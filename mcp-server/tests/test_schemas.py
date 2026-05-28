@@ -24,7 +24,32 @@ import pytest
 # Schema loading helpers
 # ---------------------------------------------------------------------------
 
-SCHEMAS_DIR = Path(__file__).parent.parent.parent / "schemas"
+def _find_schemas_dir() -> Path:
+    """Locate the schemas/ directory robustly regardless of container layout.
+
+    Tries candidate paths in order:
+      1. Two parents up from tests/ (host layout: mcp-server/tests → mcp-server → schemas/)
+      2. Three parents up (host layout: mcp-server/tests → mcp-server → crystalium → schemas/)
+      3. /app/schemas (container layout: app is the project root)
+      4. /schemas (fallback)
+    Raises AssertionError if none exist.
+    """
+    here = Path(__file__).parent
+    candidates = [
+        here.parent.parent / "schemas",        # container: /app/tests/../schemas
+        here.parent.parent.parent / "schemas",  # host: mcp-server/tests/../../schemas
+        Path("/app/schemas"),
+        Path("/schemas"),
+    ]
+    for p in candidates:
+        if p.exists() and p.is_dir():
+            return p
+    raise AssertionError(
+        f"schemas/ directory not found. Tried: {[str(c) for c in candidates]}"
+    )
+
+
+SCHEMAS_DIR = _find_schemas_dir()
 
 
 def load_schema(name: str) -> dict:
