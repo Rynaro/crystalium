@@ -1,0 +1,38 @@
+# Git metadata
+.git/
+.github/
+
+# Eval results (generated; not needed in image)
+evals/results/
+
+# Python artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+.mypy_cache/
+
+# Documentation (large; not needed in runtime image)
+# Keep: SPEC.md and agent.md (referenced by install target)
+*.md
+!SPEC.md
+!agent.md
+
+# Install target (consumer-side; not part of the image)
+.eidolons/
+
+# Dev tool configs
+.idea/
+.vscode/
+.editorconfig
+
+# Host wiring docs (not needed in image)
+hosts/
+
+# Atlas/spectra/forge planning artefacts
+.atlas/
+.spectra/
+.forge/
+
+# Runtime data directory
+.crystalium/
