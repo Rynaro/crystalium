@@ -1,0 +1,326 @@
+{
+  "description": "20-record episodic snapshot fixture for acme-api project",
+  "project": "acme-api",
+  "records": [
+    {
+      "id": "ep-0001",
+      "layer": "episodic",
+      "summary": "Bootstrapped acme-api repo with FastAPI + uvicorn",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.72,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-001"
+      }
+    },
+    {
+      "id": "ep-0002",
+      "layer": "episodic",
+      "summary": "Implemented POST /crystals endpoint with Pydantic validation",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.65,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-002"
+      }
+    },
+    {
+      "id": "ep-0003",
+      "layer": "episodic",
+      "summary": "Wrote unit tests for crystals service; coverage at 87%",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.58,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-003"
+      }
+    },
+    {
+      "id": "ep-0004",
+      "layer": "episodic",
+      "summary": "SPECTRA alignment session: defined recall scope contract",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.80,
+      "agent_class_visibility": "spectra",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "spectra",
+        "task_id": "task-004"
+      }
+    },
+    {
+      "id": "ep-0005",
+      "layer": "episodic",
+      "summary": "ATLAS scout identified 3 vector-store gaps in adapter layer",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.75,
+      "agent_class_visibility": "atlas",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "atlas",
+        "task_id": "task-005"
+      }
+    },
+    {
+      "id": "ep-0006",
+      "layer": "episodic",
+      "summary": "Tool output: GitHub Actions CI run failed on integration tests",
+      "trust_tier": "T3",
+      "validation_state": "quarantined",
+      "status": "candidate",
+      "importance": 0.30,
+      "agent_class_visibility": null,
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "environment",
+        "author_agent": null,
+        "task_id": "task-006"
+      }
+    },
+    {
+      "id": "ep-0007",
+      "layer": "episodic",
+      "summary": "Tool output: linter reported 12 style warnings in service layer",
+      "trust_tier": "T3",
+      "validation_state": "quarantined",
+      "status": "candidate",
+      "importance": 0.22,
+      "agent_class_visibility": null,
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "environment",
+        "author_agent": null,
+        "task_id": "task-007"
+      }
+    },
+    {
+      "id": "ep-0008",
+      "layer": "episodic",
+      "summary": "FORGE design decision: chose SQLite for index tier (D1)",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.88,
+      "agent_class_visibility": "forge",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "forge",
+        "task_id": "task-008"
+      }
+    },
+    {
+      "id": "ep-0009",
+      "layer": "episodic",
+      "summary": "Refactored enforcement.py — moved rate limiter to sliding deque",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.55,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-009"
+      }
+    },
+    {
+      "id": "ep-0010",
+      "layer": "episodic",
+      "summary": "Unverified agent reported: DB connection pool exhausted under load",
+      "trust_tier": "T2",
+      "validation_state": "unverified",
+      "status": "candidate",
+      "importance": 0.40,
+      "agent_class_visibility": null,
+      "sensitivity_tag": "internal",
+      "provenance": {
+        "source": "unverified_agent",
+        "author_agent": null,
+        "task_id": "task-010"
+      }
+    },
+    {
+      "id": "ep-0011",
+      "layer": "episodic",
+      "summary": "Auth service uses bcrypt cost factor 12 for password hashing",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.77,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": "internal",
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-011"
+      }
+    },
+    {
+      "id": "ep-0012",
+      "layer": "episodic",
+      "summary": "Migration plan: upgrade auth to argon2id (RFC 9106 recommended)",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.70,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": "internal",
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-012"
+      }
+    },
+    {
+      "id": "ep-0013",
+      "layer": "episodic",
+      "summary": "API versioning strategy: header-based Accept: application/vnd.acme.v2+json",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.62,
+      "agent_class_visibility": null,
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-013"
+      }
+    },
+    {
+      "id": "ep-0014",
+      "layer": "episodic",
+      "summary": "SPECTRA Wave 3: identified 5 test gaps in enforcement chokepoint",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.83,
+      "agent_class_visibility": "spectra",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "spectra",
+        "task_id": "task-014"
+      }
+    },
+    {
+      "id": "ep-0015",
+      "layer": "episodic",
+      "summary": "Tool output: pytest run 142 passed 0 failed (canary suite)",
+      "trust_tier": "T3",
+      "validation_state": "quarantined",
+      "status": "candidate",
+      "importance": 0.25,
+      "agent_class_visibility": null,
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "environment",
+        "author_agent": null,
+        "task_id": "task-015"
+      }
+    },
+    {
+      "id": "ep-0016",
+      "layer": "episodic",
+      "summary": "Implemented Dream scheduler with APScheduler daemon thread",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.68,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-016"
+      }
+    },
+    {
+      "id": "ep-0017",
+      "layer": "episodic",
+      "summary": "Rate limiter regression: sliding window off by one at boundary",
+      "trust_tier": "T2",
+      "validation_state": "unverified",
+      "status": "candidate",
+      "importance": 0.50,
+      "agent_class_visibility": null,
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "unverified_agent",
+        "author_agent": null,
+        "task_id": "task-017"
+      }
+    },
+    {
+      "id": "ep-0018",
+      "layer": "episodic",
+      "summary": "ECL envelope sidecar wired to all 7 tool handlers",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.73,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-018"
+      }
+    },
+    {
+      "id": "ep-0019",
+      "layer": "episodic",
+      "summary": "LanceDB adapter falls back gracefully when sentence-transformers absent",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.45,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-019"
+      }
+    },
+    {
+      "id": "ep-0020",
+      "layer": "episodic",
+      "summary": "KuzuDB graph store wired for relationship traversal in recall",
+      "trust_tier": "T1",
+      "validation_state": "unverified",
+      "status": "active",
+      "importance": 0.60,
+      "agent_class_visibility": "apivr",
+      "sensitivity_tag": null,
+      "provenance": {
+        "source": "verified_agent",
+        "author_agent": "apivr",
+        "task_id": "task-020"
+      }
+    }
+  ]
+}

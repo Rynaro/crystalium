@@ -1,0 +1,108 @@
+# Sample procedural skill fixtures for CRYSTALIUM canary tests.
+# 3 skills with passing verifiers + 1 with a failing verifier.
+# Schema: skills/v1.json
+
+---
+skills:
+  - name: "run-pytest-suite"
+    capability_class: "test-execution"
+    description: "Run the project's pytest suite and assert zero failures."
+    language: "bash"
+    inputs:
+      - name: "test_path"
+        type: "string"
+        description: "Path to the test directory or file"
+        required: true
+    verifier: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      TEST_PATH="${1:-mcp-server/tests/}"
+      pytest "${TEST_PATH}" -q --tb=short
+      echo "VERIFIER_PASS"
+    trust_tier: "T1"
+    status: "shared"
+    success_count: 42
+    provenance:
+      source: "verified_agent"
+      author_agent: "apivr"
+      task_id: "skill-001"
+      created_at: "2026-05-28T00:00:00Z"
+
+  - name: "check-types-mypy"
+    capability_class: "type-checking"
+    description: "Run mypy type checker and assert zero errors."
+    language: "bash"
+    inputs:
+      - name: "package_path"
+        type: "string"
+        description: "Package path to type-check"
+        required: true
+    verifier: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      PACKAGE="${1:-mcp-server/src/}"
+      mypy "${PACKAGE}" --ignore-missing-imports
+      echo "VERIFIER_PASS"
+    trust_tier: "T1"
+    status: "shared"
+    success_count: 15
+    provenance:
+      source: "verified_agent"
+      author_agent: "apivr"
+      task_id: "skill-002"
+      created_at: "2026-05-28T00:00:00Z"
+
+  - name: "validate-json-schema"
+    capability_class: "schema-validation"
+    description: "Validate all JSON files in schemas/ against their meta-schema."
+    language: "python"
+    inputs:
+      - name: "schema_dir"
+        type: "string"
+        description: "Directory containing *.json schema files"
+        required: false
+    verifier: |
+      #!/usr/bin/env python3
+      import json
+      import glob
+      import sys
+
+      schema_dir = sys.argv[1] if len(sys.argv) > 1 else "schemas"
+      errors = []
+      for path in glob.glob(f"{schema_dir}/*.json"):
+          try:
+              with open(path) as f:
+                  json.load(f)
+          except json.JSONDecodeError as e:
+              errors.append(f"{path}: {e}")
+
+      if errors:
+          print("\n".join(errors), file=sys.stderr)
+          sys.exit(1)
+      print("VERIFIER_PASS")
+    trust_tier: "T1"
+    status: "shared"
+    success_count: 8
+    provenance:
+      source: "verified_agent"
+      author_agent: "apivr"
+      task_id: "skill-003"
+      created_at: "2026-05-28T00:00:00Z"
+
+  - name: "broken-verifier-skill"
+    capability_class: "test-execution"
+    description: "A deliberately broken verifier — always exits 1. Used in CAN-6 failure path."
+    language: "bash"
+    inputs: []
+    verifier: |
+      #!/usr/bin/env bash
+      echo "Verifier intentionally failing" >&2
+      exit 1
+    trust_tier: "T2"
+    status: "candidate"
+    success_count: 0
+    provenance:
+      source: "unverified_agent"
+      author_agent: null
+      task_id: "skill-004"
+      created_at: "2026-05-28T00:00:00Z"
