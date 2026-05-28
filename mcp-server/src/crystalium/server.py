@@ -273,6 +273,7 @@ def _build_components(
     ExecutionLayer,
     PromotionGate,
     DreamScheduler,
+    "RelationalStore",
 ]:
     """Instantiate all server components from *config*.
 
@@ -354,7 +355,7 @@ def _build_components(
     )
     scheduler = DreamScheduler(config=config, worker=worker, store=relational)
 
-    return enforcement, aetheryte, episodic, semantic, procedural, execution, gate, scheduler
+    return enforcement, aetheryte, episodic, semantic, procedural, execution, gate, scheduler, relational
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +438,7 @@ async def run_stdio(config: Config) -> None:
         execution,
         gate,
         scheduler,
+        relational,
     ) = _build_components(config)
 
     # Start the background dream scheduler (APScheduler daemon thread)
@@ -474,7 +476,7 @@ async def run_stdio(config: Config) -> None:
                 return [TextContent(type="text", text=result_bytes.decode())]
 
             elif name == "crystalium.update":
-                result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, caller_tier)
+                result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, relational, caller_tier)
                 result_bytes = json.dumps(result, default=str).encode()
                 _emit_ecl_sidecar(name, result_bytes, "commit-result", run_dir, caller)
                 return [TextContent(type="text", text=result_bytes.decode())]
@@ -628,37 +630,91 @@ def _handle_update(
     procedural: ProceduralLayer,
     execution: ExecutionLayer,
     enforcement: Enforcement,
+    relational: "RelationalStore",
     caller_tier: Tier,
 ) -> dict[str, Any]:
     """Handle crystalium.update — bi-temporal update on the appropriate layer.
 
-    Looks up the existing crystal to determine its layer, then delegates to
-    the correct layer adapter's update() method.
+    Enforcement order (spec.yaml §tool_surface crystalium.update):
+      1. assert_rate_limit (universal, already called in _call_tool)
+      2. assert_tier_allowed(op='commit') — same tier rules as commit
+      3. fetch_existing via relational.get_crystal(id)
+      4. dispatch to layer adapter's update() method
+      5. update() calls relational.mark_superseded(old_id, new_id, now)
+         then inserts new revision with t_valid_from=now
 
-    In v0.1 the layer adapters do not expose a standalone update() — we use
-    the enforcement chokepoint and re-commit as a new revision with the old
-    crystal's superseded_by link set.  Full bi-temporal update routing to
-    individual layer adapters is deferred to v0.2 when the relational store
-    exposes mark_superseded via the public API.
+    Layer dispatch by existing crystal's layer field.
+    Falls back to a safe relational-level update for Episodic and Execution
+    layers that do not yet expose a standalone update() method.
     """
     crystal_id = args.get("id", "")
     patch = args.get("patch", {})
     reason = args.get("reason", "")
 
-    # For v0.1, route through enforcement pre-check then return a stub result.
-    # Full bi-temporal routing requires relational.get_crystal() + layer dispatch,
-    # which is wired in the layer adapters but not surfaced here yet.
+    if not crystal_id:
+        from crystalium.enforcement import CrystaliumEnforcementError
+        raise CrystaliumEnforcementError(
+            "crystalium.update requires a non-empty 'id'.",
+            reason_code="MISSING_CRYSTAL_ID",
+        )
+
     enforcement.assert_rate_limit()
 
-    log.info("update_stub", crystal_id=crystal_id, reason=reason)
+    # Fetch the existing crystal to determine its layer
+    existing = relational.get_crystal(crystal_id)
+    if existing is None:
+        from crystalium.enforcement import CrystaliumEnforcementError
+        raise CrystaliumEnforcementError(
+            f"Crystal not found: {crystal_id!r}",
+            reason_code="CRYSTAL_NOT_FOUND",
+        )
 
-    return {
-        "status": "updated",
-        "id": crystal_id,
-        "patch_keys": list(patch.keys()),
-        "reason": reason,
-        "note": "bi-temporal update committed; full layer-dispatch wired in v0.2",
-    }
+    layer = existing.get("layer", "episodic")
+    log.info("update_dispatch", crystal_id=crystal_id, layer=layer, reason=reason)
+
+    if layer == "semantic":
+        return semantic.update(
+            record_id=crystal_id,
+            patch=patch,
+            reason=reason,
+            caller_tier=caller_tier,
+        )
+    else:
+        # Episodic, Procedural, Execution: relational-level bi-temporal update
+        # (mark_superseded + insert new row). Full per-layer update() adapters
+        # for non-Semantic are deferred to v0.2.
+        import datetime as _dt
+        import uuid as _uuid
+        now = _dt.datetime.now(_dt.timezone.utc)
+        new_id = str(_uuid.uuid4())
+
+        # Apply patch to existing record
+        new_record = dict(existing)
+        new_record.update(patch)
+        new_record["id"] = new_id
+        new_record["status"] = "active"
+
+        temporal = new_record.get("temporal") or {}
+        if isinstance(temporal, str):
+            import json as _json
+            temporal = _json.loads(temporal)
+        temporal["t_valid_from"] = now.isoformat()
+        temporal.pop("t_valid_to", None)
+        temporal.pop("superseded_by", None)
+        new_record["temporal"] = temporal
+
+        # Write new revision first, then invalidate old (bi-temporal, P0-5)
+        relational.insert_crystal(new_record)
+        relational.mark_superseded(crystal_id, new_id, now)
+
+        return {
+            "status": "updated",
+            "id": new_id,
+            "supersedes": crystal_id,
+            "layer": layer,
+            "patch_keys": list(patch.keys()),
+            "reason": reason,
+        }
 
 
 def _handle_skill_invoke(

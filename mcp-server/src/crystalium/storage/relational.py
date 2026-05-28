@@ -317,12 +317,27 @@ class RelationalStore:
             )
             conn.commit()
 
-    def list_pending_promotions(self) -> list[dict[str, Any]]:
-        """List all pending promotions."""
+    def list_pending_promotions(
+        self,
+        layer_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List all pending promotions, optionally filtered by target_layer.
+
+        Args:
+            layer_filter: If provided, return only promotions targeting this
+                          layer (e.g. "semantic", "procedural"). Resolves the
+                          client-side fallback TODO noted in the W4 stub.
+        """
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM pending_promotions WHERE status = 'pending'"
-            ).fetchall()
+            if layer_filter:
+                rows = conn.execute(
+                    "SELECT * FROM pending_promotions WHERE status = 'pending' AND target_layer = ?",
+                    (layer_filter,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM pending_promotions WHERE status = 'pending'"
+                ).fetchall()
         return [dict(r) for r in rows]
 
     def update_promotion_status(self, promotion_id: str, status: str) -> None:
