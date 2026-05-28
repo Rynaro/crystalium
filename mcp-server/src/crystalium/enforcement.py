@@ -489,8 +489,12 @@ class Enforcement:
         except ValueError:
             raise PathEscape(target, root)
         except OSError:
-            # Path doesn't exist on disk yet (e.g. sandbox dir not yet created).
-            # Fall back to lexical resolution so we still catch ../.. escapes.
+            # target does not exist on disk. Allow only when the root itself also
+            # doesn't exist (e.g. /sandbox/<id> in a container whose bind-mount
+            # hasn't been created yet) — fall back to lexical resolution.
+            # If root exists but target doesn't, keep strict semantics → PathEscape.
+            if root.exists():
+                raise PathEscape(target, root)
             resolved_lex = target.resolve(strict=False)
             try:
                 resolved_lex.relative_to(root.resolve(strict=False))
