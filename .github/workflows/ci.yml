@@ -8,9 +8,21 @@ on:
     branches:
       - main
 
+# Why every job uses `docker run` instead of `docker compose run`:
+#
+#   docker-compose.yml bind-mounts ".:/app" (and "crystalium_data:/root/.crystalium")
+#   for live dev iteration. Inside CI the bind-mount HIDES the image's baked
+#   /app/pyproject.toml and /app/.venv — so `uv run pytest` creates a fresh
+#   venv with no deps and cannot find pytest. The image already contains
+#   everything we need; CI should treat it as the source of truth.
+#
+#   The idempotency job still needs the repo source on disk (install.sh lives
+#   there, not in the image), so it mounts the workspace to /workspace
+#   explicitly and overrides the entrypoint to `bash`.
+
 jobs:
   test:
-    name: pytest (docker compose)
+    name: pytest (container)
     runs-on: ubuntu-latest
     env:
       CRYSTALIUM_SKIP_SLOW: "1"
@@ -21,13 +33,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image
-        run: docker compose build
+      - name: Build dev image
+        run: docker compose build crystalium
 
       - name: Run pytest suite
         run: |
-          docker compose run --rm crystalium \
-            pytest mcp-server/tests/ -v --tb=short
+          docker run --rm \
+            -e CRYSTALIUM_SKIP_SLOW=1 \
+            crystalium:dev \
+            pytest tests/ -v --tb=short -p no:cacheprovider
 
   schema-validate:
     name: JSON schema validation
@@ -39,13 +53,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image
-        run: docker compose build
+      - name: Build dev image
+        run: docker compose build crystalium
 
       - name: Validate all schemas/*.json
         run: |
-          docker compose run --rm crystalium \
-            python -c "
+          docker run --rm crystalium:dev python - <<'PY'
           import json, glob, sys
           errors = []
           for f in sorted(glob.glob('schemas/*.json')):
@@ -58,8 +71,8 @@ jobs:
               for e in errors:
                   print(' ', e, file=sys.stderr)
               sys.exit(1)
-          print(f'All {len(list(glob.glob(\"schemas/*.json\")))} schemas valid.')
-          "
+          print(f'All {len(list(glob.glob("schemas/*.json")))} schemas valid.')
+          PY
 
   idempotency:
     name: install.sh idempotency (second run no-diff)
@@ -71,46 +84,45 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image
-        run: docker compose build
+      - name: Build dev image
+        run: docker compose build crystalium
+
+      - name: Prepare host directories
+        run: |
+          mkdir -p /tmp/crystalium-install-test /tmp/snapshots
+          # World-writable so the container UID can write inside the bind-mount
+          chmod 777 /tmp/crystalium-install-test /tmp/snapshots
 
       - name: First install run
         run: |
-          docker compose run --rm \
-            -v "$(pwd):/workspace" \
-            -w /workspace \
-            crystalium \
-            bash install.sh --target /tmp/crystalium-install-test --non-interactive
-
-      - name: Snapshot install target (excluding install.ts in manifest)
-        run: |
-          docker compose run --rm \
+          docker run --rm \
+            --entrypoint bash \
             -v "$(pwd):/workspace" \
             -v "/tmp/crystalium-install-test:/tmp/crystalium-install-test" \
             -w /workspace \
-            crystalium \
-            bash -c "find /tmp/crystalium-install-test -type f | sort > /tmp/snapshot1.txt && cat /tmp/snapshot1.txt"
+            crystalium:dev \
+            install.sh --target /tmp/crystalium-install-test --non-interactive
+
+      - name: Snapshot 1
+        run: |
+          find /tmp/crystalium-install-test -type f | sort | tee /tmp/snapshots/snapshot1.txt
 
       - name: Second install run (must be no-op)
         run: |
-          docker compose run --rm \
+          docker run --rm \
+            --entrypoint bash \
             -v "$(pwd):/workspace" \
             -v "/tmp/crystalium-install-test:/tmp/crystalium-install-test" \
             -w /workspace \
-            crystalium \
-            bash install.sh --target /tmp/crystalium-install-test --non-interactive
+            crystalium:dev \
+            install.sh --target /tmp/crystalium-install-test --non-interactive
 
       - name: Assert no new files appeared
         run: |
-          docker compose run --rm \
-            -v "/tmp:/tmp" \
-            crystalium \
-            bash -c "
-              find /tmp/crystalium-install-test -type f | sort > /tmp/snapshot2.txt
-              if diff /tmp/snapshot1.txt /tmp/snapshot2.txt; then
-                echo 'PASS: install target file list unchanged after second run'
-              else
-                echo 'FAIL: install target changed on second run (idempotency violation)' >&2
-                exit 1
-              fi
-            "
+          find /tmp/crystalium-install-test -type f | sort > /tmp/snapshots/snapshot2.txt
+          if diff /tmp/snapshots/snapshot1.txt /tmp/snapshots/snapshot2.txt; then
+            echo 'PASS: install target file list unchanged after second run'
+          else
+            echo 'FAIL: install target changed on second run (idempotency violation)' >&2
+            exit 1
+          fi
