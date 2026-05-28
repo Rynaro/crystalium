@@ -37,6 +37,7 @@ from crystalium.importance import importance_score
 def config(tmp_path: Path) -> Config:
     return Config(
         data_dir=tmp_path / "crystalium_data",
+        sandbox_root=tmp_path / "sandbox",
         skill_invoke_timeout_s=5,
         skill_invoke_output_cap_bytes=8192,
         rate_limit_per_minute=1000,
@@ -270,7 +271,7 @@ def test_g3_operator_warning_logged(enforcement: Enforcement, caplog) -> None:
 
     # At least one WARNING record containing the skill_id
     warning_records = [r for r in caplog.records if r.levelname == "WARNING"]
-    assert any("my-test-skill" in str(r) for r in warning_records), (
+    assert any("my-test-skill" in r.getMessage() for r in warning_records), (
         "No WARNING log containing skill_id 'my-test-skill' emitted by warn_skill_invoke"
     )
 

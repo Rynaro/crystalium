@@ -486,8 +486,16 @@ class Enforcement:
         try:
             resolved = target.resolve(strict=True)
             resolved.relative_to(root.resolve())
-        except (ValueError, OSError):
+        except ValueError:
             raise PathEscape(target, root)
+        except OSError:
+            # Path doesn't exist on disk yet (e.g. sandbox dir not yet created).
+            # Fall back to lexical resolution so we still catch ../.. escapes.
+            resolved_lex = target.resolve(strict=False)
+            try:
+                resolved_lex.relative_to(root.resolve(strict=False))
+            except ValueError:
+                raise PathEscape(target, root)
 
     # ------------------------------------------------------------------
     # Output cap helper

@@ -740,13 +740,14 @@ def _handle_skill_invoke(
     output_cap_bytes = min(
         int(args.get("output_cap_bytes", config.skill_invoke_output_cap_bytes)), 8192
     )
-    workdir_str = args.get("workdir", f"/sandbox/{skill_id}")
+    sandbox_root_str = str(config.sandbox_root)
+    workdir_str = args.get("workdir", f"{sandbox_root_str}/{skill_id}")
 
-    # Enforce workdir is under /sandbox/<skill_id> (string prefix check for non-existent paths)
+    # Enforce workdir is under <sandbox_root>/<skill_id> (string prefix check for non-existent paths)
     workdir = Path(workdir_str)
-    sandbox_root = Path(f"/sandbox/{skill_id}")
+    sandbox_root = config.sandbox_root / skill_id
     resolved_str = str(workdir_str)
-    if not resolved_str.startswith(f"/sandbox/{skill_id}"):
+    if not resolved_str.startswith(f"{sandbox_root_str}/{skill_id}"):
         from crystalium.enforcement import PathEscape
         raise PathEscape(workdir, sandbox_root)
 

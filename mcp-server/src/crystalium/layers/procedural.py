@@ -254,8 +254,8 @@ class ProceduralLayer:
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
 
-            # 2. Path guard: workdir must resolve under /sandbox/<skill_id>
-            sandbox_root = Path(f"/sandbox/{skill_id}")
+            # 2. Path guard: workdir must resolve under <sandbox_root>/<skill_id>
+            sandbox_root = self.enforcement.config.sandbox_root / skill_id
             if workdir is not None:
                 self.enforcement.assert_no_path_escape(workdir, sandbox_root)
             else:

@@ -125,6 +125,10 @@ class Config:
     # install_ts — written by install.sh; used by human_confirm_active()
     install_ts: datetime | None = None
 
+    # Sandbox root — base directory for skill_invoke sandboxes (D5).
+    # Production default: /sandbox. Tests override via Config(sandbox_root=tmp_path/"sandbox").
+    sandbox_root: Path = field(default_factory=lambda: Path("/sandbox"))
+
     # Repo root — used by is_in_repo() traversal guard
     repo_root: Path | None = None
 
