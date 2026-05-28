@@ -115,6 +115,10 @@ class Config:
     # Embedding backend — sentence-transformers by default; ollama raises NotImplementedError
     embed_backend: str = "sentence-transformers"
 
+    # Reranker (W4 TODO per spec.yaml §config_defaults; D9 / MISSION.md:106)
+    # Enabled when k_gt exceeds this threshold; false by default to keep hot path lean.
+    reranker_enabled: bool = False
+
     # Rate limiting (P0-7, atlas-aci pattern)
     rate_limit_per_minute: int = 200
 
