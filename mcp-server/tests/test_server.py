@@ -162,7 +162,7 @@ def test_record_activity_called_on_commit(config, blob_store, relational_store) 
 
     enforcement = Enforcement(config)
     gate = PromotionGate(config, relational_store, enforcement)
-    redactor = Redactor()
+    redactor = Redactor(config)
 
     episodic = EpisodicLayer(
         blob_store=blob_store,

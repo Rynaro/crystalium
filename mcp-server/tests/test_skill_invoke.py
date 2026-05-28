@@ -68,7 +68,7 @@ def procedural(config, blob_store, relational_store, enforcement) -> ProceduralL
         relational=relational_store,
         enforcement=enforcement,
         gate=gate,
-        redactor=Redactor(),
+        redactor=Redactor(config),
         importance_fn=importance_score,
         data_dir=config.data_dir,
     )
@@ -198,7 +198,7 @@ def test_g3_path_escape_blocked_via_server_handler(config, blob_store, relationa
         relational=relational_store,
         enforcement=enforcement,
         gate=gate,
-        redactor=Redactor(),
+        redactor=Redactor(config),
         importance_fn=importance_score,
         data_dir=config.data_dir,
     )
@@ -237,7 +237,7 @@ def test_g3_valid_sandbox_path_not_blocked(enforcement: Enforcement) -> None:
             relational=rel,
             enforcement=enf,
             gate=gate,
-            redactor=Redactor(),
+            redactor=Redactor(cfg),
             importance_fn=importance_score,
             data_dir=cfg.data_dir,
         )
