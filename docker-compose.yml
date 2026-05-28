@@ -1,0 +1,36 @@
+# CRYSTALIUM v0.1.0 — primary docker-compose file
+# Host commands: docker compose run --rm crystalium <args>
+#
+# Volumes:
+#   crystalium_data — persists ~/.crystalium/<project>/ across runs
+#
+# Usage:
+#   docker compose run --rm crystalium pytest mcp-server/tests/ -v
+#   docker compose run --rm crystalium python -m crystalium serve
+
+services:
+  crystalium:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    image: crystalium:dev
+    volumes:
+      # Source tree (read-write for live dev edits; tests read files directly)
+      - .:/app
+      # Named volume for runtime artefacts (SQLite, LanceDB, blob tier, KuzuDB)
+      # Mounted at the default data_dir path inside the container
+      - crystalium_data:/root/.crystalium
+    environment:
+      - CRYSTALIUM_DATA_DIR=/root/.crystalium/default
+      - PYTHONPATH=/app/mcp-server/src
+      # Set CRYSTALIUM_SKIP_SLOW=1 to skip sentence-transformers model downloads in fast CI
+      # - CRYSTALIUM_SKIP_SLOW=1
+    working_dir: /app
+    # MCP stdio transport: stdin/stdout passthrough
+    stdin_open: true
+    tty: false
+
+volumes:
+  crystalium_data:
+    driver: local

@@ -1,0 +1,13 @@
+# Root pyproject.toml — workspace configuration
+# The actual package is in mcp-server/pyproject.toml.
+# This file exists to satisfy tooling that expects a pyproject.toml at the repo root.
+# uv sync and pip install run INSIDE the Docker container from mcp-server/.
+# See: MISSION.md §Container-first + Makefile
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["B008"]

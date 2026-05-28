@@ -1,0 +1,23 @@
+# CRYSTALIUM v0.1.0 — development override
+# Extends docker-compose.yml with additional dev tooling mounts.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm crystalium ruff check mcp-server/src
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm crystalium mypy mcp-server/src
+
+services:
+  crystalium:
+    build:
+      target: dev
+    environment:
+      # Enable verbose logging in dev
+      - CRYSTALIUM_LOG_LEVEL=DEBUG
+      # Skip slow model-download tests by default in interactive dev sessions
+      # Comment out when running full canary suite
+      - CRYSTALIUM_SKIP_SLOW=1
+    volumes:
+      # Dev-only: expose host SSH agent for git operations inside container
+      # Uncomment if needed:
+      # - ${SSH_AUTH_SOCK}:/run/ssh-agent.sock
+      # Mount test fixtures explicitly for faster iteration
+      - ./mcp-server/tests:/app/mcp-server/tests

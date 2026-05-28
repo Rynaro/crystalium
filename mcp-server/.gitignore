@@ -1,0 +1,11 @@
+# uv.lock is generated inside the container on 'docker build'; never on the host.
+# See MISSION.md §"Container-first" + spec.yaml §container_first_protocol.
+uv.lock
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+dist/
