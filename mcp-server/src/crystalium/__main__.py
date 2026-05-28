@@ -20,6 +20,12 @@ from typing import Optional
 
 import click
 
+# Module-level imports make these names patchable in tests via
+# `patch("crystalium.__main__.RelationalStore")` etc.
+from crystalium.storage.relational import RelationalStore  # noqa: F401 — test-patchable
+from crystalium.gate import PromotionGate  # noqa: F401 — test-patchable
+from crystalium.enforcement import Enforcement  # noqa: F401 — test-patchable
+
 
 # ---------------------------------------------------------------------------
 # CLI group

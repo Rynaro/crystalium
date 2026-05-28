@@ -29,7 +29,7 @@ from crystalium.__main__ import cli
 
 def _invoke(args: list[str], env: dict | None = None):
     """Invoke CLI via CliRunner and return Result."""
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     return runner.invoke(cli, args, env=env, catch_exceptions=False)
 
 
@@ -43,7 +43,7 @@ def test_doctor_healthy_exits_0(tmp_path: Path) -> None:
     data_dir = tmp_path / "crystalium_data"
     data_dir.mkdir()
 
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     result = runner.invoke(
         cli,
         ["doctor"],
@@ -62,7 +62,7 @@ def test_doctor_reports_all_ok(tmp_path: Path) -> None:
     data_dir = tmp_path / "crystalium_data"
     data_dir.mkdir()
 
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     result = runner.invoke(
         cli,
         ["doctor"],
@@ -82,7 +82,7 @@ def test_doctor_outputs_crystalium_header(tmp_path: Path) -> None:
     data_dir = tmp_path / "crystalium_data"
     data_dir.mkdir()
 
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     result = runner.invoke(
         cli,
         ["doctor"],
@@ -109,7 +109,7 @@ def test_doctor_readonly_data_dir_nonzero(tmp_path: Path) -> None:
     data_dir.chmod(0o444)
 
     try:
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         result = runner.invoke(
             cli,
             ["doctor"],
@@ -132,7 +132,7 @@ def test_doctor_fail_shows_fail_marker(tmp_path: Path) -> None:
     data_dir.chmod(0o444)
 
     try:
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         # catch_exceptions=True to allow sys.exit
         result = runner.invoke(
             cli,
@@ -160,7 +160,7 @@ def test_doctor_fail_shows_fail_marker(tmp_path: Path) -> None:
 
 def test_canary_raises_w5_not_implemented() -> None:
     """crystalium canary exits with a ClickException mentioning W5."""
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     result = runner.invoke(cli, ["canary"], catch_exceptions=True)
 
     # ClickException → UsageError → exit code 1
@@ -202,7 +202,7 @@ def test_promote_list_returns_pending_rows(tmp_path: Path) -> None:
         mock_instance.list_pending_promotions.return_value = fake_rows
         MockRelationalStore.return_value = mock_instance
 
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         result = runner.invoke(
             cli,
             ["promote", "list"],
@@ -229,7 +229,7 @@ def test_promote_list_no_pending_rows(tmp_path: Path) -> None:
         mock_instance.list_pending_promotions.return_value = []
         MockRelationalStore.return_value = mock_instance
 
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         result = runner.invoke(
             cli,
             ["promote", "list"],
@@ -251,7 +251,7 @@ def test_promote_list_layer_filter_passed_to_store(tmp_path: Path) -> None:
         mock_instance.list_pending_promotions.return_value = []
         MockRelationalStore.return_value = mock_instance
 
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         runner.invoke(
             cli,
             ["promote", "list", "--layer", "semantic"],
@@ -281,7 +281,7 @@ def test_promote_review_accept_calls_gate(tmp_path: Path) -> None:
 
         with patch("crystalium.__main__.RelationalStore"):
             with patch("crystalium.__main__.Enforcement"):
-                runner = CliRunner(mix_stderr=False)
+                runner = CliRunner()
                 result = runner.invoke(
                     cli,
                     ["promote", "review", promo_id, "--accept"],
@@ -307,7 +307,7 @@ def test_promote_review_reject_calls_gate(tmp_path: Path) -> None:
 
         with patch("crystalium.__main__.RelationalStore"):
             with patch("crystalium.__main__.Enforcement"):
-                runner = CliRunner(mix_stderr=False)
+                runner = CliRunner()
                 result = runner.invoke(
                     cli,
                     ["promote", "review", promo_id, "--reject"],
