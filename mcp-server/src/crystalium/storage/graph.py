@@ -47,7 +47,12 @@ class GraphStore:
         if self._conn is None:
             import kuzu  # type: ignore[import-untyped]
 
-            self.kuzu_dir.mkdir(parents=True, exist_ok=True)
+            # kuzu.Database manages its own directory creation.
+            # We must NOT pre-create the path as a directory — KuzuDB raises
+            # "Database path cannot be a directory" if the path already exists
+            # as a directory when it expects to create it itself.
+            # Only ensure the PARENT directory exists.
+            self.kuzu_dir.parent.mkdir(parents=True, exist_ok=True)
             self._db = kuzu.Database(str(self.kuzu_dir))
             self._conn = kuzu.Connection(self._db)
             self._ensure_schema()
