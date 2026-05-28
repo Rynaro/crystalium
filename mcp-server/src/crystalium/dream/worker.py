@@ -1,0 +1,599 @@
+"""Dream worker — orient → gather → consolidate → prune cycle.
+
+Implements the async Dream consolidation loop described in MISSION §78-83
+and FORGE D3 / D9 decisions.
+
+P0 anchors:
+  P0-5  : never hard-delete; prune sets status='deprecated'.
+  P0-6  : min-tier propagation — consolidated crystal takes MIN(input tiers).
+  P0-10 : Dream is async, off hot path. Worker runs only via enqueue/run_pending,
+           never inline in an MCP request context.
+
+Dream's identity:
+  Dream runs as synthetic T0 (service identity, per OQ-2 acknowledgment,
+  spec.yaml §OQ-2). This grants Dream the right to call gate.propose_semantic()
+  and mark records deprecated via _prune(). Every such call passes
+  enforcement.assert_tier_allowed(..., tier=T0, ...) so the chokepoint is
+  exercised and telemetry is emitted even for internal operations.
+
+Phases:
+  orient     — survey recent activity (episodic commits, recall patterns).
+  gather     — fetch candidate clusters: same-topic, same-author, superseded.
+  consolidate— propose Semantic upserts via gate.propose_semantic() (NEVER direct write).
+  prune      — mark below-threshold records as deprecated; audit every prune.
+
+Per-layer prune thresholds (configurable via Config; defaults from spec):
+  episodic   0.15
+  semantic   0.10
+  procedural 0.05
+  execution  0.20
+
+Source: FORGE D3, D9; spec.yaml §dream/worker.py, §P0-5/P0-6/P0-10; OQ-2.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from typing import Any, Callable, TYPE_CHECKING
+
+import structlog
+
+from crystalium.enforcement import Enforcement
+from crystalium.telemetry import now_ms, record_call
+from crystalium.trust import Tier
+
+if TYPE_CHECKING:
+    from crystalium.gate import PromotionGate
+    from crystalium.storage.relational import RelationalStore
+    from crystalium.storage.vector import VectorStore
+    from crystalium.storage.graph import GraphStore
+
+log = structlog.get_logger("crystalium.dream.worker")
+
+# Synthetic T0 identity for Dream (OQ-2 acknowledged, ON by default)
+_DREAM_TIER: Tier = Tier.T0
+
+# Default per-layer prune importance thresholds (spec.yaml §dream/worker.py)
+_DEFAULT_PRUNE_THRESHOLDS: dict[str, float] = {
+    "episodic": 0.15,
+    "semantic": 0.10,
+    "procedural": 0.05,
+    "execution": 0.20,
+}
+
+# Maximum tokens per phase summary written to dream_runs.summary
+_PHASE_TOKEN_CAP = 500
+
+
+class DreamWorker:
+    """Dream consolidation worker.
+
+    Args:
+        relational:    RelationalStore (reads + marks deprecated; dream_runs table).
+        vector_store:  VectorStore (dense recall for cluster formation).
+        graph_store:   GraphStore (neighbor_expand for cluster formation).
+        enforcement:   Enforcement instance (tier checks for T0 Dream identity).
+        gate:          PromotionGate (propose_semantic path; NEVER direct write).
+        importance_fn: Callable(record, now) → float from importance.py.
+        prune_thresholds: Optional override dict for per-layer thresholds.
+    """
+
+    def __init__(
+        self,
+        relational: "RelationalStore",
+        vector_store: "VectorStore",
+        graph_store: "GraphStore",
+        enforcement: Enforcement,
+        gate: "PromotionGate",
+        importance_fn: Callable[..., float],
+        prune_thresholds: dict[str, float] | None = None,
+    ) -> None:
+        self.relational = relational
+        self.vector_store = vector_store
+        self.graph_store = graph_store
+        self.enforcement = enforcement
+        self.gate = gate
+        self.importance_fn = importance_fn
+        self.prune_thresholds = prune_thresholds or dict(_DEFAULT_PRUNE_THRESHOLDS)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def enqueue(self, dream_run_id: str) -> None:
+        """Write a pending dream run to the dream_runs table.
+
+        The UNIQUE constraint on run_id provides DB-level dedup (G8 second layer).
+        Silently no-ops on IntegrityError (duplicate run_id).
+
+        Args:
+            dream_run_id: Unique identifier for this dream run (UUID4).
+        """
+        import sqlite3
+
+        try:
+            with self.relational._connect() as conn:
+                # Ensure dream_runs table exists (created here lazily)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS dream_runs (
+                        run_id      TEXT PRIMARY KEY,
+                        status      TEXT NOT NULL DEFAULT 'pending',
+                        enqueued_at TEXT NOT NULL,
+                        started_at  TEXT,
+                        finished_at TEXT,
+                        summary     TEXT
+                    )
+                """)
+                conn.execute(
+                    "INSERT INTO dream_runs (run_id, status, enqueued_at) VALUES (?, 'pending', ?)",
+                    (dream_run_id, datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+            log.info("dream_run_enqueued", run_id=dream_run_id)
+        except sqlite3.IntegrityError:
+            log.debug("dream_run_duplicate_skipped", run_id=dream_run_id)
+        except Exception as exc:
+            log.warning("dream_run_enqueue_error", run_id=dream_run_id, error=str(exc))
+            raise
+
+    def run_pending(self) -> None:
+        """Drain the pending dream_runs queue and execute each run.
+
+        For each pending run: mark started → orient → gather → consolidate →
+        prune → write summary → mark finished.
+
+        Token budget: each phase produces a summary capped at _PHASE_TOKEN_CAP
+        words (heuristic; not tiktoken — Dream summaries are operator-facing text,
+        not fed back into the LLM context).
+        """
+        pending = self._fetch_pending_runs()
+        if not pending:
+            log.debug("dream_no_pending_runs")
+            return
+
+        for run_id in pending:
+            self._execute_run(run_id)
+
+    # ------------------------------------------------------------------
+    # Run execution
+    # ------------------------------------------------------------------
+
+    def _execute_run(self, run_id: str) -> None:
+        """Execute one Dream run (orient → gather → consolidate → prune)."""
+        t0 = now_ms()
+        now = datetime.now(timezone.utc)
+
+        try:
+            self._mark_run_started(run_id, now)
+
+            # Phase 1: Orient
+            orient_summary = self._orient(now)
+
+            # Phase 2: Gather clusters
+            clusters = self._gather(now)
+
+            # Phase 3: Consolidate (propose Semantic upserts via gate)
+            consolidate_summary = ""
+            proposals = 0
+            for cluster in clusters:
+                result = self._consolidate(cluster, now)
+                if result:
+                    proposals += 1
+            consolidate_summary = f"Proposed {proposals} Semantic upsert(s)."
+
+            # Phase 4: Prune
+            prune_summary = self._prune(now)
+
+            # Build run summary (≤ _PHASE_TOKEN_CAP words total)
+            summary_parts = [
+                f"orient: {_truncate(orient_summary, 100)}",
+                f"consolidate: {_truncate(consolidate_summary, 100)}",
+                f"prune: {_truncate(prune_summary, 100)}",
+            ]
+            full_summary = " | ".join(summary_parts)
+
+            self._mark_run_finished(run_id, now, summary=full_summary)
+            log.info(
+                "dream_run_finished",
+                run_id=run_id,
+                proposals=proposals,
+                latency_ms=now_ms() - t0,
+            )
+
+        except Exception as exc:
+            log.warning(
+                "dream_run_error",
+                run_id=run_id,
+                error=str(exc),
+                latency_ms=now_ms() - t0,
+            )
+            self._mark_run_finished(run_id, datetime.now(timezone.utc), summary=f"ERROR: {exc}")
+
+    # ------------------------------------------------------------------
+    # Phase: orient
+    # ------------------------------------------------------------------
+
+    def _orient(self, now: datetime) -> str:
+        """Survey recent activity — episodic commits + recall frequencies.
+
+        Returns a short summary string for the run log.
+        """
+        try:
+            with self.relational._connect() as conn:
+                # Recent episodic commits (last 24 h)
+                cutoff = datetime.now(timezone.utc)
+                rows = conn.execute(
+                    "SELECT count(*) FROM crystals WHERE layer='episodic' AND updated_at > ?",
+                    (cutoff.replace(hour=cutoff.hour - min(cutoff.hour, 24)).isoformat(),),
+                ).fetchone()
+                recent_episodic = rows[0] if rows else 0
+
+                # Total recall calls from telemetry
+                recall_rows = conn.execute(
+                    "SELECT count(*) FROM tool_calls WHERE tool='crystalium.recall'"
+                ).fetchone()
+                total_recalls = recall_rows[0] if recall_rows else 0
+
+            return f"recent_episodic={recent_episodic}, total_recalls={total_recalls}"
+        except Exception as exc:
+            log.warning("dream_orient_error", error=str(exc))
+            return f"orient_error={exc}"
+
+    # ------------------------------------------------------------------
+    # Phase: gather
+    # ------------------------------------------------------------------
+
+    def _gather(self, now: datetime) -> list[list[dict[str, Any]]]:
+        """Fetch candidate clusters for consolidation.
+
+        Cluster types:
+          1. Same-topic episodic records (graph-expand on shared neighbours).
+          2. Superseded records (flagged via temporal.superseded_by != NULL).
+
+        Returns list of clusters (each cluster = list of crystal dicts).
+        Token-bounded: fetch at most 50 records total across all clusters.
+        """
+        clusters: list[list[dict[str, Any]]] = []
+
+        try:
+            # Cluster type 1: Episodic records with shared graph neighbours
+            with self.relational._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id FROM crystals WHERE layer='episodic' AND status='active' LIMIT 20"
+                ).fetchall()
+            seed_ids = [r[0] for r in rows]
+
+            if seed_ids:
+                try:
+                    neighbour_ids = self.graph_store.neighbor_expand(seed_ids, depth=1)
+                    # Group seeds + neighbours as one cluster if non-empty
+                    if neighbour_ids:
+                        cluster_ids = list(set(seed_ids[:5]) | set(list(neighbour_ids)[:5]))
+                        cluster = []
+                        for cid in cluster_ids[:10]:
+                            rec = self.relational.get_crystal(cid)
+                            if rec:
+                                cluster.append(rec)
+                        if cluster:
+                            clusters.append(cluster)
+                except Exception as exc:
+                    log.debug("gather_graph_expand_skipped", error=str(exc))
+
+            # Cluster type 2: Records with superseded_by set (contradictions/updates)
+            with self.relational._connect() as conn:
+                rows = conn.execute(
+                    """SELECT id FROM crystals
+                       WHERE json_extract(temporal, '$.superseded_by') IS NOT NULL
+                         AND status = 'active'
+                       LIMIT 10"""
+                ).fetchall()
+            if rows:
+                superseded_cluster = []
+                for row in rows:
+                    rec = self.relational.get_crystal(row[0])
+                    if rec:
+                        superseded_cluster.append(rec)
+                if superseded_cluster:
+                    clusters.append(superseded_cluster)
+
+        except Exception as exc:
+            log.warning("dream_gather_error", error=str(exc))
+
+        return clusters
+
+    # ------------------------------------------------------------------
+    # Phase: consolidate
+    # ------------------------------------------------------------------
+
+    def _consolidate(
+        self, cluster: list[dict[str, Any]], now: datetime
+    ) -> dict[str, Any] | None:
+        """Propose a Semantic upsert for *cluster* via gate.propose_semantic().
+
+        Critical invariants:
+          1. Dream NEVER writes directly to Semantic — always via gate.propose_semantic().
+          2. Min-tier propagation (D7, P0-6): consolidated crystal takes MIN trust tier.
+          3. Dream runs as synthetic T0 (OQ-2 acknowledged, ON by default).
+          4. enforcement.assert_tier_allowed is called with tier=T0 before the gate call.
+
+        Args:
+            cluster: List of crystal dicts forming a related group.
+            now:     Reference time for the consolidation run.
+
+        Returns:
+            Proposed crystal dict if proposal was made; None if cluster was empty
+            or all records were too low-trust for Semantic admission.
+        """
+        if not cluster:
+            return None
+
+        # 1. Compute consolidated trust tier: MIN of all input tiers (D7 / P0-6)
+        from crystalium.trust import Tier as TierEnum, min_tier, LAYER_CEILING
+
+        input_tiers = []
+        for rec in cluster:
+            tier_str = rec.get("trust_tier", "T1")
+            try:
+                input_tiers.append(TierEnum.from_str(tier_str))
+            except ValueError:
+                input_tiers.append(TierEnum.T3)
+
+        if not input_tiers:
+            return None
+
+        consolidated_tier = min_tier(input_tiers)
+
+        # If consolidated tier exceeds Semantic ceiling (T1), skip this cluster
+        semantic_ceiling = LAYER_CEILING.get("semantic", TierEnum.T1)
+        if consolidated_tier > semantic_ceiling:
+            log.debug(
+                "consolidate_skip_tier",
+                consolidated_tier=str(consolidated_tier),
+                ceiling=str(semantic_ceiling),
+            )
+            return None
+
+        # 2. Assert Dream's T0 identity via enforcement chokepoint (OQ-2)
+        self.enforcement.assert_tier_allowed(
+            "dream.consolidate", "semantic", _DREAM_TIER, "commit"
+        )
+
+        # 3. Build consolidated crystal representation
+        summaries = [rec.get("summary", "") for rec in cluster]
+        consolidated_summary = "; ".join(s for s in summaries if s)[:512]
+
+        consolidated_crystal: dict[str, Any] = {
+            "id": _make_crystal_id(),
+            "layer": "semantic",
+            "summary": consolidated_summary,
+            "provenance": {
+                "source": "verified_agent",
+                "author_agent": "dream.consolidator",
+                "task_id": None,
+                "created_at": now.isoformat(),
+            },
+            "trust_tier": str(consolidated_tier),
+            "validation_state": "unverified",
+            "scope": cluster[0].get("scope", {"project": "default"}),
+            "temporal": {
+                "t_valid_from": now.isoformat(),
+                "t_valid_to": None,
+                "superseded_by": None,
+            },
+            "utility": {
+                "access_count": 0,
+                "last_access": now.isoformat(),
+                "outcome_success_score": None,
+                "importance": 0.0,
+                "novelty_at_write": 0.3,
+            },
+            "status": "active",
+        }
+
+        # 4. Propose via gate (NEVER write directly)
+        from crystalium.gate import CrystalRef
+
+        witnesses = [
+            CrystalRef(
+                id=rec["id"],
+                author_agent=rec.get("provenance", {}).get("author_agent") if isinstance(rec.get("provenance"), dict) else None,
+                source=(rec.get("provenance") or {}).get("source", "unverified_agent") if isinstance(rec.get("provenance"), dict) else "unverified_agent",
+                trust_tier=TierEnum.from_str(rec.get("trust_tier", "T1")),
+            )
+            for rec in cluster
+        ]
+
+        try:
+            result = self.gate.propose_semantic(
+                crystal=consolidated_crystal,
+                witnesses=witnesses,
+                caller_tier=_DREAM_TIER,
+                force=False,
+            )
+            log.info(
+                "dream_consolidate_proposed",
+                decision=result.decision,
+                cluster_size=len(cluster),
+                consolidated_tier=str(consolidated_tier),
+            )
+            return consolidated_crystal if result.decision == "admit" else None
+
+        except Exception as exc:
+            log.warning("dream_consolidate_gate_error", error=str(exc))
+            return None
+
+    # ------------------------------------------------------------------
+    # Phase: prune
+    # ------------------------------------------------------------------
+
+    def _prune(self, now: datetime) -> str:
+        """Mark below-threshold records as deprecated.
+
+        Rules:
+          - For each layer, compute importance_score(record, now).
+          - Records with score < per-layer threshold → status = 'deprecated'.
+          - NEVER hard-delete (P0-5).
+          - Every prune is audited via telemetry.record_call(tool="dream.prune", ...).
+          - assert_tier_allowed with tier=T0 before each deprecation (OQ-2).
+
+        Returns:
+            Short summary string for the run log.
+        """
+        deprecated_count = 0
+        layers = list(_DEFAULT_PRUNE_THRESHOLDS.keys())
+
+        for layer in layers:
+            threshold = self.prune_thresholds.get(layer, _DEFAULT_PRUNE_THRESHOLDS[layer])
+            t0_prune = now_ms()
+
+            try:
+                # Fetch active records for this layer
+                with self.relational._connect() as conn:
+                    rows = conn.execute(
+                        "SELECT id, utility, status FROM crystals WHERE layer=? AND status='active'",
+                        (layer,),
+                    ).fetchall()
+
+                to_deprecate = []
+                for row in rows:
+                    cid = row[0]
+                    utility_raw = row[1]
+                    utility = json.loads(utility_raw) if isinstance(utility_raw, str) else utility_raw or {}
+
+                    rec_stub = _UtilityStub(utility, now)
+                    score = self.importance_fn(rec_stub, now=now)
+
+                    if score < threshold:
+                        to_deprecate.append(cid)
+
+                for cid in to_deprecate:
+                    # Assert Dream's T0 identity before each deprecation
+                    self.enforcement.assert_tier_allowed(
+                        "dream.prune", layer, _DREAM_TIER, "commit"
+                    )
+
+                    with self.relational._connect() as conn:
+                        conn.execute(
+                            "UPDATE crystals SET status='deprecated', updated_at=? WHERE id=?",
+                            (datetime.now(timezone.utc).isoformat(), cid),
+                        )
+                        conn.commit()
+
+                    deprecated_count += 1
+                    log.info("dream_prune_deprecated", crystal_id=cid, layer=layer, score_below=threshold)
+
+                    # Audit telemetry per prune (P0-7 extension for Dream)
+                    record_call(
+                        tool="dream.prune",
+                        layer=layer,
+                        tier=str(_DREAM_TIER),
+                        op="prune",
+                        result="ok",
+                        latency_ms=now_ms() - t0_prune,
+                        extra={"crystal_id": cid, "threshold": threshold},
+                    )
+
+            except Exception as exc:
+                log.warning("dream_prune_error", layer=layer, error=str(exc))
+
+        return f"deprecated={deprecated_count} records across {len(layers)} layers"
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _fetch_pending_runs(self) -> list[str]:
+        """Fetch run_ids with status='pending' from dream_runs table."""
+        try:
+            with self.relational._connect() as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS dream_runs (
+                        run_id      TEXT PRIMARY KEY,
+                        status      TEXT NOT NULL DEFAULT 'pending',
+                        enqueued_at TEXT NOT NULL,
+                        started_at  TEXT,
+                        finished_at TEXT,
+                        summary     TEXT
+                    )
+                """)
+                conn.commit()
+                rows = conn.execute(
+                    "SELECT run_id FROM dream_runs WHERE status='pending'"
+                ).fetchall()
+            return [r[0] for r in rows]
+        except Exception as exc:
+            log.warning("dream_fetch_pending_error", error=str(exc))
+            return []
+
+    def _mark_run_started(self, run_id: str, now: datetime) -> None:
+        try:
+            with self.relational._connect() as conn:
+                conn.execute(
+                    "UPDATE dream_runs SET status='running', started_at=? WHERE run_id=?",
+                    (now.isoformat(), run_id),
+                )
+                conn.commit()
+        except Exception as exc:
+            log.warning("dream_mark_started_error", run_id=run_id, error=str(exc))
+
+    def _mark_run_finished(
+        self, run_id: str, now: datetime, summary: str = ""
+    ) -> None:
+        try:
+            with self.relational._connect() as conn:
+                conn.execute(
+                    "UPDATE dream_runs SET status='finished', finished_at=?, summary=? WHERE run_id=?",
+                    (now.isoformat(), summary[:_PHASE_TOKEN_CAP * 5], run_id),
+                )
+                conn.commit()
+        except Exception as exc:
+            log.warning("dream_mark_finished_error", run_id=run_id, error=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+class _UtilityStub:
+    """Minimal MemoryRecord protocol implementation from a utility dict.
+
+    Used by _prune() to call importance_fn without loading full Crystal models.
+    """
+
+    __slots__ = ("access_count", "last_access", "outcome_success", "novelty_at_write")
+
+    def __init__(self, utility: dict[str, Any], now: datetime) -> None:
+        self.access_count: int = int(utility.get("access_count", 0))
+
+        last_access_raw = utility.get("last_access")
+        if isinstance(last_access_raw, str):
+            try:
+                la = datetime.fromisoformat(last_access_raw)
+                if la.tzinfo is None:
+                    la = la.replace(tzinfo=timezone.utc)
+                self.last_access = la
+            except (ValueError, TypeError):
+                self.last_access = now
+        else:
+            self.last_access = now
+
+        outcome_raw = utility.get("outcome_success_score")
+        self.outcome_success: float | None = (
+            float(outcome_raw) if outcome_raw is not None else None
+        )
+        self.novelty_at_write: float = float(utility.get("novelty_at_write", 0.5))
+
+
+def _make_crystal_id() -> str:
+    import uuid
+    return str(uuid.uuid4())
+
+
+def _truncate(text: str, max_words: int) -> str:
+    """Truncate *text* to *max_words* words (heuristic, no tiktoken)."""
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]) + "…"
