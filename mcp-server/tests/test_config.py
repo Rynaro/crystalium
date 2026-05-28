@@ -1,0 +1,230 @@
+"""Tests for Config dataclass — YAML loading, env-var overrides, traversal guard.
+
+Container-first: run via:
+  docker compose run --rm crystalium pytest mcp-server/tests/test_config.py -v
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from crystalium.config import Config
+
+
+# ---------------------------------------------------------------------------
+# Default construction
+# ---------------------------------------------------------------------------
+
+
+class TestConfigDefaults:
+    def test_default_transport(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.transport == "stdio"
+
+    def test_default_slots(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.slots["executive"] == 300
+        assert cfg.slots["procedural"] == 600
+        assert cfg.slots["semantic"] == 800
+        assert cfg.slots["episodic"] == 800
+        assert cfg.slots["execution"] == 1000
+        assert cfg.slots["buffer"] == 300
+        assert cfg.total_cap == 3500
+
+    def test_default_importance_weights(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.importance_weights == (0.25, 0.30, 0.25, 0.20)
+        assert cfg.importance_recency_halflife_days == 14.0
+
+    def test_default_rate_limit(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.rate_limit_per_minute == 200
+
+    def test_default_human_confirm_window(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.human_confirm_default_window_days == 30
+
+    def test_data_dir_created(self, tmp_path: Path) -> None:
+        data_dir = tmp_path / "crystalium" / "test-proj"
+        cfg = Config(data_dir=data_dir)
+        assert cfg.data_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# YAML loading
+# ---------------------------------------------------------------------------
+
+
+class TestConfigFromYaml:
+    def test_from_yaml_overrides_transport(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "crystalium.yaml"
+        yaml_file.write_text("transport: http\n")
+        cfg = Config.from_yaml(yaml_file)
+        assert cfg.transport == "http"
+
+    def test_from_yaml_overrides_slots(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "crystalium.yaml"
+        yaml_file.write_text(
+            "slots:\n"
+            "  executive: 500\n"
+            "  procedural: 600\n"
+            "  semantic: 800\n"
+            "  episodic: 800\n"
+            "  execution: 1000\n"
+            "  buffer: 300\n"
+        )
+        cfg = Config.from_yaml(yaml_file)
+        assert cfg.slots["executive"] == 500
+
+    def test_from_yaml_overrides_k_corroboration(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "crystalium.yaml"
+        yaml_file.write_text("k_corroboration: 5\n")
+        cfg = Config.from_yaml(yaml_file)
+        assert cfg.k_corroboration == 5
+
+    def test_from_yaml_unknown_keys_ignored(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "crystalium.yaml"
+        yaml_file.write_text("unknown_key: surprise\ntransport: stdio\n")
+        # Should not raise
+        cfg = Config.from_yaml(yaml_file)
+        assert cfg.transport == "stdio"
+
+
+# ---------------------------------------------------------------------------
+# Env-var overrides
+# ---------------------------------------------------------------------------
+
+
+class TestConfigFromEnv:
+    def test_from_env_reads_transport(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_TRANSPORT", "http")
+        cfg = Config.from_env()
+        assert cfg.transport == "http"
+
+    def test_from_env_reads_rate_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_RATE_LIMIT_PER_MINUTE", "50")
+        cfg = Config.from_env()
+        assert cfg.rate_limit_per_minute == 50
+
+    def test_from_env_reads_halflife(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_RECENCY_HALFLIFE_DAYS", "7.0")
+        cfg = Config.from_env()
+        assert cfg.importance_recency_halflife_days == 7.0
+
+    def test_from_env_defaults_when_not_set(self) -> None:
+        # Ensure env vars are not set (they may not be in test env)
+        for k in (
+            "CRYSTALIUM_TRANSPORT",
+            "CRYSTALIUM_RATE_LIMIT_PER_MINUTE",
+            "CRYSTALIUM_RECENCY_HALFLIFE_DAYS",
+        ):
+            os.environ.pop(k, None)
+        cfg = Config.from_env()
+        assert cfg.transport == "stdio"
+        assert cfg.rate_limit_per_minute == 200
+        assert cfg.importance_recency_halflife_days == 14.0
+
+
+# ---------------------------------------------------------------------------
+# is_in_repo traversal guard
+# ---------------------------------------------------------------------------
+
+
+class TestIsInRepo:
+    def test_valid_path_inside_repo(self, tmp_path: Path) -> None:
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        subdir = repo / "src"
+        subdir.mkdir()
+        (subdir / "foo.py").write_text("# test")
+        cfg = Config(data_dir=tmp_path / "data", repo_root=repo)
+        assert cfg.is_in_repo(subdir / "foo.py") is True
+
+    def test_path_traversal_rejected(self, tmp_path: Path) -> None:
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        (repo / "file.py").write_text("x")
+        cfg = Config(data_dir=tmp_path / "data", repo_root=repo)
+        # Absolute path outside repo
+        assert cfg.is_in_repo(tmp_path / "etc" / "passwd") is False
+
+    def test_dotdot_traversal_rejected(self, tmp_path: Path) -> None:
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        cfg = Config(data_dir=tmp_path / "data", repo_root=repo)
+        # ../something attempts to escape
+        assert cfg.is_in_repo(repo / ".." / "secret") is False
+
+    def test_nonexistent_path_rejected(self, tmp_path: Path) -> None:
+        """resolve(strict=True) raises OSError for non-existent paths."""
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        cfg = Config(data_dir=tmp_path / "data", repo_root=repo)
+        nonexistent = repo / "does_not_exist" / "file.py"
+        # strict=True means OSError → is_in_repo returns False
+        assert cfg.is_in_repo(nonexistent) is False
+
+    def test_symlink_escape_rejected(self, tmp_path: Path) -> None:
+        """Symlink that points outside the repo is rejected by resolve(strict=True)."""
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("secret")
+        # Create symlink inside repo pointing outside
+        symlink = repo / "escape_link"
+        symlink.symlink_to(outside)
+        cfg = Config(data_dir=tmp_path / "data", repo_root=repo)
+        assert cfg.is_in_repo(symlink / "secret.txt") is False
+
+    def test_no_repo_root_allows_all(self, tmp_path: Path) -> None:
+        """When repo_root is None, is_in_repo returns True (dev/test mode)."""
+        cfg = Config(data_dir=tmp_path, repo_root=None)
+        assert cfg.is_in_repo(Path("/etc/passwd")) is True
+
+
+# ---------------------------------------------------------------------------
+# human_confirm_active
+# ---------------------------------------------------------------------------
+
+
+class TestHumanConfirmActive:
+    def test_active_within_30_days(self, tmp_path: Path) -> None:
+        install_ts = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        cfg = Config(data_dir=tmp_path, install_ts=install_ts)
+        now = datetime(2026, 5, 20, tzinfo=timezone.utc)  # 19 days later
+        assert cfg.human_confirm_active(now=now) is True
+
+    def test_inactive_after_30_days(self, tmp_path: Path) -> None:
+        install_ts = datetime(2026, 4, 1, tzinfo=timezone.utc)
+        cfg = Config(data_dir=tmp_path, install_ts=install_ts)
+        now = datetime(2026, 5, 28, tzinfo=timezone.utc)  # 57 days later
+        assert cfg.human_confirm_active(now=now) is False
+
+    def test_inactive_without_install_ts(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path, install_ts=None)
+        assert cfg.human_confirm_active() is False
+
+    def test_install_ts_loaded_from_file(self, tmp_path: Path) -> None:
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        # Write a recent install.ts
+        ts = datetime.now(timezone.utc)
+        (data_dir / "install.ts").write_text(ts.isoformat())
+        cfg = Config(data_dir=data_dir)
+        assert cfg.install_ts is not None
+        assert cfg.human_confirm_active() is True
+
+    def test_window_boundary_exact(self, tmp_path: Path) -> None:
+        install_ts = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        cfg = Config(data_dir=tmp_path, install_ts=install_ts)
+        # Exactly 30 days later — should be inactive (< not <=)
+        now = install_ts + timedelta(days=30)
+        assert cfg.human_confirm_active(now=now) is False
+        # One second before boundary — should be active
+        almost = now - timedelta(seconds=1)
+        assert cfg.human_confirm_active(now=almost) is True
