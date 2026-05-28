@@ -100,9 +100,10 @@ def _build_live_handlers(config_override: Optional[dict[str, Any]] = None) -> di
     cfg_kwargs: dict[str, Any] = {}
     if config_override:
         cfg_kwargs.update(config_override)
-    # Use a tmp project dir per run to avoid cross-contamination
+    # project is a Scope-level concept, not a Config field. Track it for the
+    # CanaryEnv scope filter; do NOT pass it into Config(**...).
     run_id = str(uuid.uuid4())[:8]
-    cfg_kwargs["project"] = cfg_kwargs.get("project", f"canary-{run_id}")
+    project = cfg_kwargs.pop("project", f"canary-{run_id}")
 
     config = Config(**cfg_kwargs)
     (
@@ -114,6 +115,7 @@ def _build_live_handlers(config_override: Optional[dict[str, Any]] = None) -> di
         execution_layer,
         gate,
         scheduler,
+        relational,
     ) = _build_components(config)
 
     default_tier = Tier.T1
@@ -138,7 +140,7 @@ def _build_live_handlers(config_override: Optional[dict[str, Any]] = None) -> di
     def _update(args: dict[str, Any]) -> dict[str, Any]:
         return _handle_update(
             args, episodic_layer, semantic_layer, procedural_layer,
-            execution_layer, enforcement, default_tier
+            execution_layer, enforcement, relational, default_tier
         )
 
     def _session_end(args: dict[str, Any]) -> dict[str, Any]:

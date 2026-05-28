@@ -283,7 +283,7 @@ def _build_components(
     blob_store = BlobStore(root=config.blob_root)
     relational = RelationalStore(db_path=config.sqlite_path)
     enforcement = Enforcement(config)
-    redactor = Redactor()
+    redactor = Redactor(config=config)
     composer = Composer(config)
 
     # Optional heavy stores — fall back to None-like stubs on ImportError

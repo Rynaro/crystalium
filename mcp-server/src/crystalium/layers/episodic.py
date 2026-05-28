@@ -156,21 +156,25 @@ class EpisodicLayer:
             # 5. Insert into relational store
             self.relational.insert_crystal(crystal_record)
 
-            # Vector + graph stores are optional (may not be available in tests)
+            # Vector + graph stores are optional (may not be available in tests).
+            # VectorStore.upsert needs an embedded vector; embed at write time so
+            # the dense recall arm has something to find.
             if self.vector_store is not None:
                 try:
-                    self.vector_store.insert(crystal_id, summary or str(payload)[:256])
+                    text = summary or str(payload)[:256]
+                    vec = self.vector_store.embed(text)
+                    if vec:  # skip if embedder is in SKIP_SLOW mode
+                        self.vector_store.upsert(
+                            crystal_id=crystal_id,
+                            vector=vec,
+                            metadata={"layer": "episodic"},
+                        )
                 except Exception as exc:  # noqa: BLE001
                     log.warning("vector_insert_skipped", error=str(exc))
 
             if self.graph_store is not None:
                 try:
-                    self.graph_store.upsert_crystal_node(
-                        crystal_id,
-                        layer="episodic",
-                        trust_tier=str(caller_tier),
-                        scope_project=scope.get("project", "") if isinstance(scope, dict) else "",
-                    )
+                    self.graph_store.add_node(crystal_id=crystal_id, layer="episodic")
                 except Exception as exc:  # noqa: BLE001
                     log.warning("graph_insert_skipped", error=str(exc))
 
