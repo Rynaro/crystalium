@@ -53,10 +53,7 @@ CREATE TABLE IF NOT EXISTS crystals (
     updated_at       TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS crystals_fts (
-    content='crystals',
-    content_rowid='rowid'
-) USING fts5(summary);
+CREATE VIRTUAL TABLE IF NOT EXISTS crystals_fts USING fts5(summary, content='crystals', content_rowid='rowid');
 
 CREATE TRIGGER IF NOT EXISTS crystals_ai AFTER INSERT ON crystals BEGIN
     INSERT INTO crystals_fts(rowid, summary) VALUES (new.rowid, new.summary);
@@ -78,7 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_crystals_importance  ON crystals(importance);
 
 CREATE TABLE IF NOT EXISTS pending_promotions (
     id          TEXT PRIMARY KEY,
-    crystal_id  TEXT NOT NULL REFERENCES crystals(id),
+    crystal_id  TEXT NOT NULL,
     target_layer TEXT NOT NULL,
     proposed_at TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'pending'  -- pending | accepted | rejected
