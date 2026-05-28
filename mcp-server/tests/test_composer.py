@@ -28,7 +28,8 @@ _UTC = timezone.utc
 
 
 def _ts(offset_hours: int = 0) -> datetime:
-    return datetime(2026, 5, 28, 12 + offset_hours, 0, 0, tzinfo=_UTC)
+    # Use timedelta to avoid hour-overflow for large offsets (e.g. i=0..29 in TestTotalCap)
+    return datetime(2026, 5, 28, 0, 0, 0, tzinfo=_UTC) + timedelta(hours=offset_hours)
 
 
 class _Rec:

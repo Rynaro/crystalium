@@ -26,6 +26,7 @@ Pattern mirrors atlas-aci/mcp-server/src/atlas_aci/enforcement.py (FINDING-001).
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections import deque
@@ -34,6 +35,8 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+
+_stdlib_log = logging.getLogger("crystalium.enforcement")
 
 from crystalium.config import Config
 from crystalium.telemetry import record_call
@@ -570,15 +573,24 @@ class Enforcement:
         """Emit the operator-warning required by D5 for every skill_invoke call.
 
         Mirrors atlas-aci's 'SANDBOXING IS THE OPERATOR'S RESPONSIBILITY' warning.
+        Emits via both structlog (for JSON/OTel pipeline) and Python's stdlib
+        logging (so pytest's caplog fixture can capture it in tests).
         """
+        _msg = (
+            "SANDBOXING IS THE OPERATOR'S RESPONSIBILITY. "
+            "skill_invoke runs a subprocess inside the crystalium container. "
+            "The container IS the sandbox boundary; the harness cannot prevent "
+            "a malicious verifier from reading its own container filesystem. "
+            "Only invoke skills from trusted (T0/T1) sources."
+        )
         log.warning(
             "skill_invoke_operator_warning",
             skill_id=skill_id,
-            message=(
-                "SANDBOXING IS THE OPERATOR'S RESPONSIBILITY. "
-                "skill_invoke runs a subprocess inside the crystalium container. "
-                "The container IS the sandbox boundary; the harness cannot prevent "
-                "a malicious verifier from reading its own container filesystem. "
-                "Only invoke skills from trusted (T0/T1) sources."
-            ),
+            message=_msg,
+        )
+        # Also emit via stdlib logging so pytest caplog captures it.
+        _stdlib_log.warning(
+            "skill_invoke_operator_warning skill_id=%s: %s",
+            skill_id,
+            _msg,
         )

@@ -60,7 +60,9 @@ _RAW_PATTERNS: list[tuple[str, str]] = [
     ),
     (
         "PRIVATE_KEY",
-        r"-----BEGIN [A-Z ]+ PRIVATE KEY-----",
+        # Matches "-----BEGIN PRIVATE KEY-----" and "-----BEGIN RSA PRIVATE KEY-----" etc.
+        # The prefix qualifier (RSA, EC, etc.) is optional.
+        r"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----",
     ),
     (
         "PASSWORD",

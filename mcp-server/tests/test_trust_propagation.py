@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 
 from crystalium.config import Config
-from crystalium.enforcement import Enforcement, TierCeilingViolation
+from crystalium.enforcement import Enforcement, TierCeilingViolation, TierViolation
 from crystalium.trust import Tier, min_tier, LAYER_CEILING
 
 
@@ -96,10 +96,15 @@ class TestG4MinTierBlocksSemanticLaundering:
     def test_g4_t0_inputs_allow_semantic(
         self, enforcement: Enforcement
     ) -> None:
-        """G4: T0 input → consolidated=T0 → Semantic admission allowed."""
+        """G4: T0+T1 inputs → consolidated = min_tier = T1 (least trusted) → Semantic allowed.
+
+        min_tier() returns the HIGHEST integer value (least trusted tier).
+        min_tier([T0, T1]) == T1 (int=1 > int=0), which is still within the
+        Semantic ceiling of T1, so admission proceeds without raising.
+        """
         input_tiers = [Tier.T0, Tier.T1]
         consolidated = min_tier(input_tiers)
-        assert consolidated == Tier.T0  # lowest integer = highest trust
+        assert consolidated == Tier.T1  # T1 has higher integer value → least trusted of the set
 
         enforcement.assert_tier_within_layer_ceiling(consolidated, "semantic")
 
@@ -134,8 +139,11 @@ class TestG4MinTierBlocksSemanticLaundering:
         )
 
         # Summarizer computed consolidated_tier = T3 (min of {T1,T2,T3})
-        # and passes it as caller_tier to the commit call
-        with pytest.raises(TierCeilingViolation) as exc_info:
+        # and passes it as caller_tier to the commit call.
+        # SemanticLayer.commit() calls assert_tier_allowed first (D1 matrix),
+        # which raises TierViolation for T3→semantic (matrix rule: deny).
+        # Both TierViolation and TierCeilingViolation block the laundering path.
+        with pytest.raises(TierViolation) as exc_info:
             layer.commit(
                 payload={
                     "summary": "consolidated summary of T1+T2+T3 inputs",
@@ -154,7 +162,7 @@ class TestG4MinTierBlocksSemanticLaundering:
                 caller_tier=Tier.T3,  # consolidated from min({T1,T2,T3})
             )
 
-        assert exc_info.value.reason_code == "TIER_CEILING"
+        assert exc_info.value.reason_code == "TIER_VIOLATION"
         # Assert no row was inserted in semantic store
         all_crystals = relational.bm25_search("consolidated", layer_filter="semantic", k=10)
         assert len(all_crystals) == 0, (

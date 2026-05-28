@@ -46,7 +46,9 @@ class TestSentinelFormat:
 
     def test_sentinel_format(self) -> None:
         """Sentinel uses guillemets: «REDACTED:<rule_id>»."""
-        result = Redactor(Config()).redact("SSN: 987-65-4321", "pii")
+        # Use a SSN not excluded by the pattern's negative lookaheads:
+        # pattern excludes 000-xx, 666-xx, 9xx-xx prefixes.
+        result = Redactor(Config()).redact("SSN: 123-45-6789", "pii")
         assert result.startswith("SSN: «REDACTED:SSN»")
 
 
