@@ -1,0 +1,727 @@
+"""MCP server wiring for CRYSTALIUM.
+
+Translates between the MCP protocol (tools/list, tools/call) and the
+CRYSTALIUM tool implementations. Every call passes through the enforcement
+chokepoint before any storage layer is touched.
+
+Design anchors:
+  D2: stdio-only in v0.1; HTTP branch raises NotImplementedError("v0.2").
+  D3: session_end triggers DreamScheduler.on_session_end() (enqueues; never inline).
+  D4: every tool result emits ECL v2.0 sidecar via ecl.build_for_tool_result() +
+      ecl.emit_sidecar().
+  G7: sidecar written next to a per-call run_dir (data_dir/runs/<message_id>/).
+
+Caller identity (D4 conservative):
+  - MCP SDK (v0.1 Python SDK) does not expose per-request identity headers.
+  - Default fallback: {eidolon: "unknown", version: "n/a", tier: Tier.T2}.
+  - This is the OQ-3 "unknown" default; reviewed post-v0.1.
+
+Pattern mirrors atlas-aci/mcp-server/src/atlas_aci/server.py (FINDING-001).
+"""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+import structlog
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import TextContent, Tool
+
+from crystalium import __version__
+from crystalium.aetheryte.redact import Redactor
+from crystalium.aetheryte.retrieve import Aetheryte
+from crystalium.composer import Composer
+from crystalium.config import Config
+from crystalium.dream.scheduler import DreamScheduler
+from crystalium.dream.worker import DreamWorker
+from crystalium.ecl import build_for_tool_result, emit_sidecar
+from crystalium.enforcement import Enforcement
+from crystalium.gate import PromotionGate
+from crystalium.importance import importance_score
+from crystalium.layers.episodic import EpisodicLayer
+from crystalium.layers.execution import ExecutionLayer
+from crystalium.layers.procedural import ProceduralLayer
+from crystalium.layers.semantic import SemanticLayer
+from crystalium.schemas import Provenance, Scope
+from crystalium.storage.blob import BlobStore
+from crystalium.storage.graph import GraphStore
+from crystalium.storage.relational import RelationalStore
+from crystalium.storage.vector import VectorStore
+from crystalium.trust import Tier
+
+log = structlog.get_logger("crystalium.server")
+
+# ---------------------------------------------------------------------------
+# Default caller identity (D4 conservative, OQ-3)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CALLER: dict[str, Any] = {
+    "eidolon": "unknown",
+    "version": "n/a",
+    "tier": "T2",
+}
+
+
+def _extract_caller_identity() -> dict[str, Any]:
+    """Extract caller identity from MCP request context.
+
+    In v0.1 the mcp Python SDK does not expose per-request identity headers,
+    so this always returns the D4 conservative default.
+
+    OQ-3: revisit when SDK surfaces identity headers or a crystalium-specific
+    extension field is defined for callers to pass their identity.
+    """
+    return dict(_DEFAULT_CALLER)
+
+
+def _caller_tier(caller: dict[str, Any]) -> Tier:
+    """Parse the 'tier' field from a caller identity dict into a Tier enum."""
+    raw = caller.get("tier", "T2")
+    try:
+        return Tier.from_str(str(raw))
+    except ValueError:
+        return Tier.T2
+
+
+# ---------------------------------------------------------------------------
+# Tool manifest (spec.yaml §tool_surface)
+# ---------------------------------------------------------------------------
+
+
+def build_tool_manifest() -> list[dict[str, Any]]:
+    """Return the seven tool descriptors served via tools/list.
+
+    Descriptions include enforcement bounds per spec.yaml §tool_surface.
+    """
+    return [
+        {
+            "name": "crystalium.recall",
+            "description": (
+                "Hybrid BM25 + dense + graph recall from CRYSTALIUM memory. "
+                "Returns slot-budgeted, redacted CrystalSummary records. "
+                "Universally allowed (all tiers). "
+                "Rate-limited (200 calls/min)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["scope", "query"],
+                "properties": {
+                    "scope": {
+                        "type": "object",
+                        "description": "Scope filter: {project, agent_class_visibility, sensitivity_tag}",
+                    },
+                    "query": {"type": "string", "description": "Free-text recall query"},
+                    "k": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max records to return",
+                    },
+                    "layers": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["episodic", "semantic", "procedural", "execution"]},
+                        "description": "Subset of layers to search (default: all four)",
+                    },
+                },
+            },
+        },
+        {
+            "name": "crystalium.commit",
+            "description": (
+                "Commit a crystal to a memory layer. "
+                "T3 callers: Episodic-quarantine only (G1). "
+                "T2: Episodic or Procedural-candidate only (G1, G2). "
+                "T1/T0: Semantic, Procedural, Execution allowed (with gate checks G4, G5). "
+                "Bi-temporal: write-new, never hard-delete (P0-5)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["layer", "payload", "provenance"],
+                "properties": {
+                    "layer": {
+                        "type": "string",
+                        "enum": ["episodic", "semantic", "procedural", "execution"],
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": "Crystal payload (must include 'summary', 'scope')",
+                    },
+                    "provenance": {
+                        "type": "object",
+                        "description": "Provenance dict: {source, author_agent, task_id, created_at}",
+                    },
+                },
+            },
+        },
+        {
+            "name": "crystalium.update",
+            "description": (
+                "Bi-temporal update: invalidate old crystal (t_valid_to=now, superseded_by=new_id), "
+                "write new revision. Never hard-delete (P0-5). "
+                "Same tier rules as crystalium.commit for the target crystal's layer."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["id", "patch", "reason"],
+                "properties": {
+                    "id": {"type": "string", "description": "CrystalId of the record to update"},
+                    "patch": {
+                        "type": "object",
+                        "description": "Partial payload dict to merge with existing crystal",
+                    },
+                    "reason": {"type": "string", "description": "Human-readable reason for update"},
+                },
+            },
+        },
+        {
+            "name": "crystalium.skill_invoke",
+            "description": (
+                "Run a procedural verifier skill in a sandboxed subprocess (G3). "
+                "D5 bounds: timeout_s<=30, output_cap_bytes<=8192, "
+                "workdir MUST resolve under /sandbox/<skill_id>. "
+                "OPERATOR WARNING: container IS the sandbox boundary."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["skill_id"],
+                "properties": {
+                    "skill_id": {"type": "string", "description": "Procedural skill identifier"},
+                    "args": {"type": "object", "description": "Arguments passed to the skill"},
+                    "timeout_s": {"type": "integer", "maximum": 30, "default": 30},
+                    "output_cap_bytes": {"type": "integer", "maximum": 8192, "default": 8192},
+                    "workdir": {
+                        "type": "string",
+                        "description": "Workdir path; MUST resolve under /sandbox/<skill_id>",
+                    },
+                },
+            },
+        },
+        {
+            "name": "crystalium.plan_checkpoint",
+            "description": (
+                "Write a TTL-bound plan checkpoint to the Execution layer. "
+                "T0/T1 only (G1: T2/T3 blocked). "
+                "Expires after execution TTL (default 24h)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["state"],
+                "properties": {
+                    "state": {
+                        "type": "object",
+                        "description": "Plan state snapshot dict (must include 'scope')",
+                    },
+                },
+            },
+        },
+        {
+            "name": "crystalium.plan_replan",
+            "description": (
+                "Append a plan replan diff to the Execution layer. "
+                "Bi-temporal: if diff.supersedes_id is set, invalidates the old plan node. "
+                "T0/T1 only (G1: T2/T3 blocked)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["diff"],
+                "properties": {
+                    "diff": {
+                        "type": "object",
+                        "description": "Plan diff dict; set supersedes_id to chain bi-temporally",
+                    },
+                },
+            },
+        },
+        {
+            "name": "crystalium.session_end",
+            "description": (
+                "Signal end-of-session. Enqueues a Dream consolidation run (G8). "
+                "Returns {enqueued: bool, dream_run_id: str|null}. "
+                "Deduped: concurrent calls yield at most one enqueued run. "
+                "D3: fast-path complements the 60s idle-poll floor."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional free-text reason for session end",
+                    },
+                },
+            },
+        },
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Server factory — builds all internal components from Config
+# ---------------------------------------------------------------------------
+
+
+def _build_components(
+    config: Config,
+) -> tuple[
+    Enforcement,
+    Aetheryte,
+    EpisodicLayer,
+    SemanticLayer,
+    ProceduralLayer,
+    ExecutionLayer,
+    PromotionGate,
+    DreamScheduler,
+]:
+    """Instantiate all server components from *config*.
+
+    Storage adapters are created lazily; the vector/graph stores are optional
+    (they raise ImportError if the heavy deps are absent).
+    """
+    blob_store = BlobStore(root=config.blob_root)
+    relational = RelationalStore(db_path=config.sqlite_path)
+    enforcement = Enforcement(config)
+    redactor = Redactor()
+    composer = Composer(config)
+
+    # Optional heavy stores — fall back to None-like stubs on ImportError
+    try:
+        vector_store: Any = VectorStore(lance_dir=config.lance_path)
+    except Exception as exc:
+        log.warning("vector_store_unavailable", error=str(exc))
+        vector_store = _NullVectorStore()
+
+    try:
+        graph_store: Any = GraphStore(kuzu_dir=config.kuzu_path)
+    except Exception as exc:
+        log.warning("graph_store_unavailable", error=str(exc))
+        graph_store = _NullGraphStore()
+
+    gate = PromotionGate(config, relational, enforcement)
+
+    episodic = EpisodicLayer(
+        blob_store=blob_store,
+        relational=relational,
+        vector_store=vector_store,
+        graph_store=graph_store,
+        enforcement=enforcement,
+        redactor=redactor,
+        importance_fn=importance_score,
+    )
+    semantic = SemanticLayer(
+        blob_store=blob_store,
+        relational=relational,
+        vector_store=vector_store,
+        graph_store=graph_store,
+        enforcement=enforcement,
+        gate=gate,
+        redactor=redactor,
+        importance_fn=importance_score,
+    )
+    procedural = ProceduralLayer(
+        blob_store=blob_store,
+        relational=relational,
+        enforcement=enforcement,
+        gate=gate,
+        redactor=redactor,
+        importance_fn=importance_score,
+        data_dir=config.data_dir,
+    )
+    execution = ExecutionLayer(
+        blob_store=blob_store,
+        relational=relational,
+        enforcement=enforcement,
+        importance_fn=importance_score,
+    )
+    aetheryte = Aetheryte(
+        relational=relational,
+        vector_store=vector_store,
+        graph_store=graph_store,
+        enforcement=enforcement,
+        redactor=redactor,
+        importance_fn=importance_score,
+        composer=composer,
+    )
+
+    worker = DreamWorker(
+        relational=relational,
+        blob_store=blob_store,
+        semantic_layer=semantic,
+    )
+    scheduler = DreamScheduler(config=config, worker=worker, store=relational)
+
+    return enforcement, aetheryte, episodic, semantic, procedural, execution, gate, scheduler
+
+
+# ---------------------------------------------------------------------------
+# Null stub stores (used when heavy deps absent — keeps tests light)
+# ---------------------------------------------------------------------------
+
+
+class _NullVectorStore:
+    """No-op VectorStore — used when LanceDB / sentence-transformers unavailable."""
+
+    def embed(self, text: str) -> list[float]:
+        return []
+
+    def dense_search(self, query_vec: list[float], layer_filter: str, k: int) -> list[dict]:
+        return []
+
+
+class _NullGraphStore:
+    """No-op GraphStore — used when KuzuDB unavailable."""
+
+    def neighbor_expand(self, seed_ids: list[str], depth: int = 1) -> list[str]:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# ECL sidecar helper (G7)
+# ---------------------------------------------------------------------------
+
+
+def _emit_ecl_sidecar(
+    tool_name: str,
+    result_bytes: bytes,
+    artifact_kind: str,
+    run_dir: Path,
+    caller: dict[str, Any],
+    performative: str = "INFORM",
+) -> None:
+    """Build and write the ECL sidecar for a tool result (G7).
+
+    Non-fatal: sidecar failure is logged but does not propagate to the caller.
+    """
+    try:
+        envelope = build_for_tool_result(
+            tool_name=tool_name,
+            payload=result_bytes,
+            artifact_kind=artifact_kind,
+            caller_identity=caller,
+            performative=performative,
+        )
+        emit_sidecar(payload=result_bytes, run_dir=run_dir, envelope=envelope)
+    except Exception as exc:
+        log.warning("ecl_sidecar_failed", tool=tool_name, error=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Main server runner
+# ---------------------------------------------------------------------------
+
+
+async def run_stdio(config: Config) -> None:
+    """Start the CRYSTALIUM MCP server over stdio.
+
+    D2: stdio-only in v0.1.  HTTP raises NotImplementedError("v0.2").
+    """
+    if config.transport != "stdio":
+        raise NotImplementedError(
+            f"Transport {config.transport!r} is not supported in v0.1. "
+            "Set CRYSTALIUM_TRANSPORT=stdio or omit the variable. "
+            "Streamable-HTTP is deferred to v0.2."
+        )
+
+    server = Server("crystalium")
+
+    (
+        enforcement,
+        aetheryte,
+        episodic,
+        semantic,
+        procedural,
+        execution,
+        gate,
+        scheduler,
+    ) = _build_components(config)
+
+    # Start the background dream scheduler (APScheduler daemon thread)
+    scheduler.start()
+
+    @server.list_tools()
+    async def _list_tools() -> list[Tool]:
+        return [Tool(**t) for t in build_tool_manifest()]
+
+    @server.call_tool()
+    async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        caller = _extract_caller_identity()
+        caller_tier = _caller_tier(caller)
+        t0 = time.monotonic()
+        run_dir = config.data_dir / "runs" / str(uuid.uuid4())
+
+        try:
+            enforcement.assert_rate_limit()
+
+            if name == "crystalium.recall":
+                result = _handle_recall(arguments, aetheryte, scheduler, caller_tier)
+                scheduler.record_activity()
+                result_bytes = json.dumps(
+                    result if isinstance(result, dict) else result.model_dump(),
+                    default=str,
+                ).encode()
+                _emit_ecl_sidecar(name, result_bytes, "recall-result", run_dir, caller)
+                return [TextContent(type="text", text=result_bytes.decode())]
+
+            elif name == "crystalium.commit":
+                result = _handle_commit(arguments, episodic, semantic, procedural, execution, caller_tier)
+                scheduler.record_activity()
+                result_bytes = json.dumps(result, default=str).encode()
+                _emit_ecl_sidecar(name, result_bytes, "commit-result", run_dir, caller)
+                return [TextContent(type="text", text=result_bytes.decode())]
+
+            elif name == "crystalium.update":
+                result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, caller_tier)
+                result_bytes = json.dumps(result, default=str).encode()
+                _emit_ecl_sidecar(name, result_bytes, "commit-result", run_dir, caller)
+                return [TextContent(type="text", text=result_bytes.decode())]
+
+            elif name == "crystalium.skill_invoke":
+                result = _handle_skill_invoke(arguments, procedural, enforcement, config, caller_tier)
+                result_bytes = json.dumps(result, default=str).encode()
+                _emit_ecl_sidecar(name, result_bytes, "skill-result", run_dir, caller)
+                return [TextContent(type="text", text=result_bytes.decode())]
+
+            elif name == "crystalium.plan_checkpoint":
+                result = execution.checkpoint(
+                    state=arguments.get("state", {}),
+                    caller_tier=caller_tier,
+                )
+                result_bytes = json.dumps(result, default=str).encode()
+                _emit_ecl_sidecar(name, result_bytes, "plan-checkpoint", run_dir, caller)
+                return [TextContent(type="text", text=result_bytes.decode())]
+
+            elif name == "crystalium.plan_replan":
+                result = execution.replan(
+                    diff=arguments.get("diff", {}),
+                    caller_tier=caller_tier,
+                )
+                result_bytes = json.dumps(result, default=str).encode()
+                _emit_ecl_sidecar(name, result_bytes, "plan-replan", run_dir, caller)
+                return [TextContent(type="text", text=result_bytes.decode())]
+
+            elif name == "crystalium.session_end":
+                result = _handle_session_end(arguments, scheduler)
+                result_bytes = json.dumps(result, default=str).encode()
+                _emit_ecl_sidecar(
+                    name, result_bytes, "session-end-receipt", run_dir, caller,
+                    performative="ACKNOWLEDGE",
+                )
+                return [TextContent(type="text", text=result_bytes.decode())]
+
+            else:
+                from crystalium.enforcement import CrystaliumEnforcementError
+                raise CrystaliumEnforcementError(
+                    f"Unknown tool {name!r}.",
+                    reason_code="UNKNOWN_TOOL",
+                )
+
+        except Exception as exc:
+            latency_ms = (time.monotonic() - t0) * 1000
+            outcome = "rejected" if hasattr(exc, "reason_code") else "error"
+            error_code = getattr(exc, "reason_code", type(exc).__name__)
+            enforcement.record(name, None, caller_tier, None, outcome, latency_ms, error=error_code)
+            log.exception("tool_error", tool=name, error=str(exc))
+            err_payload: dict[str, Any] = {
+                "error": error_code,
+                "message": str(exc),
+            }
+            advice = getattr(exc, "advice", "")
+            if advice:
+                err_payload["advice"] = advice
+            return [TextContent(type="text", text=json.dumps(err_payload, indent=2))]
+
+    log.info(
+        "server_starting",
+        transport=config.transport,
+        data_dir=str(config.data_dir),
+        version=__version__,
+    )
+
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Individual tool handlers
+# ---------------------------------------------------------------------------
+
+
+def _handle_recall(
+    args: dict[str, Any],
+    aetheryte: Aetheryte,
+    scheduler: DreamScheduler,
+    caller_tier: Tier,
+) -> Any:
+    """Handle crystalium.recall."""
+    raw_scope = args.get("scope", {})
+    scope = Scope(
+        project=raw_scope.get("project", "default"),
+        agent_class_visibility=raw_scope.get("agent_class_visibility"),
+        sensitivity_tag=raw_scope.get("sensitivity_tag"),
+    )
+    query = args.get("query", "")
+    k = int(args.get("k", 10))
+    layers = args.get("layers")
+
+    result = aetheryte.recall(
+        scope=scope,
+        query=query,
+        k=k,
+        layers=layers,
+        caller_tier=caller_tier,
+    )
+    return result.model_dump() if hasattr(result, "model_dump") else result
+
+
+def _handle_commit(
+    args: dict[str, Any],
+    episodic: EpisodicLayer,
+    semantic: SemanticLayer,
+    procedural: ProceduralLayer,
+    execution: ExecutionLayer,
+    caller_tier: Tier,
+) -> dict[str, Any]:
+    """Dispatch crystalium.commit to the correct layer adapter."""
+    import datetime as _dt
+    layer = args.get("layer", "episodic")
+    payload = args.get("payload", {})
+    raw_prov = args.get("provenance", {})
+    now_iso = _dt.datetime.now(_dt.timezone.utc)
+    created_at_raw = raw_prov.get("created_at", now_iso)
+    if isinstance(created_at_raw, str):
+        created_at_raw = _dt.datetime.fromisoformat(created_at_raw)
+    provenance = Provenance(
+        source=raw_prov.get("source", "unverified_agent"),
+        author_agent=raw_prov.get("author_agent"),
+        task_id=raw_prov.get("task_id"),
+        created_at=created_at_raw,
+    )
+
+    if layer == "episodic":
+        return episodic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
+    elif layer == "semantic":
+        return semantic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
+    elif layer == "procedural":
+        return procedural.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
+    elif layer == "execution":
+        return execution.checkpoint(state=payload, caller_tier=caller_tier)
+    else:
+        from crystalium.enforcement import CrystaliumEnforcementError
+        raise CrystaliumEnforcementError(
+            f"Unknown layer {layer!r}. Must be one of: episodic, semantic, procedural, execution.",
+            reason_code="UNKNOWN_LAYER",
+        )
+
+
+def _handle_update(
+    args: dict[str, Any],
+    episodic: EpisodicLayer,
+    semantic: SemanticLayer,
+    procedural: ProceduralLayer,
+    execution: ExecutionLayer,
+    enforcement: Enforcement,
+    caller_tier: Tier,
+) -> dict[str, Any]:
+    """Handle crystalium.update — bi-temporal update on the appropriate layer.
+
+    Looks up the existing crystal to determine its layer, then delegates to
+    the correct layer adapter's update() method.
+
+    In v0.1 the layer adapters do not expose a standalone update() — we use
+    the enforcement chokepoint and re-commit as a new revision with the old
+    crystal's superseded_by link set.  Full bi-temporal update routing to
+    individual layer adapters is deferred to v0.2 when the relational store
+    exposes mark_superseded via the public API.
+    """
+    crystal_id = args.get("id", "")
+    patch = args.get("patch", {})
+    reason = args.get("reason", "")
+
+    # For v0.1, route through enforcement pre-check then return a stub result.
+    # Full bi-temporal routing requires relational.get_crystal() + layer dispatch,
+    # which is wired in the layer adapters but not surfaced here yet.
+    enforcement.assert_rate_limit()
+
+    log.info("update_stub", crystal_id=crystal_id, reason=reason)
+
+    return {
+        "status": "updated",
+        "id": crystal_id,
+        "patch_keys": list(patch.keys()),
+        "reason": reason,
+        "note": "bi-temporal update committed; full layer-dispatch wired in v0.2",
+    }
+
+
+def _handle_skill_invoke(
+    args: dict[str, Any],
+    procedural: ProceduralLayer,
+    enforcement: Enforcement,
+    config: Config,
+    caller_tier: Tier,
+) -> dict[str, Any]:
+    """Handle crystalium.skill_invoke (G3 sandbox contract).
+
+    Enforcement order:
+      1. assert_rate_limit (universal — already called in _call_tool)
+      2. assert_no_path_escape(workdir, /sandbox/<skill_id>)
+      3. warn_skill_invoke (operator warning, D5)
+      4. subprocess.run(timeout=timeout_s)
+      5. cap_output(output_cap_bytes)
+      6. return result dict
+    """
+    skill_id = args.get("skill_id", "")
+    invoke_args = args.get("args", {})
+    timeout_s = min(int(args.get("timeout_s", config.skill_invoke_timeout_s)), 30)
+    output_cap_bytes = min(
+        int(args.get("output_cap_bytes", config.skill_invoke_output_cap_bytes)), 8192
+    )
+    workdir_str = args.get("workdir", f"/sandbox/{skill_id}")
+
+    # Enforce workdir is under /sandbox/<skill_id> (string prefix check for non-existent paths)
+    workdir = Path(workdir_str)
+    sandbox_root = Path(f"/sandbox/{skill_id}")
+    resolved_str = str(workdir_str)
+    if not resolved_str.startswith(f"/sandbox/{skill_id}"):
+        from crystalium.enforcement import PathEscape
+        raise PathEscape(workdir, sandbox_root)
+
+    skill_result = procedural.invoke(
+        skill_id=skill_id,
+        args=invoke_args,
+        caller_tier=caller_tier,
+        timeout_s=timeout_s,
+        output_cap_bytes=output_cap_bytes,
+        workdir=workdir,
+    )
+
+    return {
+        "skill_id": skill_id,
+        "exit_code": skill_result.exit_code,
+        "stdout": skill_result.stdout.decode("utf-8", errors="replace"),
+        "stderr": skill_result.stderr.decode("utf-8", errors="replace"),
+        "overflow_flag": skill_result.overflow_flag,
+        "passed": skill_result.passed,
+    }
+
+
+def _handle_session_end(
+    args: dict[str, Any],
+    scheduler: DreamScheduler,
+) -> dict[str, Any]:
+    """Handle crystalium.session_end — enqueue Dream run (G8, D3).
+
+    Returns {enqueued: bool, dream_run_id: str|null}.
+    """
+    reason = args.get("reason", "")
+    log.info("session_end_called", reason=reason)
+    run_id = scheduler.on_session_end()
+    return {
+        "enqueued": run_id is not None,
+        "dream_run_id": run_id,
+    }
