@@ -149,12 +149,13 @@ class GraphStore:
                 f"Must be one of {sorted(VALID_RELATIONS)}."
             )
         conn = self._get_conn()
-        # Verify both nodes exist
+        # Verify both nodes exist; use has_next() before get_next() to avoid
+        # "No more tuples" RuntimeError when the query returns 0 rows.
         for node_id in (src, dst):
             result = conn.execute(
                 "MATCH (c:Crystal {id: $id}) RETURN c.id", {"id": node_id}
             )
-            if result.get_next() is None:
+            if not result.has_next():
                 raise KeyError(f"Crystal node not found: {node_id!r}")
 
         conn.execute(

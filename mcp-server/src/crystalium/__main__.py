@@ -381,7 +381,6 @@ def promote() -> None:
 def promote_list(config_path: Optional[Path], layer: Optional[str]) -> None:
     """List pending promotions awaiting human review."""
     from crystalium.config import Config
-    from crystalium.storage.relational import RelationalStore
 
     if config_path and Path(str(config_path)).exists():
         config = Config.from_yaml(Path(config_path))
@@ -437,9 +436,6 @@ def promote_review(
     PROMOTION_ID  UUID of the pending promotion to review.
     """
     from crystalium.config import Config
-    from crystalium.enforcement import Enforcement
-    from crystalium.gate import PromotionGate
-    from crystalium.storage.relational import RelationalStore
 
     if config_path and Path(str(config_path)).exists():
         config = Config.from_yaml(Path(config_path))

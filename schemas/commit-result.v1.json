@@ -4,7 +4,6 @@
   "title": "CommitResult",
   "description": "Output contract for crystalium.commit(). Either a successful commit (status=committed) or a structured rejection (status=rejected). ECL envelope sidecar emitted alongside (G7).",
   "type": "object",
-  "additionalProperties": false,
   "required": ["status"],
   "oneOf": [
     {

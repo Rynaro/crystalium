@@ -141,16 +141,14 @@ class RelationalStore:
         return conn
 
     def _init_db(self) -> None:
-        with self._connect() as conn:
-            # Execute DDL statement by statement to avoid multi-statement issues
-            for stmt in _DDL.strip().split(";"):
-                stmt = stmt.strip()
-                if stmt:
-                    try:
-                        conn.execute(stmt)
-                    except sqlite3.OperationalError:
-                        pass  # Ignore errors from already-existing objects
-            conn.commit()
+        # executescript handles multi-statement DDL including CREATE TRIGGER ... BEGIN...END
+        # blocks which contain internal semicolons that would break a naive split(";") approach.
+        # It issues an implicit COMMIT before running, which is fine for DDL-only setup.
+        conn = self._connect()
+        try:
+            conn.executescript(_DDL)
+        finally:
+            conn.close()
 
     # ------------------------------------------------------------------
     # Crystal CRUD
