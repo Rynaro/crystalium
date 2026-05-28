@@ -22,6 +22,8 @@ build/
 # MCP server deps
 mcp-server/uv.lock
 mcp-server/.venv/
+# Stray uv.lock if uv is accidentally run from repo root
+/uv.lock
 
 # Evals results (keep .gitkeep, ignore generated JSON)
 evals/results/*.json
