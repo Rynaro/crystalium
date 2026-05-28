@@ -162,7 +162,13 @@ class TestAetheryteBm25Recall:
     def test_bm25_hit_returns_relevant_record(
         self, tmp_path: Path, tmp_relational_store: RelationalStore
     ) -> None:
-        """Insert a crystal with 'auth bug fix' in summary; BM25 should return it."""
+        """Insert a crystal whose summary contains the query terms; BM25 should return it.
+
+        Note on FTS5 tokenisation: SQLite's default FTS5 tokeniser does not stem,
+        so query terms must literally appear in the indexed text. We use full
+        tokens that exist verbatim in the summary; stemming/prefix-matching is
+        an OQ-4 follow-up for v0.2.
+        """
         crystal = _crystal_dict(
             summary="authentication bug fix in login handler",
             project="proj-a",
@@ -174,7 +180,7 @@ class TestAetheryteBm25Recall:
         scope = Scope(project="proj-a")
         result = aetheryte.recall(
             scope=scope,
-            query="auth bug fix",
+            query="authentication bug fix",
             k=5,
             layers=["semantic", "episodic", "procedural", "execution"],
             caller_tier=Tier.T1,
