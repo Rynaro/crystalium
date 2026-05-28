@@ -181,12 +181,9 @@ def dream(force: bool, config_path: Optional[Path]) -> None:
     from crystalium.config import Config
     from crystalium.dream.worker import DreamWorker
     from crystalium.dream.scheduler import DreamScheduler, _make_run_id
-    from crystalium.layers.semantic import SemanticLayer
-    from crystalium.aetheryte.redact import Redactor
     from crystalium.enforcement import Enforcement
     from crystalium.gate import PromotionGate
     from crystalium.importance import importance_score
-    from crystalium.storage.blob import BlobStore
     from crystalium.storage.relational import RelationalStore
 
     if config_path and config_path.exists():
@@ -194,28 +191,17 @@ def dream(force: bool, config_path: Optional[Path]) -> None:
     else:
         config = Config.from_env()
 
-    blob_store = BlobStore(root=config.blob_root)
     relational = RelationalStore(db_path=config.sqlite_path)
     enforcement = Enforcement(config)
     gate = PromotionGate(config, relational, enforcement)
-    redactor = Redactor()
 
-    # Minimal semantic layer for Dream worker
-    semantic = SemanticLayer(
-        blob_store=blob_store,
+    worker = DreamWorker(
         relational=relational,
         vector_store=None,
         graph_store=None,
         enforcement=enforcement,
         gate=gate,
-        redactor=redactor,
         importance_fn=importance_score,
-    )
-
-    worker = DreamWorker(
-        relational=relational,
-        blob_store=blob_store,
-        semantic_layer=semantic,
     )
 
     if force:
@@ -399,7 +385,14 @@ def promote_list(config_path: Optional[Path], layer: Optional[str]) -> None:
     relational = RelationalStore(db_path=config.sqlite_path)
 
     try:
-        rows = relational.list_pending_promotions(layer_filter=layer)
+        # Try with layer_filter kwarg first (v0.2+ RelationalStore extension)
+        try:
+            rows = relational.list_pending_promotions(layer_filter=layer)
+        except TypeError:
+            # RelationalStore.list_pending_promotions doesn't accept layer_filter yet;
+            # fetch all and filter client-side
+            all_rows = relational.list_pending_promotions()
+            rows = [r for r in all_rows if layer is None or r.get("target_layer") == layer]
     except AttributeError:
         # Fallback if list_pending_promotions not yet on RelationalStore
         rows = []

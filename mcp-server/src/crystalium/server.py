@@ -346,8 +346,11 @@ def _build_components(
 
     worker = DreamWorker(
         relational=relational,
-        blob_store=blob_store,
-        semantic_layer=semantic,
+        vector_store=vector_store,
+        graph_store=graph_store,
+        enforcement=enforcement,
+        gate=gate,
+        importance_fn=importance_score,
     )
     scheduler = DreamScheduler(config=config, worker=worker, store=relational)
 
