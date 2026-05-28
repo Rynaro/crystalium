@@ -13,10 +13,12 @@ __pycache__/
 .mypy_cache/
 
 # Documentation (large; not needed in runtime image)
-# Keep: SPEC.md and agent.md (referenced by install target)
+# Keep: SPEC.md, agent.md (install-target references), and README.md
+# (pyproject.toml [project.readme] points to it; hatchling reads it at build).
 *.md
 !SPEC.md
 !agent.md
+!README.md
 
 # Install target (consumer-side; not part of the image)
 .eidolons/

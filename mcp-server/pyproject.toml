@@ -14,10 +14,6 @@ authors = [
     {name = "Henrique Aparecido Lavezzo", email = "5271543+Rynaro@users.noreply.github.com"},
 ]
 
-[project.urls]
-Homepage = "https://github.com/Rynaro/crystalium"
-Repository = "https://github.com/Rynaro/crystalium"
-
 dependencies = [
     "mcp>=1.2.0",
     "pydantic>=2.6",
@@ -46,6 +42,10 @@ dev = [
 
 [project.scripts]
 crystalium = "crystalium.__main__:cli"
+
+[project.urls]
+Homepage = "https://github.com/Rynaro/crystalium"
+Repository = "https://github.com/Rynaro/crystalium"
 
 [build-system]
 requires = ["hatchling"]

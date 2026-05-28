@@ -6,13 +6,26 @@
 
 FROM python:3.12-slim AS base
 
-# Install uv (fast Python package manager)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# Install curl for uv installer (and as a useful tool for the doctor command)
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (fast Python package manager).
+# Pinned to a stable installer URL — ghcr.io/astral-sh/uv image registry pulls
+# proved flaky during initial bootstrap (DeadlineExceeded). The installer
+# script is self-contained and idempotent.
+ENV UV_INSTALL_DIR=/usr/local/bin
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && uv --version
 
 WORKDIR /app
 
-# Copy pyproject.toml first for layer caching
+# Copy pyproject.toml + README first for layer caching.
+# README.md is at the repo root (not under mcp-server/); hatchling reads it
+# via [project.readme] during 'uv sync', so it MUST be in the build context
+# before sync runs.
 COPY mcp-server/pyproject.toml mcp-server/.python-version ./
+COPY README.md ./
 
 # Install all dependencies including dev group (needed for pytest)
 # uv sync runs INSIDE the container — never on the host (P0-13)
