@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rynaro/crystalium/schemas/commit-result.v1.json",
+  "title": "CommitResult",
+  "description": "Output contract for crystalium.commit(). Either a successful commit (status=committed) or a structured rejection (status=rejected). ECL envelope sidecar emitted alongside (G7).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status"],
+  "oneOf": [
+    {
+      "description": "Successful commit.",
+      "properties": {
+        "status": {"const": "committed"},
+        "id": {
+          "type": "string",
+          "description": "Assigned crystal identifier.",
+          "minLength": 1
+        },
+        "layer": {
+          "type": "string",
+          "enum": ["episodic", "semantic", "procedural", "execution"]
+        },
+        "validation_state": {
+          "type": "string",
+          "enum": ["validated", "unverified", "quarantined", "candidate"]
+        },
+        "importance": {
+          "type": "number",
+          "description": "Computed importance score at commit time [0, 1].",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": ["status", "id", "layer", "validation_state", "importance"],
+      "additionalProperties": false
+    },
+    {
+      "description": "Rejected commit with structured error.",
+      "properties": {
+        "status": {"const": "rejected"},
+        "reason_code": {
+          "type": "string",
+          "description": "Machine-readable rejection reason (maps to failure_class in spec.yaml).",
+          "enum": [
+            "TIER_VIOLATION",
+            "TIER_CEILING",
+            "VERIFIER_FAIL",
+            "PROMOTION_GATE",
+            "RATE_LIMIT",
+            "PATH_ESCAPE",
+            "PROMOTION_PENDING"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "description": "Human-readable detail and any structured advice (e.g. 'exclude T3 inputs or commit to Episodic instead').",
+          "minLength": 1
+        }
+      },
+      "required": ["status", "reason_code", "detail"],
+      "additionalProperties": false
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rynaro/crystalium/schemas/recall-result.v1.json",
+  "title": "RecallResult",
+  "description": "Output contract for crystalium.recall(). Slot breakdown mirrors the Baddeley working-set model (MISSION.md §Bounded, slotted working set).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["records", "slot_breakdown", "total_tokens", "evicted_count"],
+  "properties": {
+    "records": {
+      "type": "array",
+      "description": "Array of crystal summaries returned by the Aetheryte, after redaction.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "layer", "summary", "trust_tier", "validation_state", "importance", "last_access"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Crystal identifier.",
+            "minLength": 1
+          },
+          "layer": {
+            "type": "string",
+            "enum": ["episodic", "semantic", "procedural", "execution"]
+          },
+          "summary": {
+            "type": "string",
+            "description": "Redacted summary of this crystal.",
+            "minLength": 1
+          },
+          "trust_tier": {
+            "type": "string",
+            "enum": ["T0", "T1", "T2", "T3"]
+          },
+          "validation_state": {
+            "type": "string",
+            "enum": ["validated", "unverified", "quarantined", "candidate"]
+          },
+          "importance": {
+            "type": "number",
+            "description": "Cached importance score [0, 1].",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "last_access": {
+            "type": "string",
+            "description": "RFC 3339 timestamp of last recall.",
+            "format": "date-time"
+          },
+          "content_ref": {
+            "type": "string",
+            "description": "Blob-tier SHA-256 ref for episodic crystals. Callers resolve separately.",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "score": {
+            "type": "number",
+            "description": "Retrieval relevance score from the Aetheryte hybrid retrieval."
+          }
+        }
+      }
+    },
+    "slot_breakdown": {
+      "type": "object",
+      "description": "Per-slot token counts used by the working-set composer (FORGE D9, G6).",
+      "additionalProperties": false,
+      "required": ["executive", "procedural", "semantic", "episodic", "execution", "buffer"],
+      "properties": {
+        "executive": {"type": "integer", "minimum": 0},
+        "procedural": {"type": "integer", "minimum": 0},
+        "semantic": {"type": "integer", "minimum": 0},
+        "episodic": {"type": "integer", "minimum": 0},
+        "execution": {"type": "integer", "minimum": 0},
+        "buffer": {"type": "integer", "minimum": 0}
+      }
+    },
+    "total_tokens": {
+      "type": "integer",
+      "description": "Total tokens in the assembled working set (must be <= 3500, MISSION.md §Bounded).",
+      "minimum": 0,
+      "maximum": 3500
+    },
+    "evicted_count": {
+      "type": "integer",
+      "description": "Number of candidates evicted to satisfy the token budget.",
+      "minimum": 0
+    }
+  }
+}

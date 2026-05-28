@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rynaro/crystalium/schemas/commit-request.v1.json",
+  "title": "CommitRequest",
+  "description": "Input contract for crystalium.commit(). Every commit funnels through enforcement.assert_tier_allowed() before any store mutation (MISSION.md §Keystone). Gates traversed: G1, G2, G4, G5, G7.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["layer", "payload", "provenance", "caller_tier"],
+  "properties": {
+    "layer": {
+      "type": "string",
+      "description": "Target memory layer for this commit.",
+      "enum": ["episodic", "semantic", "procedural", "execution"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Crystal payload (all fields except id, which the server assigns). Must match crystal.v1.json minus id.",
+      "additionalProperties": true
+    },
+    "provenance": {
+      "type": "object",
+      "description": "Provenance of the commit (author, source, task context).",
+      "additionalProperties": false,
+      "required": ["source", "created_at"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["human", "verified_agent", "unverified_agent", "environment"]
+        },
+        "author_agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "caller_tier": {
+      "type": "string",
+      "description": "Trust tier of the calling agent. Enforcement uses this to gate the commit (G1, G2, G4).",
+      "enum": ["T0", "T1", "T2", "T3"]
+    },
+    "force_promote": {
+      "type": "boolean",
+      "description": "T0-only: skip pending_promotions queue and commit directly. Audit trail is via telemetry (OQ-1).",
+      "default": false
+    }
+  }
+}

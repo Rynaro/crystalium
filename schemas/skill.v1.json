@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rynaro/crystalium/schemas/skill.v1.json",
+  "title": "Skill",
+  "description": "A Skill is procedural crystal frontmatter. Verified, executable, reusable skills admitted into the Procedural layer via the verifier-gated path (MISSION.md §Procedural + FORGE D5, G3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "capability_class",
+    "description",
+    "language",
+    "inputs",
+    "verifier",
+    "provenance",
+    "trust_tier",
+    "success_count",
+    "last_used",
+    "status"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique name identifying this skill.",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "capability_class": {
+      "type": "string",
+      "description": "High-level capability class. Hook for polyglot skill abstraction (deferred to v0.2, MISSION.md §Out of scope).",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this skill does.",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "language": {
+      "type": "string",
+      "description": "Primary language of the skill's verifier script.",
+      "enum": ["python", "ts", "sql", "bash", "none"]
+    },
+    "inputs": {
+      "type": "array",
+      "description": "Typed parameter list consumed by the verifier.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Parameter name.",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "description": "Parameter type (Python annotation style).",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description of this parameter."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether this parameter is required.",
+            "default": true
+          }
+        }
+      }
+    },
+    "verifier": {
+      "type": "string",
+      "description": "Path to the executable test / verifier script (relative to the skill blob root). Must pass (exit 0) for procedural admission (G3).",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "description": "Provenance of the skill (same shape as Crystal.provenance).",
+      "additionalProperties": false,
+      "required": ["source", "created_at"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["human", "verified_agent", "unverified_agent", "environment"]
+        },
+        "author_agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "trust_tier": {
+      "type": "string",
+      "description": "Trust tier. Must be >= T1 (T0 or T1) for shared skills (MISSION.md §Procedural admission requires verifier-gated).",
+      "enum": ["T0", "T1", "T2", "T3"]
+    },
+    "success_count": {
+      "type": "integer",
+      "description": "Number of times this skill has been successfully invoked.",
+      "minimum": 0
+    },
+    "last_used": {
+      "type": ["string", "null"],
+      "description": "RFC 3339 timestamp of most recent successful invocation. null = never used.",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "description": "Lifecycle status of this skill.",
+      "enum": ["candidate", "shared", "deprecated"]
+    },
+    "activation_conditions": {
+      "type": ["object", "null"],
+      "description": "Optional structured conditions under which this skill is activated (hook for v0.2 capability dispatch).",
+      "additionalProperties": true
+    }
+  }
+}

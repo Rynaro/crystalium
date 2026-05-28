@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rynaro/crystalium/schemas/crystal.v1.json",
+  "title": "Crystal",
+  "description": "A Crystal is a single admitted memory or skill record in the CRYSTALIUM lattice. Every write/promote funnels through the enforcement chokepoint before any store mutation runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "layer",
+    "summary",
+    "provenance",
+    "trust_tier",
+    "validation_state",
+    "scope",
+    "temporal",
+    "utility",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Globally unique crystal identifier (UUID v4 or v7).",
+      "minLength": 1
+    },
+    "layer": {
+      "type": "string",
+      "description": "Memory layer this crystal belongs to.",
+      "enum": ["episodic", "semantic", "procedural", "execution"]
+    },
+    "content_ref": {
+      "type": "string",
+      "description": "SHA-256 blob-tier address of the full content payload. REQUIRED when layer=episodic. Index→pointer→content pattern (MISSION.md §Index→pointer→content).",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Human-readable summary of the crystal content. Stored in SQLite FTS5 for BM25 recall.",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "embedding_ref": {
+      "type": "string",
+      "description": "Reference to the vector embedding in LanceDB (crystal_id key).",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "description": "Who wrote this crystal, when, and from what source.",
+      "additionalProperties": false,
+      "required": ["source", "created_at"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Trust-tier classification of the originating source.",
+          "enum": ["human", "verified_agent", "unverified_agent", "environment"]
+        },
+        "author_agent": {
+          "type": "string",
+          "description": "Eidolon or agent identifier that wrote this crystal.",
+          "minLength": 1
+        },
+        "task_id": {
+          "type": "string",
+          "description": "Task or session identifier under which this crystal was created.",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "description": "RFC 3339 timestamp when the crystal was created.",
+          "format": "date-time"
+        }
+      }
+    },
+    "trust_tier": {
+      "type": "string",
+      "description": "Trust tier at admission time. Carries through cross-agent reads and summarization (MISSION.md §Trust tier carries through). Takes MIN of all input tiers on consolidation.",
+      "enum": ["T0", "T1", "T2", "T3"]
+    },
+    "validation_state": {
+      "type": "string",
+      "description": "Current admission state of this crystal.",
+      "enum": ["validated", "unverified", "quarantined", "candidate"]
+    },
+    "scope": {
+      "type": "object",
+      "description": "Scope triple controlling access, isolation, and redaction (MISSION.md §Scope+redaction).",
+      "additionalProperties": false,
+      "required": ["project"],
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Project identifier scoping this crystal.",
+          "minLength": 1
+        },
+        "agent_class_visibility": {
+          "type": "string",
+          "description": "Which agent classes can read this crystal. null = all.",
+          "minLength": 1
+        },
+        "sensitivity_tag": {
+          "type": "string",
+          "description": "Sensitivity classification for redactor judgement.",
+          "minLength": 1
+        }
+      }
+    },
+    "temporal": {
+      "type": "object",
+      "description": "Bi-temporal validity window (MISSION.md §Updates are bi-temporal). Never hard-delete.",
+      "additionalProperties": false,
+      "required": ["t_valid_from"],
+      "properties": {
+        "t_valid_from": {
+          "type": "string",
+          "description": "RFC 3339 timestamp from which this crystal is valid.",
+          "format": "date-time"
+        },
+        "t_valid_to": {
+          "type": ["string", "null"],
+          "description": "RFC 3339 timestamp until which this crystal was valid. null = currently valid.",
+          "format": "date-time"
+        },
+        "superseded_by": {
+          "type": ["string", "null"],
+          "description": "ID of the crystal that supersedes this one. null = not superseded."
+        }
+      }
+    },
+    "utility": {
+      "type": "object",
+      "description": "Utility signals used by the importance function (FORGE D6) and Dream eviction.",
+      "additionalProperties": false,
+      "required": ["access_count", "last_access", "importance", "novelty_at_write"],
+      "properties": {
+        "access_count": {
+          "type": "integer",
+          "description": "Total number of times this crystal has been recalled.",
+          "minimum": 0
+        },
+        "last_access": {
+          "type": "string",
+          "description": "RFC 3339 timestamp of most recent recall.",
+          "format": "date-time"
+        },
+        "outcome_success_score": {
+          "type": ["number", "null"],
+          "description": "Normalised outcome success score [0, 1]. null = unscored.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "importance": {
+          "type": "number",
+          "description": "Cached importance score [0, 1] from importance_score() (FORGE D6). Recomputed by Dream.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "novelty_at_write": {
+          "type": "number",
+          "description": "Novelty score [0, 1] at the time of writing. Frozen at write time per FORGE D6 (recomputation is OQ-9).",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "description": "Lifecycle status of this crystal.",
+      "enum": ["candidate", "active", "deprecated"]
+    }
+  },
+  "if": {
+    "properties": {
+      "layer": {"const": "episodic"}
+    },
+    "required": ["layer"]
+  },
+  "then": {
+    "required": ["content_ref"]
+  }
+}
