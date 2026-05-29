@@ -106,6 +106,7 @@ class PromotionGate:
         witnesses: list[CrystalRef],
         caller_tier: Tier,
         force: bool = False,
+        k_override: int | None = None,
     ) -> PromotionResult:
         """Evaluate a Semantic promotion proposal.
 
@@ -161,7 +162,11 @@ class PromotionGate:
 
         # Check human-confirm window (G5 / D8)
         human_confirm = self._human_confirm_active()
-        k = self.config.k_corroboration
+        # W3 STC (D4): a salient nearby event may lower the corroboration bar via
+        # k_override. This ONLY changes the threshold — witnesses are still counted,
+        # the human-confirm window still applies, and record_promotion still fires.
+        # Floored at 1 so it can never bypass witness counting (never 0/force).
+        k = self.config.k_corroboration if k_override is None else max(1, int(k_override))
 
         if not human_confirm and independent_count >= k:
             log.info(

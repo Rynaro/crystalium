@@ -73,6 +73,12 @@ def _cmd_evb_gate(args: argparse.Namespace) -> dict[str, Any]:
     return run()
 
 
+def _cmd_dream_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.dream_gate import run
+
+    return run()
+
+
 def _cmd_forget(args: argparse.Namespace) -> dict[str, Any]:
     from evals.ab_memory_onoff import _build_live_handlers
     from evals.selective_forgetting import run_test
@@ -131,6 +137,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     g = sub.add_parser("evb-gate", help="deterministic EVB ablation gate (W2 DoD)")
     g.set_defaults(func=_cmd_evb_gate)
+
+    dg = sub.add_parser("dream-gate", help="deterministic Dream-intelligence ablation gate (W3 DoD)")
+    dg.set_defaults(func=_cmd_dream_gate)
 
     return p
 

@@ -442,3 +442,51 @@ class TestProcessPending:
                 (promotion_id,),
             ).fetchone()
         assert row["status"] == "rejected"
+
+
+class TestKOverride:
+    """W3 D4 — STC lowers the corroboration bar via k_override, without bypassing
+    witness counting or the human-confirm window (chokepoint-preserving)."""
+
+    def test_k_override_lowers_bar(self, gate_no_window: PromotionGate) -> None:
+        # 2 witnesses < config k=3 → would be pending; k_override=2 → admit.
+        result = gate_no_window.propose_semantic(
+            crystal=_stub_crystal(), witnesses=_make_witnesses(2),
+            caller_tier=Tier.T1, k_override=2,
+        )
+        assert result.decision == "admit"
+
+    def test_k_override_still_counts_witnesses(self, gate_no_window: PromotionGate) -> None:
+        # 1 witness < k_override=2 → still pending (override is a threshold, not a bypass).
+        result = gate_no_window.propose_semantic(
+            crystal=_stub_crystal(), witnesses=_make_witnesses(1),
+            caller_tier=Tier.T1, k_override=2,
+        )
+        assert result.decision == "pending"
+
+    def test_k_override_floored_at_one(self, gate_no_window: PromotionGate) -> None:
+        # k_override=0 floors to 1 → 1 witness admits, 0 witnesses stays pending
+        # (never bypasses witness counting → never a force).
+        assert gate_no_window.propose_semantic(
+            crystal=_stub_crystal("c-a"), witnesses=_make_witnesses(1),
+            caller_tier=Tier.T1, k_override=0,
+        ).decision == "admit"
+        assert gate_no_window.propose_semantic(
+            crystal=_stub_crystal("c-b"), witnesses=_make_witnesses(0),
+            caller_tier=Tier.T1, k_override=0,
+        ).decision == "pending"
+
+    def test_k_override_none_is_baseline(self, gate_no_window: PromotionGate) -> None:
+        # None → config k=3: 2 witnesses pending, 3 admit (byte-identical to W2).
+        assert gate_no_window.propose_semantic(
+            crystal=_stub_crystal("c-c"), witnesses=_make_witnesses(2),
+            caller_tier=Tier.T1, k_override=None,
+        ).decision == "pending"
+
+    def test_k_override_respects_human_confirm_window(self, gate_in_window: PromotionGate) -> None:
+        # Inside the human-confirm window, even a lowered k stays pending.
+        result = gate_in_window.propose_semantic(
+            crystal=_stub_crystal(), witnesses=_make_witnesses(3),
+            caller_tier=Tier.T1, k_override=1,
+        )
+        assert result.decision == "pending"

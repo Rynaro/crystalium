@@ -228,6 +228,12 @@ def dream(force: bool, config_path: Optional[Path]) -> None:
         gate=gate,
         importance_fn=_select_importance_fn(config),
         persist_dynamics=config.evb_enabled,
+        replay_evb=config.dream_replay_evb,
+        interleave=config.dream_interleave,
+        interleave_ratio=config.dream_interleave_ratio,
+        stc=config.dream_stc,
+        stc_threshold=config.stc_threshold,
+        stc_window_s=config.stc_window_s,
     )
 
     if force:

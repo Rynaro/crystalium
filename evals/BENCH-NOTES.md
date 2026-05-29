@@ -141,3 +141,38 @@ Flipping was NOT done unilaterally — redefining the gate to manufacture a win
 would violate "never massage a metric". Also note EVB's product is systematically
 lower-scaled than the additive sum, so eviction thresholds likely want
 recalibration for the EVB scale (a W4 forgetting-faculty concern).
+
+## W3 Dream-intelligence gate (`evals/dream_gate.py`) — INCONCLUSIVE, all flags OFF
+
+`docker run --rm crystalium:dev python -m evals dream-gate`. A deterministic
+labeled-fact population (3 fact groups with ≥k=3 independent witnesses + a
+2-witness STC group, a FakeGraph linking each group) runs through the real
+gather→consolidate→prune pipeline in two arm-pairs.
+
+| Gate | axis | on | off | delta |
+|---|---|---|---|---|
+| (i) replay+interleave vs chrono | consolidation_gain | 1 | 1 | 0 |
+| | semantic_drift | 0.0 | 0.0 | 0.0 |
+| (ii) STC off vs on | useful_context_retention | 1.0 | 1.0 | 0.0 |
+| | consolidation_gain | 1 | 1 | 0 |
+
+**Verdict: no augment strictly beats baseline ⇒ `dream_replay_evb`,
+`dream_interleave`, `dream_stc` all stay OFF (default).** Honest null, not a
+regression — every augment ships behind its off flag, fully tested; the gate is
+now *evaluable* (metrics defined, no longer null).
+
+**Why the tie (root cause + [GAP] for a later wave):** v0.1 `_gather`
+(`worker.py:252`) collapses seeds + graph-neighbours into a *single mixed
+cluster*, so consolidation count is ~1 regardless of replay ordering; the mixed
+cluster already carries ≥k witnesses, so STC's lowered `k_override` changes
+nothing; summaries fit in the 512-char join so drift is 0; and nothing is pruned
+so context retention is 1.0. The augments are correct and gated, but the coarse
+single-cluster `_gather` can't *exercise* per-fact consolidation dynamics. A
+later wave should refine `_gather` to emit **per-topic clusters** (so replay
+ordering, interleave, and STC each have a measurable surface) and re-run this
+gate. Until then all W3 flags remain OFF.
+
+**Measurement note:** consolidation gain is measured as the *admitted-
+consolidation count*, NOT semantic-row growth — the Dream **proposes** (the gate
+admits + records a promotion) but `_consolidate` never inserts the semantic
+crystal, so row-count growth is structurally 0.

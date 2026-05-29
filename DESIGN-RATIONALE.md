@@ -106,6 +106,30 @@ This document traces every non-obvious decision in CRYSTALIUM v0.1.0 to its sour
 
 ---
 
+### D6.2. The Dream Becomes Intelligent — W3 (v0.4.0)
+
+**Decision:** Four neuro-inspired augments to the Dream worker's consolidation, each behind its **own default-OFF flag** (the Dream still only PROPOSES via `gate.propose_semantic`; admission stays in the gate):
+1. **Prioritized replay** (`dream_replay_evb`) — order the consolidation queue by EVB (reverse replay of high-Gain episodes) in `_gather`.
+2. **Interleaved replay** (`dream_interleave` + `dream_interleave_ratio`) — mix a sampled ratio of existing semantic facts into each batch.
+3. **Synaptic tagging & capture** (`dream_stc` + `stc_threshold` + `stc_window_s`) — a salient (EVB ≥ threshold) episode lowers the corroboration bar for nearby-in-time episodes via a new chokepoint-preserving `k_override` on the gate (floored at 1; never `force`).
+4. **Abstraction metric** (log-only) — `compression_ratio` per consolidation; ratio ≈ 1 flags a promotion that didn't generalize.
+
+**Rationale:**
+- **Prioritized replay** — Mattar & Daw 2018 (*Nat Neurosci* 21:1609; **[verified]**): replay ordered by EVB, reverse replay propagating new outcomes backward.
+- **Complementary Learning Systems** — McClelland, McNaughton & O'Reilly 1995 (*Psych Review*); Kumaran, Hassabis & McClelland 2016 (*TICS*) **[verified]**: interleave new with old to avoid catastrophic interference in the semantic store.
+- **Synaptic tagging & capture** — Frey & Morris 1997 (*Nature* 385:533) **[verified]**; behavioral tagging (Moncada & Viola 2007): a salient event lets nearby weak memories consolidate too.
+- **Abstraction / active forgetting** — Borges 1942 ("Funes"); a promotion that doesn't compress isn't consolidation — measure it.
+
+**Stance — ablation-as-arbiter:** every augment ships OFF and flips on only if `python -m evals dream-gate` shows it strictly beating chronological/baseline on its named metric (gain↑ & drift not-worse; STC: context-retention↑ without precision regression). **W3 gate result: INCONCLUSIVE — all flags stay OFF** (see `evals/BENCH-NOTES.md`): the coarse single-cluster `_gather` can't yet exercise per-fact dynamics; a later wave refines clustering and re-gates.
+
+**[PROXY]** compression_ratio uses summary length (worker has no blob_store dep). **[PROXY]** "interleaving prevents forgetting" measured via retention/gain, not synaptic interference. **[DISPUTED]** mapping "synaptic tag" → "lowered promotion threshold" is a *functional* analogy, not literal protein-synthesis capture.
+
+**Reversibility:** all behaviour is flag-gated; flags default OFF reproduce W2 byte-identically.
+
+**Source:** `roadmap-v1/W3-dream-intelligence.md`; Mattar & Daw 2018, McClelland 1995, Kumaran/Hassabis/McClelland 2016, Frey & Morris 1997 [all verified].
+
+---
+
 ### D7. Cross-cutting trust-tier propagation
 
 **Decision:** Consolidated tier = MIN(inputs.tier). Admission checks `consolidated.tier ≤ layer.ceiling`. T3 input → Semantic admission denied. Error message: structured advice "exclude T3 inputs or commit to Episodic instead."

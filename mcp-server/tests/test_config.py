@@ -252,3 +252,42 @@ class TestEvbFlag:
         })
         assert cfg.evb_enabled is True
         assert cfg.evb_gain_weights == (0.4, 0.4, 0.2)
+
+
+class TestDreamFlags:
+    """W3 Dream-intelligence flags (default OFF — ablation-or-revert)."""
+
+    def test_dream_flags_off_by_default(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.dream_replay_evb is False
+        assert cfg.dream_interleave is False
+        assert cfg.dream_stc is False
+        assert cfg.dream_interleave_ratio == 0.5
+        assert cfg.stc_threshold == 0.5
+        assert cfg.stc_window_s == 3600
+
+    def test_dream_flags_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_DREAM_REPLAY_EVB", "true")
+        monkeypatch.setenv("CRYSTALIUM_DREAM_INTERLEAVE", "true")
+        monkeypatch.setenv("CRYSTALIUM_DREAM_INTERLEAVE_RATIO", "0.25")
+        monkeypatch.setenv("CRYSTALIUM_DREAM_STC", "true")
+        monkeypatch.setenv("CRYSTALIUM_STC_WINDOW_S", "120")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.dream_replay_evb is True
+        assert cfg.dream_interleave is True
+        assert cfg.dream_interleave_ratio == 0.25
+        assert cfg.dream_stc is True
+        assert cfg.stc_window_s == 120
+
+    def test_dream_flags_from_dict(self) -> None:
+        cfg = Config._from_dict({
+            "dream_replay_evb": True,
+            "dream_interleave_ratio": 0.1,
+            "stc_threshold": 0.7,
+            "stc_window_s": 60,
+        })
+        assert cfg.dream_replay_evb is True
+        assert cfg.dream_interleave_ratio == 0.1
+        assert cfg.stc_threshold == 0.7
+        assert cfg.stc_window_s == 60
