@@ -82,6 +82,13 @@ CREATE TABLE IF NOT EXISTS pending_promotions (
     status      TEXT NOT NULL DEFAULT 'pending'  -- pending | accepted | rejected
 );
 
+CREATE TABLE IF NOT EXISTS promotions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    crystal_id  TEXT NOT NULL,
+    gate        TEXT NOT NULL,    -- semantic | procedural
+    ts          TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tool_calls (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     tool        TEXT NOT NULL,
@@ -295,6 +302,48 @@ class RelationalStore:
             )
             conn.commit()
         return True
+
+    # ------------------------------------------------------------------
+    # W2 instrumentation — promotions ledger + dynamics snapshots
+    # ------------------------------------------------------------------
+
+    def record_promotion(self, crystal_id: str, gate: str, *, now: datetime) -> None:
+        """Append a promotion-ledger row (every auto-admit). Net-new in W2."""
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO promotions (crystal_id, gate, ts) VALUES (?, ?, ?)",
+                (crystal_id, gate, now.isoformat()),
+            )
+            conn.commit()
+
+    def list_promotions(self) -> list[dict[str, Any]]:
+        """All promotion-ledger rows (crystal_id, gate, ts)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT crystal_id, gate, ts FROM promotions ORDER BY id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_crystals_with_dynamics(self) -> list[dict[str, Any]]:
+        """Per-crystal snapshot for the W2 bench axes: id, layer, status,
+        access_count, outcome_success_score, and persisted evb."""
+        out: list[dict[str, Any]] = []
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, layer, status, utility, memory_dynamics FROM crystals"
+            ).fetchall()
+        for r in rows:
+            util = _from_json(r["utility"]) if r["utility"] else {}
+            md = _from_json(r["memory_dynamics"]) if r["memory_dynamics"] else {}
+            out.append({
+                "id": r["id"],
+                "layer": r["layer"],
+                "status": r["status"],
+                "access_count": int(util.get("access_count", 0)),
+                "outcome_success_score": util.get("outcome_success_score"),
+                "evb": md.get("evb") if isinstance(md, dict) else None,
+            })
+        return out
 
     # ------------------------------------------------------------------
     # BM25 / FTS5 search

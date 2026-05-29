@@ -73,6 +73,8 @@ def _build_null_handlers() -> dict[str, Any]:
         "row_count": lambda layer: 0,
         "dream_queue_len": lambda: 0,
         "trigger_idle_poll": lambda: None,
+        "list_promotions": lambda: [],
+        "list_crystals_with_dynamics": lambda: [],
     }
 
 
@@ -170,6 +172,18 @@ def _build_live_handlers(config_override: Optional[dict[str, Any]] = None) -> di
         except Exception:
             return None
 
+    def _list_promotions() -> list[dict[str, Any]]:
+        try:
+            return relational.list_promotions()
+        except Exception:
+            return []
+
+    def _list_crystals_with_dynamics() -> list[dict[str, Any]]:
+        try:
+            return relational.list_crystals_with_dynamics()
+        except Exception:
+            return []
+
     return {
         "recall": _recall,
         "commit": _commit,
@@ -179,6 +193,8 @@ def _build_live_handlers(config_override: Optional[dict[str, Any]] = None) -> di
         "row_count": _row_count,
         "dream_queue_len": _dream_queue_len,
         "trigger_idle_poll": _trigger_idle_poll,
+        "list_promotions": _list_promotions,
+        "list_crystals_with_dynamics": _list_crystals_with_dynamics,
     }
 
 
@@ -192,13 +208,15 @@ def _run_arm(
     project_prefix: str = "canary",
     config_override: Optional[dict[str, Any]] = None,
     seed_fixture: bool = False,
+    return_handlers: bool = False,
 ) -> dict[str, MissionResult]:
     """Run all 10 missions in one arm. Returns mission_id -> MissionResult.
 
     config_override is merged into the live-arm Config (previously it was
     dropped); the per-run project scope is always injected. When seed_fixture is
     True the deterministic fixture repo is committed before missions run, giving
-    both arms the same known baseline.
+    both arms the same known baseline. When return_handlers is True, returns
+    (results, handlers) so the caller can read post-run store snapshots (W2 axes).
     """
     run_id = str(uuid.uuid4())[:8]
     project = f"{project_prefix}-{'on' if memory_on else 'off'}-{run_id}"
@@ -218,7 +236,7 @@ def _run_arm(
                     observed={}, expected={},
                     error=f"live_handler_build_failed: {exc}",
                 )
-            return results
+            return (results, {}) if return_handlers else results
     else:
         handlers = _build_null_handlers()
 
@@ -244,7 +262,7 @@ def _run_arm(
             )
         results[result.mission_id] = result
 
-    return results
+    return (results, handlers) if return_handlers else results
 
 
 # ---------------------------------------------------------------------------
