@@ -356,6 +356,7 @@ def _build_components(
         redactor=redactor,
         importance_fn=importance_fn,
         composer=composer,
+        persist_dynamics=config.evb_enabled,
     )
 
     worker = DreamWorker(
@@ -769,6 +770,21 @@ def _handle_update(
             f"Crystal not found: {crystal_id!r}",
             reason_code="CRYSTAL_NOT_FOUND",
         )
+
+    # W2 outcome event: an outcome-only patch records utility.outcome_success_score
+    # IN PLACE (a fact about the existing crystal — not a bi-temporal supersession).
+    # Feeds EVB's Gain term + promotion precision; EVB refreshes on the next
+    # recall/Dream recompute.
+    if "outcome_success_score" in patch and set(patch.keys()) <= {"outcome_success_score"}:
+        import datetime as _dt
+
+        score = float(patch["outcome_success_score"])
+        relational.record_outcome(crystal_id, score, now=_dt.datetime.now(_dt.timezone.utc))
+        return {
+            "status": "outcome_recorded",
+            "id": crystal_id,
+            "outcome_success_score": score,
+        }
 
     layer = existing.get("layer", "episodic")
     log.info("update_dispatch", crystal_id=crystal_id, layer=layer, reason=reason)

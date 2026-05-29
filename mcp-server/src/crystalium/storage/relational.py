@@ -272,6 +272,30 @@ class RelationalStore:
             conn.commit()
         return True
 
+    def record_outcome(self, crystal_id: str, score: float, *, now: datetime) -> bool:
+        """Set utility.outcome_success_score in-place (W2 outcome event).
+
+        An outcome is an in-place fact about an existing crystal — NOT a
+        bi-temporal supersession. Feeds EVB's Gain term + promotion precision.
+        EVB is refreshed on the next recall/Dream recompute. Returns False if
+        the crystal does not exist.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT utility FROM crystals WHERE id = ?", (crystal_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            util = _from_json(row["utility"]) if row["utility"] else {}
+            util["outcome_success_score"] = float(score)
+            util["last_access"] = now.isoformat()
+            conn.execute(
+                "UPDATE crystals SET utility = ?, updated_at = ? WHERE id = ?",
+                (_to_json(util), _now_iso(), crystal_id),
+            )
+            conn.commit()
+        return True
+
     # ------------------------------------------------------------------
     # BM25 / FTS5 search
     # ------------------------------------------------------------------
