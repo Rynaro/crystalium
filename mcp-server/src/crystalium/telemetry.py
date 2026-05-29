@@ -8,6 +8,7 @@ No enforcement logic here — that lives in enforcement.py (W2).
 
 from __future__ import annotations
 
+import math
 import time
 from contextlib import contextmanager
 from typing import Any, Generator
@@ -149,7 +150,70 @@ def record_call(
             if k not in fields:
                 fields[k] = v
 
+    _record_latency(tool, latency_ms)
     log.info("tool_call", **fields)
+
+
+# ---------------------------------------------------------------------------
+# Latency aggregation + panels
+#
+# A bounded in-memory sample store fed by record_call(). Used to emit per-tool
+# latency panels (p50/p95/p99) and the recall-p95 panel that the W8 availability
+# SLO depends on. In-process only; degrades to empty panels with no samples.
+# ---------------------------------------------------------------------------
+
+_MAX_SAMPLES = 2048
+_latency_samples: dict[str, list[float]] = {}
+
+
+def _record_latency(tool: str, latency_ms: float) -> None:
+    """Append a latency sample for *tool*, bounded to the most recent N."""
+    buf = _latency_samples.setdefault(tool, [])
+    buf.append(latency_ms)
+    if len(buf) > _MAX_SAMPLES:
+        del buf[0 : len(buf) - _MAX_SAMPLES]
+
+
+def latency_percentile(tool: str, p: float) -> float | None:
+    """Nearest-rank pth-percentile latency (ms) for *tool*, or None if no samples."""
+    buf = sorted(_latency_samples.get(tool, []))
+    if not buf:
+        return None
+    rank = int(math.ceil((p / 100.0) * len(buf)))
+    idx = min(max(rank, 1), len(buf)) - 1
+    return round(buf[idx], 2)
+
+
+def recall_p95() -> float | None:
+    """Recall p95 latency (ms) — the W8 availability-SLO panel metric."""
+    return latency_percentile("crystalium.recall", 95)
+
+
+def latency_panel() -> dict[str, dict[str, Any]]:
+    """Build a per-tool latency panel: count + p50/p95/p99 (ms)."""
+    panel: dict[str, dict[str, Any]] = {}
+    for tool, buf in _latency_samples.items():
+        if not buf:
+            continue
+        panel[tool] = {
+            "count": len(buf),
+            "p50_ms": latency_percentile(tool, 50),
+            "p95_ms": latency_percentile(tool, 95),
+            "p99_ms": latency_percentile(tool, 99),
+        }
+    return panel
+
+
+def emit_latency_panel() -> dict[str, dict[str, Any]]:
+    """Log the latency panel (recall/commit/forget/dream) + recall p95. Returns it."""
+    panel = latency_panel()
+    log.info("latency_panel", panel=panel, recall_p95_ms=recall_p95())
+    return panel
+
+
+def reset_latency_samples() -> None:
+    """Clear all latency samples (test isolation / panel reset)."""
+    _latency_samples.clear()
 
 
 # ---------------------------------------------------------------------------

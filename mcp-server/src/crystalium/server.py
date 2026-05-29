@@ -52,6 +52,7 @@ from crystalium.storage.blob import BlobStore
 from crystalium.storage.graph import GraphStore
 from crystalium.storage.relational import RelationalStore
 from crystalium.storage.vector import VectorStore
+from crystalium.telemetry import emit_latency_panel, record_call, tool_span
 from crystalium.trust import Tier
 
 log = structlog.get_logger("crystalium.server")
@@ -452,80 +453,103 @@ async def run_stdio(config: Config) -> None:
     async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         caller = _extract_caller_identity()
         caller_tier = _caller_tier(caller)
+        tier_str = getattr(caller_tier, "name", str(caller_tier))
         t0 = time.monotonic()
         run_dir = config.data_dir / "runs" / str(uuid.uuid4())
+        layer_hint: str | None = None
 
         try:
             enforcement.assert_rate_limit()
 
-            if name == "crystalium.recall":
-                result = _handle_recall(arguments, aetheryte, scheduler, caller_tier)
-                scheduler.record_activity()
-                result_bytes = json.dumps(
-                    result if isinstance(result, dict) else result.model_dump(),
-                    default=str,
-                ).encode()
-                _emit_ecl_sidecar(name, result_bytes, "recall-result", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+            # One OTel span per tool call (telemetry.tool_span); per-call latency
+            # is recorded once on the success path below and once on the error
+            # path. Layer/tool-specific telemetry inside the layers/dream worker
+            # is preserved and nests under this span.
+            with tool_span(name, tier=tier_str):
+                performative = "INFORM"
+                if name == "crystalium.recall":
+                    result = _handle_recall(arguments, aetheryte, scheduler, caller_tier)
+                    scheduler.record_activity()
+                    result_bytes = json.dumps(
+                        result if isinstance(result, dict) else result.model_dump(),
+                        default=str,
+                    ).encode()
+                    artifact_kind = "recall-result"
 
-            elif name == "crystalium.commit":
-                result = _handle_commit(arguments, episodic, semantic, procedural, execution, caller_tier)
-                scheduler.record_activity()
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "commit-result", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.commit":
+                    layer_hint = arguments.get("layer")
+                    result = _handle_commit(arguments, episodic, semantic, procedural, execution, caller_tier)
+                    scheduler.record_activity()
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "commit-result"
 
-            elif name == "crystalium.update":
-                result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, relational, caller_tier)
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "commit-result", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.update":
+                    layer_hint = arguments.get("layer")
+                    result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, relational, caller_tier)
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "commit-result"
 
-            elif name == "crystalium.skill_invoke":
-                result = _handle_skill_invoke(arguments, procedural, enforcement, config, caller_tier)
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "skill-result", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.skill_invoke":
+                    layer_hint = "procedural"
+                    result = _handle_skill_invoke(arguments, procedural, enforcement, config, caller_tier)
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "skill-result"
 
-            elif name == "crystalium.plan_checkpoint":
-                result = execution.checkpoint(
-                    state=arguments.get("state", {}),
-                    caller_tier=caller_tier,
-                )
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "plan-checkpoint", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.plan_checkpoint":
+                    layer_hint = "execution"
+                    result = execution.checkpoint(
+                        state=arguments.get("state", {}),
+                        caller_tier=caller_tier,
+                    )
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "plan-checkpoint"
 
-            elif name == "crystalium.plan_replan":
-                result = execution.replan(
-                    diff=arguments.get("diff", {}),
-                    caller_tier=caller_tier,
-                )
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "plan-replan", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.plan_replan":
+                    layer_hint = "execution"
+                    result = execution.replan(
+                        diff=arguments.get("diff", {}),
+                        caller_tier=caller_tier,
+                    )
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "plan-replan"
 
-            elif name == "crystalium.session_end":
-                result = _handle_session_end(arguments, scheduler)
-                result_bytes = json.dumps(result, default=str).encode()
+                elif name == "crystalium.session_end":
+                    result = _handle_session_end(arguments, scheduler)
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "session-end-receipt"
+                    performative = "ACKNOWLEDGE"
+                    # Surface the recall/commit/forget/dream latency panels +
+                    # recall p95 (W8 SLO) at the close of the session.
+                    emit_latency_panel()
+
+                else:
+                    from crystalium.enforcement import CrystaliumEnforcementError
+                    raise CrystaliumEnforcementError(
+                        f"Unknown tool {name!r}.",
+                        reason_code="UNKNOWN_TOOL",
+                    )
+
                 _emit_ecl_sidecar(
-                    name, result_bytes, "session-end-receipt", run_dir, caller,
-                    performative="ACKNOWLEDGE",
+                    name, result_bytes, artifact_kind, run_dir, caller,
+                    performative=performative,
                 )
-                return [TextContent(type="text", text=result_bytes.decode())]
 
-            else:
-                from crystalium.enforcement import CrystaliumEnforcementError
-                raise CrystaliumEnforcementError(
-                    f"Unknown tool {name!r}.",
-                    reason_code="UNKNOWN_TOOL",
-                )
+            latency_ms = (time.monotonic() - t0) * 1000
+            record_call(
+                tool=name, layer=layer_hint, tier=tier_str,
+                result="ok", latency_ms=latency_ms,
+            )
+            return [TextContent(type="text", text=result_bytes.decode())]
 
         except Exception as exc:
             latency_ms = (time.monotonic() - t0) * 1000
             outcome = "rejected" if hasattr(exc, "reason_code") else "error"
             error_code = getattr(exc, "reason_code", type(exc).__name__)
             enforcement.record(name, None, caller_tier, None, outcome, latency_ms, error=error_code)
+            record_call(
+                tool=name, layer=layer_hint, tier=tier_str,
+                result=outcome, latency_ms=latency_ms, error=error_code,
+            )
             log.exception("tool_error", tool=name, error=str(exc))
             err_payload: dict[str, Any] = {
                 "error": error_code,
