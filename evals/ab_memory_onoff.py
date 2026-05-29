@@ -191,14 +191,23 @@ def _run_arm(
     memory_on: bool,
     project_prefix: str = "canary",
     config_override: Optional[dict[str, Any]] = None,
+    seed_fixture: bool = False,
 ) -> dict[str, MissionResult]:
-    """Run all 10 missions in one arm. Returns mission_id -> MissionResult."""
+    """Run all 10 missions in one arm. Returns mission_id -> MissionResult.
+
+    config_override is merged into the live-arm Config (previously it was
+    dropped); the per-run project scope is always injected. When seed_fixture is
+    True the deterministic fixture repo is committed before missions run, giving
+    both arms the same known baseline.
+    """
     run_id = str(uuid.uuid4())[:8]
     project = f"{project_prefix}-{'on' if memory_on else 'off'}-{run_id}"
 
     if memory_on:
         try:
-            handlers = _build_live_handlers(config_override={"project": project})
+            live_override = dict(config_override or {})
+            live_override["project"] = project
+            handlers = _build_live_handlers(config_override=live_override)
         except Exception as exc:
             # If live handlers fail to build (e.g. missing deps), return all failures
             results: dict[str, MissionResult] = {}
@@ -214,6 +223,10 @@ def _run_arm(
         handlers = _build_null_handlers()
 
     env = CanaryEnv(memory_on=memory_on, project=project, handlers=handlers)
+
+    if seed_fixture:
+        from evals.fixture_repo import seed_fixture_repo
+        seed_fixture_repo(env)
 
     results = {}
     for mission_fn in MISSIONS:

@@ -1,0 +1,49 @@
+{
+  "fixture_version": "1",
+  "project": "fixture-acme",
+  "description": "Deterministic seeded fixture repo for the W1 ablation bench. Stable ids, fixed order. Seeded into the live arm before missions run so the store has a known baseline. No timestamps/random data — byte-stable across loads.",
+  "crystals": [
+    {
+      "id": "fx-0001",
+      "layer": "semantic",
+      "summary": "fixture-acme authenticates users with argon2id password hashing",
+      "content": "The fixture-acme service hashes passwords with argon2id (memory=64MB, iterations=3). Migrated off bcrypt in release 2.0.",
+      "trust_tier": "T1"
+    },
+    {
+      "id": "fx-0002",
+      "layer": "semantic",
+      "summary": "fixture-acme uses PostgreSQL 16 as the primary datastore",
+      "content": "Primary datastore is PostgreSQL 16. Connection pooling via pgbouncer in transaction mode.",
+      "trust_tier": "T1"
+    },
+    {
+      "id": "fx-0003",
+      "layer": "semantic",
+      "summary": "fixture-acme deploys via blue-green on Kubernetes",
+      "content": "Deployment strategy is blue-green on Kubernetes; traffic shifted by updating the active Service selector.",
+      "trust_tier": "T1"
+    },
+    {
+      "id": "fx-0004",
+      "layer": "semantic",
+      "summary": "fixture-acme API rate limit is 200 requests per minute per token",
+      "content": "Public API enforces a 200 req/min per-token sliding-window rate limit; 429 on exceed.",
+      "trust_tier": "T1"
+    },
+    {
+      "id": "fx-0005",
+      "layer": "procedural",
+      "summary": "fixture-acme release checklist runs the full test suite then tags vN",
+      "content": "Release procedure: run full suite, bump version, tag vN, push image to registry, blue-green cutover.",
+      "trust_tier": "T1"
+    },
+    {
+      "id": "fx-0006",
+      "layer": "semantic",
+      "summary": "fixture-acme uses Conventional Commits for all changes",
+      "content": "All commits follow Conventional Commits; CI rejects non-conforming subjects on protected branches.",
+      "trust_tier": "T1"
+    }
+  ]
+}
