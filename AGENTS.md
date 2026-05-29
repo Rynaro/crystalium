@@ -297,3 +297,9 @@ Until v0.2, no versioned releases are published; the repo is a development tree.
 - **atlas-aci** (Rynaro/atlas-aci) — reference implementation of enforcement.py pattern.
 - **EIIS v1.4** (Rynaro/eidolons-eiis) — install contract conformance.
 - **ECL v2.0** (Rynaro/eidolons-ecl) — envelope wire format.
+
+<!-- eidolon:dispatch-pointer start -->
+## Eidolons
+
+This project uses [Eidolons](https://github.com/Rynaro/eidolons). The canonical agent dispatch table, methodology references, and per-Eidolon hand-off contracts live at [`./EIDOLONS.md`](./EIDOLONS.md). Read that file first before responding to any prompt that mentions an Eidolon or matches a TRANCE complexity signal.
+<!-- eidolon:dispatch-pointer end -->
