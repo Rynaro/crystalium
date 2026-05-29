@@ -141,6 +141,21 @@ class Config:
     evb_gain_weights: tuple[float, float, float] = (0.5, 0.3, 0.2)
     evb_need_weights: tuple[float, float, float] = (0.5, 0.3, 0.2)
 
+    # Dream intelligence (W3) — each augment behind its own flag, default OFF
+    # (ablation-or-revert). The Dream still only PROPOSES through the gate.
+    # dream_replay_evb realizes the roadmap's "dream.replay=evb": order the
+    # consolidation queue by EVB (reverse replay of high-Gain episodes).
+    dream_replay_evb: bool = False
+    # Interleaved replay (Complementary Learning Systems): mix a sampled ratio of
+    # existing semantic facts into each consolidation batch to resist interference.
+    dream_interleave: bool = False
+    dream_interleave_ratio: float = 0.5
+    # Synaptic tagging & capture: a salient (EVB >= stc_threshold) episode lowers
+    # the promotion threshold (k_override) for episodes within stc_window_s.
+    dream_stc: bool = False
+    stc_threshold: float = 0.5
+    stc_window_s: int = 3600
+
     # Rate limiting (P0-7, atlas-aci pattern)
     rate_limit_per_minute: int = 200
 
@@ -215,6 +230,12 @@ class Config:
             or "sentence-transformers",
             rate_limit_per_minute=_env_int("CRYSTALIUM_RATE_LIMIT_PER_MINUTE", 200),
             evb_enabled=_env_bool("CRYSTALIUM_EVB_ENABLED", False),
+            dream_replay_evb=_env_bool("CRYSTALIUM_DREAM_REPLAY_EVB", False),
+            dream_interleave=_env_bool("CRYSTALIUM_DREAM_INTERLEAVE", False),
+            dream_interleave_ratio=_env_float("CRYSTALIUM_DREAM_INTERLEAVE_RATIO", 0.5),
+            dream_stc=_env_bool("CRYSTALIUM_DREAM_STC", False),
+            stc_threshold=_env_float("CRYSTALIUM_STC_THRESHOLD", 0.5),
+            stc_window_s=_env_int("CRYSTALIUM_STC_WINDOW_S", 3600),
         )
 
     @classmethod
@@ -232,7 +253,10 @@ class Config:
             if simple in data:
                 kwargs[simple] = data[simple]
 
-        for bool_field in ("http_json_response", "http_stateless", "evb_enabled"):
+        for bool_field in (
+            "http_json_response", "http_stateless", "evb_enabled",
+            "dream_replay_evb", "dream_interleave", "dream_stc",
+        ):
             if bool_field in data:
                 kwargs[bool_field] = bool(data[bool_field])
 
@@ -253,11 +277,16 @@ class Config:
             "human_confirm_default_window_days",
             "rate_limit_per_minute",
             "total_cap",
+            "stc_window_s",
         ):
             if int_field in data:
                 kwargs[int_field] = int(data[int_field])
 
-        for float_field in ("importance_recency_halflife_days",):
+        for float_field in (
+            "importance_recency_halflife_days",
+            "dream_interleave_ratio",
+            "stc_threshold",
+        ):
             if float_field in data:
                 kwargs[float_field] = float(data[float_field])
 
