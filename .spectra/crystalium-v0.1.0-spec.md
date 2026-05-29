@@ -701,16 +701,16 @@ Ten missions. Each has `scenario`, `oracle`, `pass criterion`. The headline A/B 
 |---|---|---|---|---|
 | CAN-1 | recall_hit_across_sessions | Commit a fact in session A; recall in fresh session B with the same scope. | Memory-off returns nothing relevant; memory-on returns the committed crystal in top-3. | Memory-on `mrr@3 > 0` AND memory-off `mrr@3 == 0` |
 | CAN-2 | promote_gate_T3_blocked | T3 caller attempts `commit(layer=Semantic)`. | `TierViolation` raised; no store write. | G1 test_anchor passes + no row inserted in semantic store |
-| CAN-3 | promote_gate_T2_procedural_candidate | T2 caller commits Procedural; later T1 caller runs `skill_invoke`; verifier passes. | Candidate → admitted. | G2 + G3 test_anchors pass end-to-end |
-| CAN-4 | poisoning_resistance_T3_summarization | Summarizer ingests {T1, T2, T3} and tries to commit to Semantic. | Admission rejected with `TierCeilingViolation`; advice surfaced. | G4 test_anchor passes; structured advice present in error payload |
-| CAN-5 | selective_forget_bi_temporal | Update a fact: invalidate-old + write-new with `superseded_by`. | Old record present with `t_valid_to`; new record visible; no hard-delete. | Bi-temporal integrity assertion in `test_layers_semantic.py` |
-| CAN-6 | multi_agent_isolation | Two agent_class_visibility scopes commit overlapping facts; recall from scope A does not return scope B's crystal. | Scope isolation honoured. | Recall result for scope A contains zero scope-B crystals |
-| CAN-7 | procedural_verifier_pass | Submit a Procedural skill with a failing verifier; admission denied. Resubmit with passing verifier; admission granted. | G3 path exercised. | Both branches' test_anchors pass |
+| CAN-3 | poisoning_resistance_t3_episodic_only | T3 tool-origin content is committed and attempts to reach Semantic. | T3 content stays Episodic-quarantined; never promoted to Semantic. | Quarantine/tier test_anchor passes; no T3-origin row reaches the semantic store |
+| CAN-4 | selective_forget_superseded | Update a fact (e.g. bcrypt → argon2): invalidate-old + write-new with `superseded_by`. | Default recall returns the new crystal; old remains with `t_valid_to`; no hard-delete. | Bi-temporal integrity + `superseded_by` correct (`evals/selective_forgetting.py`) |
+| CAN-5 | multi_agent_isolation | Two agent_class_visibility scopes commit overlapping facts; recall from scope A does not return scope B's crystal. | Scope isolation honoured. | Recall result for scope A contains zero scope-B crystals |
+| CAN-6 | procedural_verifier_required | Submit a Procedural skill without a verifier; then resubmit with a passing verifier. | No-verifier stays candidate; passing verifier → shared. | G3 path exercised; both branches' test_anchors pass |
+| CAN-7 | bitemporal_correctness | Update a crystal; inspect bi-temporal fields on the superseded record. | `t_valid_to` + `superseded_by` set on the old record; no hard-delete. | Bi-temporal correctness assertion (`test_bitemporal.py`) |
 | CAN-8 | working_set_budget_invariant | Compose with overload set 3× cap. | Composer enforces per-slot + 3500 total caps; eviction deterministic. | G6 test_anchor passes |
 | CAN-9 | ecl_envelope_conformance | Recall + commit + update all emit valid envelopes. | All three envelopes validate against `envelope.v2.json`; SHA-256 matches. | G7 test_anchor passes; jsonschema validation green |
 | CAN-10 | dream_dedup | Trigger session_end + idle-poll + event-count concurrently. | Exactly one Dream run enqueued. | G8 test_anchor passes |
 
-**Headline A/B metric.** For each of CAN-1, CAN-3, CAN-5, CAN-6 (the four with a memory-on vs memory-off question), run both arms. Pass rate = (arms where memory-on strictly beats memory-off) / (arms tested). Target ≥ 0.80. If below, report as `[UNVERIFIED — memory does not measurably help on this canary set]` per `MISSION.md:163`.
+**Headline A/B metric.** For each of CAN-1, CAN-3, CAN-4, CAN-5 (the four `ab_arm` missions), run both arms. Pass rate = (arms where memory-on strictly beats memory-off) / (arms tested). Target ≥ 0.80. If below, report as `[UNVERIFIED — memory does not measurably help on this canary set]` per `MISSION.md:163`. The A/B membership is owned by `evals/missions.py` `AB_ARM_MISSION_IDS` (the single source of truth); this table mirrors it. Reconciled in v0.2.0 — see `evals/BENCH-NOTES.md`.
 
 ---
 

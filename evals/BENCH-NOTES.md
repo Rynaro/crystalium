@@ -36,19 +36,33 @@ the ablation-or-revert rule. Strengthening the missions with genuinely
 memory-dependent oracles is later-wave work; W1 only builds the measurement
 spine and reproduces the baseline.
 
-## [DISPUTED] DECISION-2 — A/B arm-set drift (tracked, NOT changed in W1)
+## DECISION-2 — A/B arm-set drift — RECONCILED (spec → code) in v0.2.0
 
-The A/B arm set disagrees between code and the frozen spec:
+The A/B arm set previously disagreed between code and the spec, and the two also
+numbered missions CAN-3…CAN-7 differently. Reconciled **spec → code** (code is
+the running reality; preserves the v0.1 parity baseline):
 
-| Source | A/B arms |
-|---|---|
-| code (`evals/missions.py:AB_ARM_MISSION_IDS`) | `{CAN-1, CAN-3, CAN-4, CAN-5}` |
-| spec (`.spectra/crystalium-v0.1.0-spec.md:713`) | `{CAN-1, CAN-3, CAN-5, CAN-6}` |
+- **Single source of truth:** `evals/missions.py` `AB_ARM_MISSION_IDS = {CAN-1,
+  CAN-3, CAN-4, CAN-5}` (the four `ab_arm` missions: recall-across-sessions,
+  poisoning-resistance, selective-forget, multi-agent-isolation).
+- `.spectra/crystalium-v0.1.0-spec.md` §13 and `.spectra/crystalium-v0.1.0-spec.yaml`
+  `canary_missions` + `headline_ab_metric` were rewritten so their CAN-3…CAN-7
+  identities and `ab_arm` flags match the code, and the headline now reads
+  `{CAN-1, CAN-3, CAN-4, CAN-5}`.
 
-Note the code and spec also number missions differently (code CAN-4 =
-selective-forget, CAN-5 = multi-agent-isolation). W1 **keeps the code set** as
-the reproduction baseline (DECISION-2) so it proves v0.1 parity, and logs the
-drift here. Reconcile in a later wave before the roster consumes the headline.
+Code↔(old spec) mission-numbering map, for anyone reading pre-v0.2.0 history:
+
+| CAN-N | code identity (canonical) | old spec identity (pre-reconcile) |
+|---|---|---|
+| CAN-3 | poisoning_resistance_t3_episodic_only | promote_gate_T2_procedural_candidate |
+| CAN-4 | selective_forget_superseded | poisoning_resistance_T3_summarization |
+| CAN-5 | multi_agent_isolation | selective_forget_bi_temporal |
+| CAN-6 | procedural_verifier_required | multi_agent_isolation |
+| CAN-7 | bitemporal_correctness | procedural_verifier_pass |
+
+CAN-1/2/8/9/10 already agreed. The reconciliation is documentation-only (no code
+or `AB_ARM_MISSION_IDS` change), so the reproduced v0.1 headline (delta −0.75) is
+unchanged.
 
 ## Toolchain caveat — `docker compose run` vs baked image
 
