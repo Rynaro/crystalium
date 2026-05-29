@@ -86,3 +86,9 @@ git checkout feat/crystalium-v0.1.0
 ```
 
 See `AGENTS.md` for the full developer standard.
+
+<!-- eidolon:dispatch-pointer start -->
+## Eidolons
+
+This project uses [Eidolons](https://github.com/Rynaro/eidolons). The canonical agent dispatch table, methodology references, and per-Eidolon hand-off contracts live at [`./EIDOLONS.md`](./EIDOLONS.md). Read that file first before responding to any prompt that mentions an Eidolon or matches a TRANCE complexity signal.
+<!-- eidolon:dispatch-pointer end -->
