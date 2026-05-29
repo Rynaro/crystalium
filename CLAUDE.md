@@ -53,7 +53,7 @@ The spec is frozen for v0.1 and shipped to the install target as `./.eidolons/cr
 
 ## Quality gates (all must pass before commit)
 
-- **G1–G8:** All 8 conformance gates passing in pytest (test_enforcement.py, test_skill_invoke.py, test_composer.py, test_dream_scheduler.py, test_ecl_conformance.py, test_trust_propagation.py, test_promotion_gate.py).
+- **G1–G8:** All 8 conformance gates passing in pytest (test_enforcement.py, test_skill_invoke.py, test_composer.py, test_dream_scheduler.py, test_ecl_envelope.py, test_trust_propagation.py, test_promotion_gate.py).
 - **agent.md ≤1000 tokens:** CI verifies token count via tiktoken.
 - **Composer ≤3500 tokens:** G6 invariant enforced.
 - **Canary suite ≥0.80 A/B pass rate:** memory-on beats memory-off on ≥80% of 10 missions.

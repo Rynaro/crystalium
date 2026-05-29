@@ -9,6 +9,6 @@ to the appropriate storage backends.
   procedural.py — verifier-sandboxed skill admission
   execution.py  — ephemeral TTL-bound plan state
 
-W3 scope: gate.py, aetheryte/recall.py, and dream/* are assembled here too
+W3 scope: gate.py, aetheryte/retrieve.py, and dream/* are assembled here too
 but live in sibling modules.
 """

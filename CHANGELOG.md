@@ -35,7 +35,7 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   memory-on beats memory-off on ≥80% of canaries.
 - 8 P0 conformance gates (G1–G8) with `test_anchor` paths in
   `test_enforcement.py`, `test_skill_invoke.py`, `test_composer.py`,
-  `test_dream_scheduler.py`, `test_ecl_conformance.py`, `test_trust_propagation.py`,
+  `test_dream_scheduler.py`, `test_ecl_envelope.py`, `test_trust_propagation.py`,
   `test_promotion_gate.py`.
 - Container-first architecture: all Python toolchain (uv, pytest, embeddings,
   storage engines) runs inside `docker compose service crystalium`. Host runs
