@@ -150,6 +150,9 @@ class ProceduralLayer:
                 "novelty_at_write": payload.get("novelty_at_write", 0.5),
             }
 
+            from crystalium.protection import resolve_protection
+            protected, tags = resolve_protection(payload, prov_dict.get("source"))
+
             crystal_record: dict[str, Any] = {
                 "id": crystal_id,
                 "layer": "procedural",
@@ -167,6 +170,8 @@ class ProceduralLayer:
                 },
                 "utility": utility,
                 "status": status,
+                "protected": protected,
+                "tags": tags,
             }
 
             self.relational.insert_crystal(crystal_record)
