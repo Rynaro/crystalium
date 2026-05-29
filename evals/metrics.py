@@ -152,6 +152,62 @@ def high_value_retention(
     return sum(1 for c in members if c.get("status") == "active") / len(members)
 
 
+# ---------------------------------------------------------------------------
+# W3 Dream-intelligence gate axes (store-snapshot / consolidation based)
+# ---------------------------------------------------------------------------
+
+
+def consolidation_gain(semantic_active_before: int, semantic_active_after: int) -> int:
+    """Net new admitted semantic crystals over a Dream cycle (row-growth, D3).
+
+    The promotions ledger reads ~0 from Dream (consolidation routes to pending
+    unless >=k independent witnesses), so gain is measured as the growth in
+    count(layer='semantic' AND status='active').
+    """
+    return int(semantic_active_after) - int(semantic_active_before)
+
+
+def semantic_drift(consolidations: list[dict]) -> float | None:
+    """Fraction of consolidations whose summary does NOT preserve its ground-truth.
+
+    Each item: {"summary": str, "expected_tokens": [str, ...]}. A consolidation
+    "drifts" if any expected token is absent from the summary (case-insensitive) —
+    a labeled-fact fidelity check. Lower is better. None when no consolidations.
+    """
+    if not consolidations:
+        return None
+    drifted = 0
+    for c in consolidations:
+        summary = (c.get("summary") or "").lower()
+        expected = [t.lower() for t in c.get("expected_tokens", [])]
+        if not all(tok in summary for tok in expected):
+            drifted += 1
+    return drifted / len(consolidations)
+
+
+def useful_context_retention(
+    crystals: list[dict],
+    key_event_neighbor_ids: set[str],
+) -> float | None:
+    """Fraction of near-key-event context crystals still active (STC).
+
+    Structurally identical to high_value_retention with a ground-truth id set —
+    the context worth keeping around a salient (key) event.
+    """
+    return high_value_retention(crystals, high_value_ids=key_event_neighbor_ids)
+
+
+def compression_ratio(source_sizes: list[int], summary_size: int) -> float | None:
+    """summary_size / sum(source_sizes). None when there is no source content.
+
+    Ratio ~1 means the consolidation didn't generalize (D5 abstraction diagnostic).
+    """
+    total = sum(source_sizes)
+    if total <= 0:
+        return None
+    return summary_size / total
+
+
 def swe_bench_cl_axes(
     R: Matrix,
     *,
