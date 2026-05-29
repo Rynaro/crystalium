@@ -11,9 +11,18 @@ import pytest
 from evals.metrics import (
     compression_ratio,
     consolidation_gain,
+    memory_size_plateau,
     semantic_drift,
     useful_context_retention,
 )
+
+
+def test_memory_size_plateau():
+    # linear growth -> latter-half slope ~1
+    assert memory_size_plateau([0, 1, 2, 3, 4, 5, 6]) == pytest.approx(1.0)
+    # plateau -> latter-half slope ~0
+    assert memory_size_plateau([0, 2, 4, 6, 6, 6, 6]) == pytest.approx(0.0)
+    assert memory_size_plateau([5]) is None
 
 
 def test_consolidation_gain():

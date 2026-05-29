@@ -197,6 +197,22 @@ def useful_context_retention(
     return high_value_retention(crystals, high_value_ids=key_event_neighbor_ids)
 
 
+def memory_size_plateau(counts: list[int]) -> float | None:
+    """Mean per-tick growth over the LATTER half of an active-count series.
+
+    The plateau signal: a curve that flattens -> ~0; linear growth -> ~constant
+    positive. The W4 gate compares this on (fsrs) < off (lru). None if < 2 points.
+    [PROXY] a slope heuristic, not a formal convergence proof.
+    """
+    if len(counts) < 2:
+        return None
+    tail = counts[len(counts) // 2:]
+    if len(tail) < 2:
+        tail = counts[-2:]
+    deltas = [tail[i + 1] - tail[i] for i in range(len(tail) - 1)]
+    return sum(deltas) / len(deltas)
+
+
 def compression_ratio(source_sizes: list[int], summary_size: int) -> float | None:
     """summary_size / sum(source_sizes). None when there is no source content.
 
