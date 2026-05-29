@@ -169,6 +169,49 @@
       "type": "string",
       "description": "Lifecycle status of this crystal.",
       "enum": ["candidate", "active", "deprecated"]
+    },
+    "memory_dynamics": {
+      "type": ["object", "null"],
+      "description": "Memory-dynamics signals consumed by later-wave algorithms. UNPOPULATED in v0.2.0 (schema-first migration); no code reads or writes these yet. Bounds are intentionally left open to avoid a breaking bump when waves W2/W4 fix their ranges.",
+      "additionalProperties": false,
+      "properties": {
+        "stability": {
+          "type": ["number", "null"],
+          "description": "FSRS memory stability (W4 forgetting faculty). null = uncomputed."
+        },
+        "retrievability": {
+          "type": ["number", "null"],
+          "description": "FSRS retrievability at last access (W4). null = uncomputed."
+        },
+        "difficulty": {
+          "type": ["number", "null"],
+          "description": "FSRS item difficulty (W4). null = uncomputed."
+        },
+        "evb": {
+          "type": ["number", "null"],
+          "description": "Expected Value of Backup importance signal (W2). null = uncomputed."
+        },
+        "prediction_error": {
+          "type": ["number", "null"],
+          "description": "Encoding-time prediction error / surprise signal (W2/W3). null = uncomputed."
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form retrieval tags. UNPOPULATED in v0.2.0; defaults to empty.",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "protected": {
+      "type": "boolean",
+      "description": "When true, the crystal is exempt from Dream eviction/forgetting (W4). UNPOPULATED in v0.2.0; defaults to false.",
+      "default": false
+    },
+    "encoding_context": {
+      "type": ["object", "null"],
+      "description": "Context captured at encoding time for context-dependent recall (W5). UNPOPULATED in v0.2.0; shape intentionally open for later waves. null = none.",
+      "default": null
     }
   },
   "if": {

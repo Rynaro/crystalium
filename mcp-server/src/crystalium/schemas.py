@@ -63,6 +63,23 @@ class Utility(BaseModel):
     novelty_at_write: float = Field(ge=0.0, le=1.0)
 
 
+class MemoryDynamics(BaseModel):
+    """Memory-dynamics signals consumed by later-wave algorithms.
+
+    UNPOPULATED in v0.2.0 (schema-first migration, DECISION-1): no code reads or
+    writes these yet. Bounds are intentionally open so W2 (EVB) and W4 (FSRS) can
+    fix their ranges without a breaking schema bump.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stability: Optional[float] = None
+    retrievability: Optional[float] = None
+    difficulty: Optional[float] = None
+    evb: Optional[float] = None
+    prediction_error: Optional[float] = None
+
+
 # ---------------------------------------------------------------------------
 # Crystal (crystal.v1.json)
 # ---------------------------------------------------------------------------
@@ -93,6 +110,11 @@ class Crystal(BaseModel):
     temporal: Temporal
     utility: Utility
     status: StatusLiteral
+    # v0.2.0 schema-first additions (DECISION-1) — UNPOPULATED; no code reads these yet.
+    memory_dynamics: Optional[MemoryDynamics] = None
+    tags: list[str] = Field(default_factory=list)
+    protected: bool = False
+    encoding_context: Optional[dict[str, Any]] = None
 
     @model_validator(mode="after")
     def check_content_ref_required_for_episodic(self) -> "Crystal":
