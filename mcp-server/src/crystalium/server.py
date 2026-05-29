@@ -5,7 +5,8 @@ CRYSTALIUM tool implementations. Every call passes through the enforcement
 chokepoint before any storage layer is touched.
 
 Design anchors:
-  D2: stdio-only in v0.1; HTTP branch raises NotImplementedError("v0.2").
+  D2: stdio is the default transport; Streamable-HTTP (run_http) added in v0.2.
+      Both transports share _build_server + the @server.call_tool dispatch.
   D3: session_end triggers DreamScheduler.on_session_end() (enqueues; never inline).
   D4: every tool result emits ECL v2.0 sidecar via ecl.build_for_tool_result() +
       ecl.emit_sidecar().
@@ -52,6 +53,7 @@ from crystalium.storage.blob import BlobStore
 from crystalium.storage.graph import GraphStore
 from crystalium.storage.relational import RelationalStore
 from crystalium.storage.vector import VectorStore
+from crystalium.telemetry import emit_latency_panel, record_call, tool_span
 from crystalium.trust import Tier
 
 log = structlog.get_logger("crystalium.server")
@@ -415,18 +417,14 @@ def _emit_ecl_sidecar(
 # ---------------------------------------------------------------------------
 
 
-async def run_stdio(config: Config) -> None:
-    """Start the CRYSTALIUM MCP server over stdio.
+def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
+    """Build the MCP Server with all 7 tools wired, plus its DreamScheduler.
 
-    D2: stdio-only in v0.1.  HTTP raises NotImplementedError("v0.2").
+    Transport-agnostic: shared verbatim by both run_stdio and run_http (D2,
+    v0.2). The caller is responsible for starting the scheduler and running the
+    chosen transport. Components (_build_components) and the @server.call_tool
+    dispatch are reused as-is across transports.
     """
-    if config.transport != "stdio":
-        raise NotImplementedError(
-            f"Transport {config.transport!r} is not supported in v0.1. "
-            "Set CRYSTALIUM_TRANSPORT=stdio or omit the variable. "
-            "Streamable-HTTP is deferred to v0.2."
-        )
-
     server = Server("crystalium")
 
     (
@@ -441,9 +439,6 @@ async def run_stdio(config: Config) -> None:
         relational,
     ) = _build_components(config)
 
-    # Start the background dream scheduler (APScheduler daemon thread)
-    scheduler.start()
-
     @server.list_tools()
     async def _list_tools() -> list[Tool]:
         return [Tool(**t) for t in build_tool_manifest()]
@@ -452,80 +447,103 @@ async def run_stdio(config: Config) -> None:
     async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         caller = _extract_caller_identity()
         caller_tier = _caller_tier(caller)
+        tier_str = getattr(caller_tier, "name", str(caller_tier))
         t0 = time.monotonic()
         run_dir = config.data_dir / "runs" / str(uuid.uuid4())
+        layer_hint: str | None = None
 
         try:
             enforcement.assert_rate_limit()
 
-            if name == "crystalium.recall":
-                result = _handle_recall(arguments, aetheryte, scheduler, caller_tier)
-                scheduler.record_activity()
-                result_bytes = json.dumps(
-                    result if isinstance(result, dict) else result.model_dump(),
-                    default=str,
-                ).encode()
-                _emit_ecl_sidecar(name, result_bytes, "recall-result", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+            # One OTel span per tool call (telemetry.tool_span); per-call latency
+            # is recorded once on the success path below and once on the error
+            # path. Layer/tool-specific telemetry inside the layers/dream worker
+            # is preserved and nests under this span.
+            with tool_span(name, tier=tier_str):
+                performative = "INFORM"
+                if name == "crystalium.recall":
+                    result = _handle_recall(arguments, aetheryte, scheduler, caller_tier)
+                    scheduler.record_activity()
+                    result_bytes = json.dumps(
+                        result if isinstance(result, dict) else result.model_dump(),
+                        default=str,
+                    ).encode()
+                    artifact_kind = "recall-result"
 
-            elif name == "crystalium.commit":
-                result = _handle_commit(arguments, episodic, semantic, procedural, execution, caller_tier)
-                scheduler.record_activity()
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "commit-result", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.commit":
+                    layer_hint = arguments.get("layer")
+                    result = _handle_commit(arguments, episodic, semantic, procedural, execution, caller_tier)
+                    scheduler.record_activity()
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "commit-result"
 
-            elif name == "crystalium.update":
-                result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, relational, caller_tier)
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "commit-result", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.update":
+                    layer_hint = arguments.get("layer")
+                    result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, relational, caller_tier)
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "commit-result"
 
-            elif name == "crystalium.skill_invoke":
-                result = _handle_skill_invoke(arguments, procedural, enforcement, config, caller_tier)
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "skill-result", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.skill_invoke":
+                    layer_hint = "procedural"
+                    result = _handle_skill_invoke(arguments, procedural, enforcement, config, caller_tier)
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "skill-result"
 
-            elif name == "crystalium.plan_checkpoint":
-                result = execution.checkpoint(
-                    state=arguments.get("state", {}),
-                    caller_tier=caller_tier,
-                )
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "plan-checkpoint", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.plan_checkpoint":
+                    layer_hint = "execution"
+                    result = execution.checkpoint(
+                        state=arguments.get("state", {}),
+                        caller_tier=caller_tier,
+                    )
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "plan-checkpoint"
 
-            elif name == "crystalium.plan_replan":
-                result = execution.replan(
-                    diff=arguments.get("diff", {}),
-                    caller_tier=caller_tier,
-                )
-                result_bytes = json.dumps(result, default=str).encode()
-                _emit_ecl_sidecar(name, result_bytes, "plan-replan", run_dir, caller)
-                return [TextContent(type="text", text=result_bytes.decode())]
+                elif name == "crystalium.plan_replan":
+                    layer_hint = "execution"
+                    result = execution.replan(
+                        diff=arguments.get("diff", {}),
+                        caller_tier=caller_tier,
+                    )
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "plan-replan"
 
-            elif name == "crystalium.session_end":
-                result = _handle_session_end(arguments, scheduler)
-                result_bytes = json.dumps(result, default=str).encode()
+                elif name == "crystalium.session_end":
+                    result = _handle_session_end(arguments, scheduler)
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "session-end-receipt"
+                    performative = "ACKNOWLEDGE"
+                    # Surface the recall/commit/forget/dream latency panels +
+                    # recall p95 (W8 SLO) at the close of the session.
+                    emit_latency_panel()
+
+                else:
+                    from crystalium.enforcement import CrystaliumEnforcementError
+                    raise CrystaliumEnforcementError(
+                        f"Unknown tool {name!r}.",
+                        reason_code="UNKNOWN_TOOL",
+                    )
+
                 _emit_ecl_sidecar(
-                    name, result_bytes, "session-end-receipt", run_dir, caller,
-                    performative="ACKNOWLEDGE",
+                    name, result_bytes, artifact_kind, run_dir, caller,
+                    performative=performative,
                 )
-                return [TextContent(type="text", text=result_bytes.decode())]
 
-            else:
-                from crystalium.enforcement import CrystaliumEnforcementError
-                raise CrystaliumEnforcementError(
-                    f"Unknown tool {name!r}.",
-                    reason_code="UNKNOWN_TOOL",
-                )
+            latency_ms = (time.monotonic() - t0) * 1000
+            record_call(
+                tool=name, layer=layer_hint, tier=tier_str,
+                result="ok", latency_ms=latency_ms,
+            )
+            return [TextContent(type="text", text=result_bytes.decode())]
 
         except Exception as exc:
             latency_ms = (time.monotonic() - t0) * 1000
             outcome = "rejected" if hasattr(exc, "reason_code") else "error"
             error_code = getattr(exc, "reason_code", type(exc).__name__)
             enforcement.record(name, None, caller_tier, None, outcome, latency_ms, error=error_code)
+            record_call(
+                tool=name, layer=layer_hint, tier=tier_str,
+                result=outcome, latency_ms=latency_ms, error=error_code,
+            )
             log.exception("tool_error", tool=name, error=str(exc))
             err_payload: dict[str, Any] = {
                 "error": error_code,
@@ -536,19 +554,90 @@ async def run_stdio(config: Config) -> None:
                 err_payload["advice"] = advice
             return [TextContent(type="text", text=json.dumps(err_payload, indent=2))]
 
+    return server, scheduler
+
+
+async def run_stdio(config: Config) -> None:
+    """Start the CRYSTALIUM MCP server over stdio (the default transport)."""
+    server, scheduler = _build_server(config)
+    scheduler.start()
     log.info(
         "server_starting",
-        transport=config.transport,
+        transport="stdio",
         data_dir=str(config.data_dir),
         version=__version__,
     )
-
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
             write_stream,
             server.create_initialization_options(),
         )
+
+
+def build_http_app(config: Config):
+    """Build the Starlette ASGI app for the Streamable-HTTP transport (D2, v0.2).
+
+    Returns (app, scheduler, session_manager). build_http_app starts nothing —
+    the caller (run_http) starts the scheduler and serves the app — so tests can
+    drive the app through an ASGI test client without a live socket or the
+    APScheduler daemon. Every tool result still flows through the shared
+    @server.call_tool dispatch, so the ECL v2.0 sidecar is emitted over HTTP too.
+    """
+    import contextlib
+
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    server, scheduler = _build_server(config)
+
+    session_manager = StreamableHTTPSessionManager(
+        app=server,
+        event_store=None,
+        json_response=config.http_json_response,
+        stateless=config.http_stateless,
+    )
+
+    async def handle_streamable_http(scope: Any, receive: Any, send: Any) -> None:
+        await session_manager.handle_request(scope, receive, send)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: Any):
+        async with session_manager.run():
+            yield
+
+    app = Starlette(
+        routes=[Mount(config.http_path, app=handle_streamable_http)],
+        lifespan=lifespan,
+    )
+    return app, scheduler, session_manager
+
+
+async def run_http(config: Config) -> None:
+    """Start the CRYSTALIUM MCP server over Streamable-HTTP (D2 unstubbed, v0.2)."""
+    import uvicorn
+
+    app, scheduler, _session_manager = build_http_app(config)
+    scheduler.start()
+    log.info(
+        "server_starting",
+        transport="streamable-http",
+        host=config.http_host,
+        port=config.http_port,
+        path=config.http_path,
+        data_dir=str(config.data_dir),
+        version=__version__,
+    )
+    uv = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=config.http_host,
+            port=config.http_port,
+            log_level="warning",
+        )
+    )
+    await uv.serve()
 
 
 # ---------------------------------------------------------------------------

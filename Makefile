@@ -12,7 +12,7 @@ RUN     = $(COMPOSE) run --rm $(SERVICE)
 # Primary targets
 # ---------------------------------------------------------------------------
 
-.PHONY: build test test-fast test-schemas test-storage lint typecheck clean
+.PHONY: build test test-fast test-schemas test-storage test-w1 bench bench-axes lint typecheck clean shell help
 
 ## build: Build the crystalium container image
 build:
@@ -50,6 +50,14 @@ test-w1:
 		mcp-server/tests/test_importance.py \
 		mcp-server/tests/test_config.py \
 		-v
+
+## bench: Run the ablation/canary bench (memory-on/off A/B headline) in-container
+bench:
+	$(RUN) python -m evals canary --mode both
+
+## bench-axes: Print SWE-Bench-CL axes from the demo accuracy matrix (dep-free smoke)
+bench-axes:
+	$(RUN) python -m evals axes --demo
 
 ## lint: Run ruff linter inside the container
 lint:

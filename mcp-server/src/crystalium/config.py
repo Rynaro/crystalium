@@ -72,8 +72,18 @@ class Config:
     - rate_limit_per_minute: MISSION P0-7 (atlas-aci pattern)
     """
 
-    # Transport (D2) — stdio only for v0.1; HTTP stub raises NotImplementedError("v0.2")
+    # Transport (D2) — "stdio" (default) or "http"/"streamable-http" (v0.2, Streamable-HTTP).
     transport: str = "stdio"
+
+    # Streamable-HTTP transport binding (used only when transport != "stdio").
+    http_host: str = "127.0.0.1"
+    http_port: int = 8848
+    http_path: str = "/mcp"
+    # json_response=True returns plain JSON (no SSE) — simpler for single request/response
+    # clients and smoke tests. stateless=True serves each request in its own transient
+    # session (no server-side session continuity required).
+    http_json_response: bool = True
+    http_stateless: bool = True
 
     # Dream scheduler (D3)
     idle_threshold_s: int = 300
@@ -166,6 +176,11 @@ class Config:
         """Build config purely from environment variables (useful for tests)."""
         return cls(
             transport=_env("CRYSTALIUM_TRANSPORT", "stdio") or "stdio",
+            http_host=_env("CRYSTALIUM_HTTP_HOST", "127.0.0.1") or "127.0.0.1",
+            http_port=_env_int("CRYSTALIUM_HTTP_PORT", 8848),
+            http_path=_env("CRYSTALIUM_HTTP_PATH", "/mcp") or "/mcp",
+            http_json_response=_env_bool("CRYSTALIUM_HTTP_JSON_RESPONSE", True),
+            http_stateless=_env_bool("CRYSTALIUM_HTTP_STATELESS", True),
             idle_threshold_s=_env_int("CRYSTALIUM_IDLE_THRESHOLD_S", 300),
             min_dream_gap_s=_env_int("CRYSTALIUM_MIN_DREAM_GAP_S", 1800),
             dream_tick_s=_env_int("CRYSTALIUM_DREAM_TICK_S", 60),
@@ -198,9 +213,18 @@ class Config:
             "transport",
             "ecl_version",
             "embed_backend",
+            "http_host",
+            "http_path",
         ):
             if simple in data:
                 kwargs[simple] = data[simple]
+
+        for bool_field in ("http_json_response", "http_stateless"):
+            if bool_field in data:
+                kwargs[bool_field] = bool(data[bool_field])
+
+        if "http_port" in data:
+            kwargs["http_port"] = int(data["http_port"])
 
         for int_field in (
             "idle_threshold_s",

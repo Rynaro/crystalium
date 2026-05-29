@@ -14,6 +14,7 @@ Usage (container-first):
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Optional
@@ -63,13 +64,18 @@ def serve(config_path: Optional[Path]) -> None:
     else:
         config = Config.from_env()
 
-    if config.transport != "stdio":
-        raise click.ClickException(
-            f"Transport {config.transport!r} is not supported in v0.1. "
-            "Set CRYSTALIUM_TRANSPORT=stdio (or unset it)."
-        )
+    transport = (config.transport or "stdio").lower()
+    if transport == "stdio":
+        asyncio.run(run_stdio(config))
+    elif transport in ("http", "streamable-http", "streamable_http"):
+        from crystalium.server import run_http
 
-    asyncio.run(run_stdio(config))
+        asyncio.run(run_http(config))
+    else:
+        raise click.ClickException(
+            f"Transport {config.transport!r} is not supported. "
+            "Use CRYSTALIUM_TRANSPORT=stdio (default) or http."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -343,21 +349,29 @@ def doctor(config_path: Optional[Path]) -> None:
 
 
 @cli.command()
-@click.option("--mission", "mission_id", default=None, help="Run a specific canary mission ID.")
-def canary(mission_id: Optional[str]) -> None:
-    """Run the canary suite (W5 — not yet implemented in v0.1).
+@click.option(
+    "--mode", default="both",
+    type=click.Choice(["both", "on_only", "off_only"]),
+    help="Which A/B arm(s) to run.",
+)
+@click.option("--no-write", is_flag=True, help="Do not persist a results JSON.")
+def canary(mode: str, no_write: bool) -> None:
+    """Run the canary suite memory-on/off A/B and print the headline.
 
-    Stub: raises a clear error directing to W5 when the canary package is missing.
+    Dispatches to the evals bench (evals.ab_memory_onoff.run_all). The bench is a
+    separate top-level package (evals/, not crystalium.evals); see also
+    `python -m evals` for the ablation/axes/forget subcommands.
     """
     try:
-        from crystalium.evals import run_canary  # type: ignore[import-not-found]
-        run_canary(mission_id=mission_id)
-    except ImportError:
+        from evals.ab_memory_onoff import run_all
+    except ImportError as exc:  # pragma: no cover - import-environment guard
         raise click.ClickException(
-            "W5 not implemented: crystalium.evals is not available in v0.1. "
-            "Canary suite ships in Wave 5. "
-            "See .spectra/crystalium-v0.1.0-spec.yaml §waves.W5 for the canary roadmap."
-        )
+            f"evals package not importable ({exc}). Ensure PYTHONPATH includes the "
+            "repo root (the container sets PYTHONPATH=/app/src:/app)."
+        ) from exc
+
+    result = run_all(mode=mode, write_results=not no_write)
+    click.echo(json.dumps(result.get("headline", {}), indent=2, default=str))
 
 
 # ---------------------------------------------------------------------------

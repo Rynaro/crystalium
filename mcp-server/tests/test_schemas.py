@@ -469,3 +469,74 @@ class TestPydanticRoundTrips:
         bad["content_ref"] = "not-a-valid-sha256"
         with pytest.raises(ValidationError):
             Crystal.model_validate(bad)
+
+
+# ---------------------------------------------------------------------------
+# v0.2.0 schema-first migration (DECISION-1) — memory_dynamics + tags/protected/
+# encoding_context. Fields are UNPOPULATED in v0.2.0: a v0.1 crystal omitting them
+# must still validate, and the new fields must round-trip when present-but-null.
+# ---------------------------------------------------------------------------
+
+
+class TestCrystalV2Fields:
+    def setup_method(self) -> None:
+        self.schema = load_schema("crystal.v1.json")
+
+    def test_v01_crystal_without_new_fields_still_valid(self) -> None:
+        # Backward compatibility: the new fields are optional.
+        validate(self.schema, _good_crystal("semantic"))
+
+    def test_crystal_with_nulled_new_fields_valid(self) -> None:
+        c = _good_crystal("semantic")
+        c["memory_dynamics"] = {
+            "stability": None,
+            "retrievability": None,
+            "difficulty": None,
+            "evb": None,
+            "prediction_error": None,
+        }
+        c["tags"] = []
+        c["protected"] = False
+        c["encoding_context"] = None
+        validate(self.schema, c)
+
+    def test_crystal_with_populated_new_fields_valid(self) -> None:
+        # Schema permits population (later waves); v0.2.0 simply never does it.
+        c = _good_crystal("semantic")
+        c["memory_dynamics"] = {"stability": 12.5, "retrievability": 0.9, "evb": -0.2}
+        c["tags"] = ["auth", "bcrypt"]
+        c["protected"] = True
+        c["encoding_context"] = {"branch": "main"}
+        validate(self.schema, c)
+
+    def test_memory_dynamics_unknown_subfield_rejected(self) -> None:
+        c = _good_crystal("semantic")
+        c["memory_dynamics"] = {"stability": 1.0, "bogus": 2}
+        assert_invalid(self.schema, c, "memory_dynamics additionalProperties=false")
+
+    def test_pydantic_defaults_when_new_fields_omitted(self) -> None:
+        from crystalium.schemas import Crystal
+
+        crystal = Crystal.model_validate(_good_crystal("semantic"))
+        assert crystal.memory_dynamics is None
+        assert crystal.tags == []
+        assert crystal.protected is False
+        assert crystal.encoding_context is None
+
+    def test_pydantic_round_trip_with_new_fields(self) -> None:
+        from crystalium.schemas import Crystal
+
+        data = _good_crystal("semantic")
+        data["memory_dynamics"] = {"stability": 3.0, "evb": 0.5}
+        data["tags"] = ["x"]
+        data["protected"] = True
+        data["encoding_context"] = {"k": "v"}
+        crystal = Crystal.model_validate(data)
+        assert crystal.memory_dynamics is not None
+        assert crystal.memory_dynamics.stability == 3.0
+        assert crystal.memory_dynamics.retrievability is None
+        dumped = crystal.model_dump(mode="json")
+        crystal2 = Crystal.model_validate(dumped)
+        assert crystal2.tags == ["x"]
+        assert crystal2.protected is True
+        assert crystal2.encoding_context == {"k": "v"}

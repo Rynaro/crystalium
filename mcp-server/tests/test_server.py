@@ -111,37 +111,74 @@ def test_session_end_passes_through_run_id() -> None:
 
 
 # ---------------------------------------------------------------------------
-# test_transport_http_raises_not_implemented
+# Streamable-HTTP transport (D2 unstubbed, v0.2). stdio remains the default.
 # ---------------------------------------------------------------------------
 
 
-def test_transport_http_raises_not_implemented(config: Config) -> None:
-    """D2: HTTP transport raises NotImplementedError with 'v0.2' in message."""
-    import asyncio
-    from crystalium.server import run_stdio
-
-    http_config = Config(
-        data_dir=config.data_dir,
+def _http_config(tmp_path: Path) -> Config:
+    return Config(
+        data_dir=tmp_path / "http_data",
         transport="http",
         rate_limit_per_minute=1000,
     )
 
-    with pytest.raises(NotImplementedError) as exc_info:
-        asyncio.run(run_stdio(http_config))
 
-    assert "v0.2" in str(exc_info.value), (
-        f"NotImplementedError should mention 'v0.2', got: {exc_info.value}"
-    )
+def test_stdio_is_default_transport() -> None:
+    """Unsetting CRYSTALIUM_TRANSPORT yields stdio (default unchanged)."""
+    assert Config(data_dir=Path("/tmp/x")).transport == "stdio"
 
 
-def test_transport_http_raises_not_implemented_streamable(tmp_path: Path) -> None:
-    """Any non-stdio transport raises NotImplementedError."""
-    import asyncio
-    from crystalium.server import run_stdio
+def test_http_transport_builds_app(tmp_path: Path) -> None:
+    """HTTP no longer raises NotImplementedError: build_http_app wires a Starlette app."""
+    from starlette.applications import Starlette
 
-    cfg = Config(data_dir=tmp_path / "data", transport="streamable-http")
-    with pytest.raises(NotImplementedError):
-        asyncio.run(run_stdio(cfg))
+    from crystalium.server import build_http_app
+
+    app, scheduler, session_manager = build_http_app(_http_config(tmp_path))
+    assert isinstance(app, Starlette)
+    assert scheduler is not None
+    assert session_manager is not None
+
+
+def test_http_smoke_initialize(tmp_path: Path) -> None:
+    """Host smoke test: an MCP `initialize` over the ASGI HTTP transport returns
+    crystalium serverInfo. Exercises the real Streamable-HTTP request path."""
+    from starlette.testclient import TestClient
+
+    from crystalium.server import build_http_app
+
+    cfg = _http_config(tmp_path)
+    app, _scheduler, _sm = build_http_app(cfg)
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "smoke", "version": "0.0"},
+        },
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    # TestClient context enters the app lifespan (session_manager.run()).
+    with TestClient(app) as client:
+        resp = client.post(cfg.http_path, json=payload, headers=headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["result"]["serverInfo"]["name"] == "crystalium", body
+
+
+def test_http_caller_identity_no_escalation() -> None:
+    """[DISPUTED→resolved] Over HTTP the caller identity is NOT trusted/elevated:
+    it stays the conservative unknown/T2 default, so enforcement gating is
+    unchanged from stdio. HTTP must never grant a higher tier than stdio."""
+    caller = _extract_caller_identity()
+    assert _caller_tier(caller) == Tier.T2
+    assert _caller_tier(_DEFAULT_CALLER) == Tier.T2
 
 
 # ---------------------------------------------------------------------------

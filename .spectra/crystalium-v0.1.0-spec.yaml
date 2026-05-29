@@ -744,34 +744,34 @@ canary_missions:
     pass: "G1 test_anchor passes; semantic store row count unchanged"
     ab_arm: false
   - id: "CAN-3"
-    name: "promote_gate_T2_procedural_candidate"
-    scenario: "T2 caller commits Procedural; T1 caller runs skill_invoke; verifier passes."
-    oracle: "Candidate -> admitted."
-    pass: "G2 + G3 test_anchors pass end-to-end"
+    name: "poisoning_resistance_t3_episodic_only"
+    scenario: "T3 tool-origin content is committed and attempts to reach Semantic."
+    oracle: "T3 content stays Episodic-quarantined; never promoted to Semantic."
+    pass: "Quarantine/tier test_anchor passes; no T3-origin row reaches the semantic store"
     ab_arm: true
   - id: "CAN-4"
-    name: "poisoning_resistance_T3_summarization"
-    scenario: "Summarizer ingests {T1,T2,T3} and attempts commit(layer=Semantic)."
-    oracle: "TierCeilingViolation; advice surfaced."
-    pass: "G4 test_anchor passes; structured advice present in error payload"
-    ab_arm: false
-  - id: "CAN-5"
-    name: "selective_forget_bi_temporal"
-    scenario: "Update a fact: invalidate-old + write-new with superseded_by."
-    oracle: "Old record present with t_valid_to; new record visible; no hard-delete."
-    pass: "Bi-temporal integrity assertion in test_layers_semantic.py"
+    name: "selective_forget_superseded"
+    scenario: "Update a fact (e.g. bcrypt -> argon2): invalidate-old + write-new with superseded_by."
+    oracle: "Default recall returns the new crystal; old remains with t_valid_to set; no hard-delete."
+    pass: "Bi-temporal integrity + superseded_by correct (evals/selective_forgetting.py)"
     ab_arm: true
-  - id: "CAN-6"
+  - id: "CAN-5"
     name: "multi_agent_isolation"
     scenario: "Two agent_class_visibility scopes commit overlapping facts."
     oracle: "Scope isolation honoured; recall from A returns zero B crystals."
     pass: "Recall result for scope A contains zero scope-B crystals"
     ab_arm: true
+  - id: "CAN-6"
+    name: "procedural_verifier_required"
+    scenario: "Submit a Procedural skill without a verifier; then resubmit with a passing verifier."
+    oracle: "No-verifier stays candidate; passing verifier -> shared."
+    pass: "G3 path exercised; both branches' test_anchors pass"
+    ab_arm: false
   - id: "CAN-7"
-    name: "procedural_verifier_pass"
-    scenario: "Submit Procedural skill with failing verifier; admission denied. Resubmit with passing verifier; admission granted."
-    oracle: "G3 path exercised."
-    pass: "Both branches' test_anchors pass"
+    name: "bitemporal_correctness"
+    scenario: "Update a crystal; inspect bi-temporal fields on the superseded record."
+    oracle: "t_valid_to + superseded_by set on the old record; no hard-delete."
+    pass: "Bi-temporal correctness assertion (test_bitemporal.py)"
     ab_arm: false
   - id: "CAN-8"
     name: "working_set_budget_invariant"
@@ -793,7 +793,7 @@ canary_missions:
     ab_arm: false
 
 headline_ab_metric:
-  description: "Memory-on beats memory-off on >=80% of A/B-eligible canaries (CAN-1, CAN-3, CAN-5, CAN-6)."
+  description: "Memory-on beats memory-off on >=80% of A/B-eligible canaries (CAN-1, CAN-3, CAN-4, CAN-5). Source of truth: evals/missions.py AB_ARM_MISSION_IDS."
   pass_threshold: 0.80
   failure_handling: "Report plainly as '[UNVERIFIED — memory does not measurably help on this canary set]' per MISSION.md:163."
 
@@ -906,7 +906,7 @@ scorecard:
     how_to_score: "eiis_v1_4_conformance + ecl_v2_0_conformance blocks present and non-empty."
   - id: 5
     criterion: "Memory-on/off A/B canary ready"
-    how_to_score: ">=4 canary missions with ab_arm: true (CAN-1, CAN-3, CAN-5, CAN-6) and headline_ab_metric defined."
+    how_to_score: ">=4 canary missions with ab_arm: true (CAN-1, CAN-3, CAN-4, CAN-5) and headline_ab_metric defined."
   - id: 6
     criterion: "Tier matrix unambiguous"
     how_to_score: "tier_matrix block — 12 rows x 4 columns; no '?' or 'tbd'."
