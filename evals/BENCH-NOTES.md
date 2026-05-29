@@ -74,3 +74,37 @@ use `docker run --rm crystalium:dev <cmd>` against the **baked** image (see
 path for convention parity and share this caveat. **[GAP]** A future wave could
 relocate the venv (e.g. `UV_PROJECT_ENVIRONMENT=/opt/venv`) so the compose path
 works with live edits; out of scope for W1.
+
+## W2 EVB ablation gate (v0.3.0) — INCONCLUSIVE, flag stays OFF
+
+`docker run --rm crystalium:dev python -m evals ab --flag evb_enabled` over the
+A/B arm set, evb_threshold=0.5:
+
+| axis | on (evb) | off (legacy) | delta |
+|---|---|---|---|
+| pass_rate | 0.25 | 0.25 | 0.0 |
+| promotion_precision | null | null | null |
+| high_value_retention | null | null | null |
+
+**Verdict: EVB does NOT beat legacy ⇒ `evb_enabled` stays OFF (default).** This is
+an honest ablation-or-revert null, not a regression:
+
+- **Both gate metrics are undefined (null)** on the current canary. The suite
+  triggers **no promotions** (semantic auto-admit needs k independent witnesses;
+  the missions don't commit corroborating witnesses → empty ledger →
+  promotion_precision undefined) and produces **no high-EVB persisted crystals**
+  in a single synchronous run (the full Dream prune write-back doesn't run inline;
+  recall-persisted evb values stay below 0.5 for the few recalled crystals →
+  high_value_retention undefined).
+- **pass_rate is unchanged** (0.25 both arms): EVB reshapes eviction/composer
+  *ordering*, not mission pass/fail on this suite — expected.
+
+The EVB machinery (evb.py, persistence, routing, recompute-on-event,
+instrumentation, axes) all ship **behind the OFF flag** and are fully tested. The
+keystone is in place; the canary simply cannot yet *demonstrate* it beats legacy.
+
+**[GAP — later wave]** Strengthen the canary to exercise continual-learning
+dynamics that EVB targets: missions that (a) commit k corroborating witnesses so
+promotions actually fire, (b) run a full Dream prune cycle so high-EVB survival
+is observable, and (c) attach outcomes to recalled crystals. Only then can the
+gate give EVB a fair vs-legacy comparison. Until then `evb_enabled` remains OFF.
