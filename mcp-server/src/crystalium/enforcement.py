@@ -337,6 +337,12 @@ _MATRIX: dict[tuple[str, str], dict[Tier, str]] = {
         Tier.T2: "deny",
         Tier.T3: "deny",
     },
+    # W4 right-to-be-forgotten — the ONE sanctioned hard-delete. Operator-only
+    # (T0); everyone else denied. Same shape across all layers.
+    ("episodic", "forget"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
+    ("semantic", "forget"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
+    ("procedural", "forget"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
+    ("execution", "forget"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
 }
 
 # Make the matrix immutable at the module level

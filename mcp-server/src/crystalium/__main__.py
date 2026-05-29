@@ -190,6 +190,63 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
 
 
 # ---------------------------------------------------------------------------
+# forget — right-to-be-forgotten (W4): the ONE sanctioned hard-delete
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("crystal_id")
+@click.option("--reason", required=True, help="Audited reason for the erasure.")
+@click.option("--config", "config_path", type=click.Path(exists=False, path_type=Path), default=None)
+@click.option("--yes", is_flag=True, default=False, help="Skip the interactive confirmation.")
+def forget(crystal_id: str, reason: str, config_path: Optional[Path], yes: bool) -> None:
+    """Operator right-to-be-forgotten: hard-tombstone a crystal (T0, audited).
+
+    The SOLE exception to never-hard-delete. Routes through the `forget`
+    enforcement op (T0-only), writes a forget_audit row, then deletes the crystal
+    row + its blob. Irreversible.
+    """
+    import datetime as _dt
+
+    from crystalium.config import Config
+    from crystalium.enforcement import Enforcement
+    from crystalium.storage.blob import BlobStore
+    from crystalium.trust import Tier
+
+    config = Config.from_yaml(config_path) if (config_path and config_path.exists()) else Config.from_env()
+    relational = RelationalStore(db_path=config.sqlite_path)
+    enforcement = Enforcement(config)
+    blob_store = BlobStore(root=config.blob_root)
+
+    crystal = relational.get_crystal(crystal_id)
+    if crystal is None:
+        raise click.ClickException(f"Crystal not found: {crystal_id!r}")
+    layer = crystal.get("layer", "episodic")
+
+    # Operator gate THROUGH the chokepoint: forget op is T0-only.
+    try:
+        enforcement.assert_tier_allowed("crystalium.forget", layer, Tier.T0, "forget")
+    except Exception as exc:
+        raise click.ClickException(f"forget denied by enforcement: {exc}") from exc
+
+    if not yes:
+        click.confirm(
+            f"Permanently erase crystal {crystal_id!r} ({layer})? This is irreversible.",
+            abort=True,
+        )
+
+    now = _dt.datetime.now(_dt.timezone.utc)
+    relational.tombstone(crystal_id, reason, actor_tier=str(Tier.T0), now=now)
+    content_ref = crystal.get("content_ref")
+    if content_ref:
+        try:
+            blob_store.tombstone(content_ref)
+        except Exception as exc:  # blob already gone / shared — audit row already written
+            click.echo(f"  (blob tombstone note: {exc})", err=True)
+    click.echo(f"Forgotten: {crystal_id} (audited; reason={reason!r}).")
+
+
+# ---------------------------------------------------------------------------
 # dream
 # ---------------------------------------------------------------------------
 
