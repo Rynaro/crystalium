@@ -28,6 +28,20 @@ from crystalium.gate import PromotionGate  # noqa: F401 — test-patchable
 from crystalium.enforcement import Enforcement  # noqa: F401 — test-patchable
 
 
+def _select_importance_fn(config):
+    """W2: pick EVB (Gain x Need) or legacy importance_score per config.evb_enabled.
+
+    Mirrors server._build_components so CLI-built components honour the same flag.
+    """
+    from crystalium.importance import importance_score
+
+    if config.evb_enabled:
+        from crystalium.evb import make_evb_scorer
+
+        return make_evb_scorer(config.evb_gain_weights, config.evb_need_weights)
+    return importance_score
+
+
 # ---------------------------------------------------------------------------
 # CLI group
 # ---------------------------------------------------------------------------
@@ -110,7 +124,6 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
     from crystalium.layers.episodic import EpisodicLayer
     from crystalium.aetheryte.redact import Redactor
     from crystalium.enforcement import Enforcement
-    from crystalium.importance import importance_score
     from crystalium.storage.blob import BlobStore
     from crystalium.storage.relational import RelationalStore
     from crystalium.schemas import Provenance
@@ -126,6 +139,7 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
     enforcement = Enforcement(config)
     redactor = Redactor()
 
+    importance_fn = _select_importance_fn(config)
     episodic = EpisodicLayer(
         blob_store=blob_store,
         relational=relational,
@@ -133,7 +147,7 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
         graph_store=None,
         enforcement=enforcement,
         redactor=redactor,
-        importance_fn=importance_score,
+        importance_fn=importance_fn,
     )
 
     p = path.resolve()
@@ -195,7 +209,6 @@ def dream(force: bool, config_path: Optional[Path]) -> None:
     from crystalium.dream.scheduler import DreamScheduler, _make_run_id
     from crystalium.enforcement import Enforcement
     from crystalium.gate import PromotionGate
-    from crystalium.importance import importance_score
     from crystalium.storage.relational import RelationalStore
 
     if config_path and config_path.exists():
@@ -213,7 +226,8 @@ def dream(force: bool, config_path: Optional[Path]) -> None:
         graph_store=None,
         enforcement=enforcement,
         gate=gate,
-        importance_fn=importance_score,
+        importance_fn=_select_importance_fn(config),
+        persist_dynamics=config.evb_enabled,
     )
 
     if force:

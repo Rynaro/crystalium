@@ -147,6 +147,9 @@ class PromotionGate:
                 crystal_id=crystal_id,
                 caller_tier=str(caller_tier),
             )
+            self.relational.record_promotion(
+                crystal_id, "semantic", now=datetime.now(timezone.utc)
+            )
             return PromotionResult(
                 decision="admit",
                 reason="force_promote by T0",
@@ -166,6 +169,9 @@ class PromotionGate:
                 crystal_id=crystal_id,
                 witnesses=independent_count,
                 k=k,
+            )
+            self.relational.record_promotion(
+                crystal_id, "semantic", now=datetime.now(timezone.utc)
             )
             return PromotionResult(
                 decision="admit",
@@ -275,6 +281,9 @@ class PromotionGate:
             "procedural_admit",
             crystal_id=crystal_id,
             caller_tier=str(caller_tier),
+        )
+        self.relational.record_promotion(
+            crystal_id, "procedural", now=datetime.now(timezone.utc)
         )
         return PromotionResult(
             decision="admit",

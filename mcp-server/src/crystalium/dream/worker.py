@@ -88,6 +88,7 @@ class DreamWorker:
         gate: "PromotionGate",
         importance_fn: Callable[..., float],
         prune_thresholds: dict[str, float] | None = None,
+        persist_dynamics: bool = False,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -96,6 +97,10 @@ class DreamWorker:
         self.gate = gate
         self.importance_fn = importance_fn
         self.prune_thresholds = prune_thresholds or dict(_DEFAULT_PRUNE_THRESHOLDS)
+        # W2 (D2): when True, importance_fn is evb_score and the prune loop writes
+        # the recomputed value back to memory_dynamics.evb (persist-only — no
+        # net-new replay ranking). Set from config.evb_enabled at build time.
+        self.persist_dynamics = persist_dynamics
 
     # ------------------------------------------------------------------
     # Public API
@@ -463,6 +468,12 @@ class DreamWorker:
 
                     rec_stub = _UtilityStub(utility, now)
                     score = self.importance_fn(rec_stub, now=now)
+
+                    # W2 (D2): when EVB is the scorer, persist the recomputed value
+                    # to memory_dynamics.evb so the composer + later waves read a
+                    # fresh, single-source-of-truth value (persist-only).
+                    if self.persist_dynamics:
+                        self.relational.update_dynamics(cid, {"evb": score})
 
                     if score < threshold:
                         to_deprecate.append(cid)

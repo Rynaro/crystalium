@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.ab_memory_onoff import RESULTS_DIR, _run_arm
+from evals.metrics import high_value_retention, promotion_precision
 from evals.missions import AB_ARM_MISSION_IDS, MissionResult
 
 MEMORY_FLAG = "memory"
@@ -54,6 +55,19 @@ def compute_axes(
     }
 
 
+def _snapshot_axes(handlers: dict, evb_threshold: float) -> dict[str, float | None]:
+    """W2 store-snapshot axes for one arm, read from the live handlers."""
+    if not handlers:
+        return {"promotion_precision": None, "high_value_retention": None}
+    promotions = handlers.get("list_promotions", lambda: [])()
+    crystals = handlers.get("list_crystals_with_dynamics", lambda: [])()
+    by_id = {c["id"]: c for c in crystals}
+    return {
+        "promotion_precision": promotion_precision(promotions, by_id),
+        "high_value_retention": high_value_retention(crystals, evb_threshold=evb_threshold),
+    }
+
+
 def ab(
     flag: str,
     missions: list[str] | None = None,
@@ -61,6 +75,7 @@ def ab(
     config_override: dict[str, Any] | None = None,
     seed_fixture: bool = True,
     write_results: bool = False,
+    evb_threshold: float = 0.5,
 ) -> dict[str, Any]:
     """Run an A/B ablation for `flag` over `missions`; return {axis:(on,off,delta)}.
 
@@ -70,26 +85,41 @@ def ab(
         config_override: extra Config kwargs applied to both arms.
         seed_fixture: seed the deterministic fixture repo before each arm.
         write_results: persist a JSON artefact to evals/results/.
+        evb_threshold: high-EVB cut for high_value_retention (recorded in output).
+
+    Axes include pass_rate/average_accuracy (mission pass) and the W2 gate axes
+    promotion_precision + high_value_retention (store snapshots). A snapshot axis
+    delta is None when either arm is undefined (e.g. no promotions on the canary).
     """
     mission_ids = list(missions) if missions else sorted(AB_ARM_MISSION_IDS)
     base = dict(config_override or {})
 
     if flag == MEMORY_FLAG:
-        on = _run_arm(memory_on=True, config_override=base or None, seed_fixture=seed_fixture)
-        off = _run_arm(memory_on=False, config_override=base or None, seed_fixture=seed_fixture)
+        on, on_h = _run_arm(memory_on=True, config_override=base or None,
+                            seed_fixture=seed_fixture, return_handlers=True)
+        off, off_h = _run_arm(memory_on=False, config_override=base or None,
+                             seed_fixture=seed_fixture, return_handlers=True)
     else:
-        on = _run_arm(
-            memory_on=True, config_override={**base, flag: True}, seed_fixture=seed_fixture
-        )
-        off = _run_arm(
-            memory_on=True, config_override={**base, flag: False}, seed_fixture=seed_fixture
-        )
+        on, on_h = _run_arm(memory_on=True, config_override={**base, flag: True},
+                            seed_fixture=seed_fixture, return_handlers=True)
+        off, off_h = _run_arm(memory_on=True, config_override={**base, flag: False},
+                             seed_fixture=seed_fixture, return_handlers=True)
 
     axes = compute_axes(on, off, mission_ids)
+
+    # W2 store-snapshot gate axes (promotion_precision, high_value_retention).
+    on_snap = _snapshot_axes(on_h, evb_threshold)
+    off_snap = _snapshot_axes(off_h, evb_threshold)
+    for name in ("promotion_precision", "high_value_retention"):
+        o, f = on_snap[name], off_snap[name]
+        delta = (o - f) if (o is not None and f is not None) else None
+        axes[name] = (o, f, delta)
+
     result: dict[str, Any] = {
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "flag": flag,
         "missions": mission_ids,
+        "evb_threshold": evb_threshold,
         "axes": {k: {"on": v[0], "off": v[1], "delta": v[2]} for k, v in axes.items()},
         "per_mission_on": {mid: on[mid].passed for mid in on},
         "per_mission_off": {mid: off[mid].passed for mid in off},

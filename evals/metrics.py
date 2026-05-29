@@ -92,6 +92,66 @@ def tool_use_efficiency(successes: float, tool_calls: float) -> float | None:
     return successes / tool_calls
 
 
+# ---------------------------------------------------------------------------
+# W2 ablation-gate axes (store-snapshot based)
+# ---------------------------------------------------------------------------
+
+
+def promotion_precision(
+    promotions: list[dict],
+    crystals_by_id: dict[str, dict],
+    *,
+    outcome_threshold: float = 0.5,
+) -> float | None:
+    """Fraction of promoted crystals later recalled *usefully*.
+
+    promotions: ledger rows ({"crystal_id": ...}). crystals_by_id maps id -> a
+    snapshot dict with access_count + outcome_success_score. "Usefully recalled"
+    = recalled at least once (access_count > 0) AND a positive outcome
+    (outcome_success_score > threshold). Returns None when nothing was promoted
+    (precision undefined — a documented sentinel, not 0.0).
+    """
+    promoted = {p["crystal_id"] for p in promotions}
+    if not promoted:
+        return None
+    useful = 0
+    for cid in promoted:
+        c = crystals_by_id.get(cid)
+        if not c:
+            continue
+        oss = c.get("outcome_success_score")
+        if c.get("access_count", 0) > 0 and oss is not None and oss > outcome_threshold:
+            useful += 1
+    return useful / len(promoted)
+
+
+def high_value_retention(
+    crystals: list[dict],
+    *,
+    evb_threshold: float | None = None,
+    high_value_ids: set[str] | None = None,
+) -> float | None:
+    """Fraction of high-value crystals still active (survived Dream eviction).
+
+    "High value" is identified one of two ways:
+      - high_value_ids: a GROUND-TRUTH set (scorer-independent) — the fair A/B
+        form, defined identically in both arms. Preferred for the gate.
+      - evb_threshold: high = persisted evb >= threshold. Only defined in the EVB
+        arm (legacy never persists evb), so NOT a fair cross-arm comparison; kept
+        for diagnostics.
+    Returns None when there are no high-value members (undefined).
+    """
+    if high_value_ids is not None:
+        members = [c for c in crystals if c.get("id") in high_value_ids]
+    elif evb_threshold is not None:
+        members = [c for c in crystals if c.get("evb") is not None and c["evb"] >= evb_threshold]
+    else:
+        raise ValueError("high_value_retention needs high_value_ids or evb_threshold")
+    if not members:
+        return None
+    return sum(1 for c in members if c.get("status") == "active") / len(members)
+
+
 def swe_bench_cl_axes(
     R: Matrix,
     *,

@@ -111,6 +111,7 @@ class Aetheryte:
         redactor: Redactor,
         importance_fn: Callable[..., float],
         composer: "Composer",
+        persist_dynamics: bool = False,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -119,6 +120,10 @@ class Aetheryte:
         self.redactor = redactor
         self.importance_fn = importance_fn
         self.composer = composer
+        # W2: when True (evb_enabled), recall recomputes + persists EVB for each
+        # returned crystal. The access-count bump itself is unconditional (a layer
+        # fact applied to BOTH A/B arms so the only difference is the scorer).
+        self.persist_dynamics = persist_dynamics
 
     # ------------------------------------------------------------------
     # Public recall API
@@ -302,13 +307,31 @@ class Aetheryte:
                     except Exception:
                         raw_scope = {}
 
+                # W2: when a persisted EVB value exists (written by Dream/recall
+                # under evb_enabled), it is the composer's single source of truth
+                # for ranking. Legacy path is byte-identical: with no evb, fall back
+                # to utility.importance exactly as before.
+                md = crystal.get("memory_dynamics")
+                if isinstance(md, str):
+                    import json
+                    try:
+                        md = json.loads(md)
+                    except Exception:
+                        md = None
+                evb_cached = md.get("evb") if isinstance(md, dict) else None
+                importance_val = (
+                    float(evb_cached)
+                    if evb_cached is not None
+                    else float(utility.get("importance", 0.0))
+                )
+
                 return _ComposerRecord(
                     id=crystal["id"],
                     layer=crystal.get("layer", "episodic"),
                     summary=crystal.get("summary", ""),
                     trust_tier=crystal.get("trust_tier", "T1"),
                     validation_state=crystal.get("validation_state", "unverified"),
-                    importance=float(utility.get("importance", 0.0)),
+                    importance=importance_val,
                     last_access=last_access_dt,
                     content_ref=crystal.get("content_ref"),
                     scope_sensitivity_tag=(raw_scope.get("sensitivity_tag") or "none"),
@@ -323,6 +346,23 @@ class Aetheryte:
 
             # 7. Composer: slot-budgeted assembly
             composed = self.composer.compose(composer_records)
+
+            # 7b. W2 access event: bump access_count/last_access for every surfaced
+            # crystal (a layer fact recorded in BOTH A/B arms). Under evb_enabled,
+            # recompute + persist EVB so Need's access-frequency term and the
+            # composer's evb cache stay fresh. Never let this break a recall.
+            for rec in composed.records:
+                try:
+                    self.relational.record_access(rec.id, now=now)
+                    if self.persist_dynamics:
+                        full = self.relational.get_crystal(rec.id)
+                        if full is not None:
+                            stub = _AccessStub(full.get("utility", {}), now)
+                            self.relational.update_dynamics(
+                                rec.id, {"evb": self.importance_fn(stub, now=now)}
+                            )
+                except Exception:
+                    log.warning("recall_access_event_failed", crystal_id=rec.id)
 
             # 8. Redactor: per-record summary redaction (P0-12)
             result_records: list[CrystalSummary] = []
@@ -386,6 +426,25 @@ class Aetheryte:
                 latency_ms=now_ms() - t0,
                 error=error_code,
             )
+
+
+class _AccessStub:
+    """Minimal MemoryRecord built from a crystal's utility JSON for EVB recompute."""
+
+    __slots__ = ("access_count", "last_access", "outcome_success", "novelty_at_write")
+
+    def __init__(self, util: dict[str, Any], now: datetime) -> None:
+        self.access_count = int(util.get("access_count", 0))
+        la = util.get("last_access")
+        if isinstance(la, str):
+            try:
+                self.last_access = datetime.fromisoformat(la)
+            except ValueError:
+                self.last_access = now
+        else:
+            self.last_access = now
+        self.outcome_success = util.get("outcome_success_score")
+        self.novelty_at_write = float(util.get("novelty_at_write", 0.0))
 
 
 # ---------------------------------------------------------------------------

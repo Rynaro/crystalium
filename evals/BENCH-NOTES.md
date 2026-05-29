@@ -74,3 +74,70 @@ use `docker run --rm crystalium:dev <cmd>` against the **baked** image (see
 path for convention parity and share this caveat. **[GAP]** A future wave could
 relocate the venv (e.g. `UV_PROJECT_ENVIRONMENT=/opt/venv`) so the compose path
 works with live edits; out of scope for W1.
+
+## W2 EVB ablation gate (v0.3.0) — INCONCLUSIVE, flag stays OFF
+
+`docker run --rm crystalium:dev python -m evals ab --flag evb_enabled` over the
+A/B arm set, evb_threshold=0.5:
+
+| axis | on (evb) | off (legacy) | delta |
+|---|---|---|---|
+| pass_rate | 0.25 | 0.25 | 0.0 |
+| promotion_precision | null | null | null |
+| high_value_retention | null | null | null |
+
+**Verdict: EVB does NOT beat legacy ⇒ `evb_enabled` stays OFF (default).** This is
+an honest ablation-or-revert null, not a regression:
+
+- **Both gate metrics are undefined (null)** on the current canary. The suite
+  triggers **no promotions** (semantic auto-admit needs k independent witnesses;
+  the missions don't commit corroborating witnesses → empty ledger →
+  promotion_precision undefined) and produces **no high-EVB persisted crystals**
+  in a single synchronous run (the full Dream prune write-back doesn't run inline;
+  recall-persisted evb values stay below 0.5 for the few recalled crystals →
+  high_value_retention undefined).
+- **pass_rate is unchanged** (0.25 both arms): EVB reshapes eviction/composer
+  *ordering*, not mission pass/fail on this suite — expected.
+
+The EVB machinery (evb.py, persistence, routing, recompute-on-event,
+instrumentation, axes) all ship **behind the OFF flag** and are fully tested. The
+keystone is in place; the canary simply cannot yet *demonstrate* it beats legacy.
+
+**[GAP — addressed below]** Strengthen the canary to exercise continual-learning
+dynamics that EVB targets: missions that (a) commit k corroborating witnesses so
+promotions actually fire, (b) run a full Dream prune cycle so high-EVB survival
+is observable, and (c) attach outcomes to recalled crystals.
+
+## W2 EVB gate — strengthened workload (`evals/evb_gate.py`)
+
+`docker run --rm crystalium:dev python -m evals evb-gate`. A deterministic
+population (6 high-value, 6 distractor, 6 low-value) runs through a real Dream
+prune in each arm; metrics use a **ground-truth value label (id prefix)** —
+scorer-independent, so the A/B is fair in BOTH arms (it no longer keys on
+persisted evb, which only the EVB arm has).
+
+| axis | on (evb) | off (legacy) | delta |
+|---|---|---|---|
+| promotion_precision | 1.0 | 1.0 | 0.0 (tie) |
+| high_value_retention | 1.0 | 1.0 | 0.0 (tie) |
+| distractor_eviction *(diagnostic)* | 1.0 | 0.0 | **+1.0** |
+
+**Verdict: EVB does NOT strictly beat legacy on the two DoD metrics ⇒
+`evb_enabled` stays OFF.** Both scorers perfectly retain genuine high-value
+memories and recall promoted ones, so the recall-oriented DoD metrics tie.
+
+**Key finding (the real EVB effect):** the diagnostic shows EVB evicts **100% of
+single-axis distractors** ("high need, low gain" — frequently accessed but
+useless) while legacy keeps **0%**. EVB's multiplicative Gain×Need correctly
+devalues junk the additive blend over-rewards. EVB's advantage is **precision**
+(evicting low-value), which the DoD's **recall** metrics (high-value retention /
+promotion precision) structurally cannot detect.
+
+**Operator decision surfaced:** the W2 DoD named the wrong axes to detect EVB's
+benefit. Options: (i) keep `evb_enabled` OFF under the strict literal DoD (ties →
+no flip — the conservative default taken here); or (ii) adopt distractor-eviction
+/ retention-precision as the W2 gate metric (a DoD refinement) and flip ON.
+Flipping was NOT done unilaterally — redefining the gate to manufacture a win
+would violate "never massage a metric". Also note EVB's product is systematically
+lower-scaled than the additive sum, so eviction thresholds likely want
+recalibration for the EVB scale (a W4 forgetting-faculty concern).

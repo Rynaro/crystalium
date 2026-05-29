@@ -228,3 +228,27 @@ class TestHumanConfirmActive:
         # One second before boundary — should be active
         almost = now - timedelta(seconds=1)
         assert cfg.human_confirm_active(now=almost) is True
+
+
+class TestEvbFlag:
+    """W2: evb_enabled flag + EVB proxy weights (default OFF — ablation-or-revert)."""
+
+    def test_evb_disabled_by_default(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.evb_enabled is False
+        assert len(cfg.evb_gain_weights) == 3
+        assert len(cfg.evb_need_weights) == 3
+
+    def test_evb_enabled_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_EVB_ENABLED", "true")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.evb_enabled is True
+
+    def test_evb_from_dict(self) -> None:
+        cfg = Config._from_dict({
+            "evb_enabled": True,
+            "evb_gain_weights": [0.4, 0.4, 0.2],
+        })
+        assert cfg.evb_enabled is True
+        assert cfg.evb_gain_weights == (0.4, 0.4, 0.2)

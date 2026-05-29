@@ -90,6 +90,22 @@ This document traces every non-obvious decision in CRYSTALIUM v0.1.0 to its sour
 
 ---
 
+### D6.1. Expected Value of Backup (EVB) — W2 (v0.3.0)
+
+**Decision:** Add a parallel scorer `evb_score(record, *, now)` computing **EVB = Gain × Need**, selected over the legacy `importance_score` by `Config.evb_enabled` (default OFF). EVB becomes the single source of truth for eviction (Dream prune) and the working-set composer when enabled; `importance_score` and its frozen `WEIGHTS` are untouched (D6 lock holds — `evb.py` is parallel, `mcp-server/src/crystalium/evb.py`).
+
+**Rationale:** Mattar & Daw 2018 (*Nat Neurosci* 21:1609–1617, DOI 10.1038/s41593-018-0232-z; **[verified]** — real paper) show optimal memory access/replay is ordered by **EVB = Gain × Need**: Gain = how much accessing a memory improves future choices; Need = how likely/soon it is relevant. One product unifies what to keep, evict, and replay — matching CRYSTALIUM's three importance consumers.
+
+**Deliberate approximation [MEDIUM]:** True Mattar–Daw *Gain* requires counterfactual policy evaluation, which CRYSTALIUM has no policy to run. We use a **SFMA-style proxy** — `gain ≈ g(outcome_success, novelty, corroboration_potential)`, `need ≈ n(recency, access_frequency, predicted_next_task_match)` — over the existing `MemoryRecord` fields. `corroboration_potential` and `predicted_next_task_match` have no canonical schema ground truth **[UNVERIFIED]**; their proxy formulas are pinned in `evb.py` with documented assumptions. The 2025 "SuRe" follow-on (prioritized replay for continual LLM learning) is **[MEDIUM]** corroboration.
+
+**Stance — neuroscience-as-hypothesis, ablation-as-arbiter:** the citation motivates the design; it does **not** justify shipping it. EVB flips ON only if `ab("evb_enabled", canary)` beats `legacy` on **both** promotion precision and high-value retention (`evals/ablation.py`); otherwise the flag stays OFF and the null result is reported honestly (ablation-or-revert).
+
+**Reversibility:** the realised `PluggableImportance` reversibility promised in D6 — a single `_build_components` swap point selects the scorer; remove the flag to revert.
+
+**Source:** `roadmap-v1/W2-importance-evb.md`; Mattar & Daw 2018 [verified]; SFMA proxy [MEDIUM].
+
+---
+
 ### D7. Cross-cutting trust-tier propagation
 
 **Decision:** Consolidated tier = MIN(inputs.tier). Admission checks `consolidated.tier ≤ layer.ceiling`. T3 input → Semantic admission denied. Error message: structured advice "exclude T3 inputs or commit to Episodic instead."

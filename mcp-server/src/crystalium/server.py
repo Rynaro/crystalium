@@ -43,6 +43,7 @@ from crystalium.dream.worker import DreamWorker
 from crystalium.ecl import build_for_tool_result, emit_sidecar
 from crystalium.enforcement import Enforcement
 from crystalium.gate import PromotionGate
+from crystalium.evb import make_evb_scorer
 from crystalium.importance import importance_score
 from crystalium.layers.episodic import EpisodicLayer
 from crystalium.layers.execution import ExecutionLayer
@@ -303,6 +304,16 @@ def _build_components(
 
     gate = PromotionGate(config, relational, enforcement)
 
+    # W2: single swap point for the importance function. When evb_enabled, EVB
+    # (Gain x Need) replaces the legacy importance_score everywhere it is injected
+    # (eviction, composer, layers). Default OFF (ablation-or-revert). The
+    # enforcement chokepoint never receives importance_fn — it stays untouched.
+    importance_fn = (
+        make_evb_scorer(config.evb_gain_weights, config.evb_need_weights)
+        if config.evb_enabled
+        else importance_score
+    )
+
     episodic = EpisodicLayer(
         blob_store=blob_store,
         relational=relational,
@@ -310,7 +321,7 @@ def _build_components(
         graph_store=graph_store,
         enforcement=enforcement,
         redactor=redactor,
-        importance_fn=importance_score,
+        importance_fn=importance_fn,
     )
     semantic = SemanticLayer(
         blob_store=blob_store,
@@ -320,7 +331,7 @@ def _build_components(
         enforcement=enforcement,
         gate=gate,
         redactor=redactor,
-        importance_fn=importance_score,
+        importance_fn=importance_fn,
     )
     procedural = ProceduralLayer(
         blob_store=blob_store,
@@ -328,14 +339,14 @@ def _build_components(
         enforcement=enforcement,
         gate=gate,
         redactor=redactor,
-        importance_fn=importance_score,
+        importance_fn=importance_fn,
         data_dir=config.data_dir,
     )
     execution = ExecutionLayer(
         blob_store=blob_store,
         relational=relational,
         enforcement=enforcement,
-        importance_fn=importance_score,
+        importance_fn=importance_fn,
     )
     aetheryte = Aetheryte(
         relational=relational,
@@ -343,8 +354,9 @@ def _build_components(
         graph_store=graph_store,
         enforcement=enforcement,
         redactor=redactor,
-        importance_fn=importance_score,
+        importance_fn=importance_fn,
         composer=composer,
+        persist_dynamics=config.evb_enabled,
     )
 
     worker = DreamWorker(
@@ -353,7 +365,8 @@ def _build_components(
         graph_store=graph_store,
         enforcement=enforcement,
         gate=gate,
-        importance_fn=importance_score,
+        importance_fn=importance_fn,
+        persist_dynamics=config.evb_enabled,
     )
     scheduler = DreamScheduler(config=config, worker=worker, store=relational)
 
@@ -757,6 +770,21 @@ def _handle_update(
             f"Crystal not found: {crystal_id!r}",
             reason_code="CRYSTAL_NOT_FOUND",
         )
+
+    # W2 outcome event: an outcome-only patch records utility.outcome_success_score
+    # IN PLACE (a fact about the existing crystal — not a bi-temporal supersession).
+    # Feeds EVB's Gain term + promotion precision; EVB refreshes on the next
+    # recall/Dream recompute.
+    if "outcome_success_score" in patch and set(patch.keys()) <= {"outcome_success_score"}:
+        import datetime as _dt
+
+        score = float(patch["outcome_success_score"])
+        relational.record_outcome(crystal_id, score, now=_dt.datetime.now(_dt.timezone.utc))
+        return {
+            "status": "outcome_recorded",
+            "id": crystal_id,
+            "outcome_success_score": score,
+        }
 
     layer = existing.get("layer", "episodic")
     log.info("update_dispatch", crystal_id=crystal_id, layer=layer, reason=reason)
