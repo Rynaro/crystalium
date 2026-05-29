@@ -291,3 +291,32 @@ class TestDreamFlags:
         assert cfg.dream_interleave_ratio == 0.1
         assert cfg.stc_threshold == 0.7
         assert cfg.stc_window_s == 60
+
+
+class TestForgettingFlags:
+    """W4 forgetting-faculty flags (default OFF — ablation-or-revert)."""
+
+    def test_forgetting_off_by_default(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.forgetting_fsrs is False
+        assert cfg.r_floor == 0.7
+        assert cfg.evb_percentile == 0.5
+        assert cfg.resurface_floor == 0.85
+
+    def test_forgetting_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_FORGETTING_FSRS", "true")
+        monkeypatch.setenv("CRYSTALIUM_R_FLOOR", "0.6")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.forgetting_fsrs is True
+        assert cfg.r_floor == 0.6
+
+    def test_forgetting_from_dict(self) -> None:
+        cfg = Config._from_dict({
+            "forgetting_fsrs": True,
+            "evb_percentile": 0.25,
+            "fsrs_boost_factor": 2.0,
+        })
+        assert cfg.forgetting_fsrs is True
+        assert cfg.evb_percentile == 0.25
+        assert cfg.fsrs_boost_factor == 2.0

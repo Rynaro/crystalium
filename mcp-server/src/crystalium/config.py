@@ -156,6 +156,19 @@ class Config:
     stc_threshold: float = 0.5
     stc_window_s: int = 3600
 
+    # Forgetting faculty (W4, FSRS/DSR). When True, FSRS decay drives a
+    # value-aware eviction (R < r_floor AND EVB below percentile — never age
+    # alone), recall boosts stability, and aging-but-valuable crystals are
+    # re-surfaced. Default OFF (ablation-or-revert). Realizes "forgetting.mode=fsrs".
+    forgetting_fsrs: bool = False
+    r_floor: float = 0.7              # evict only when retrievability dips below this
+    resurface_floor: float = 0.85    # re-surface aging crystals before R crosses r_floor
+    evb_percentile: float = 0.5      # evict only when EVB below this percentile of active set
+    fsrs_initial_stability: float = 2.0   # days; R=0.9 after this elapsed at first
+    fsrs_initial_difficulty: float = 0.3
+    fsrs_boost_factor: float = 1.5   # stability multiplier on successful recall (reconsolidation)
+    fsrs_lapse_stability: float = 0.5  # stability reset on a lapse (R<r_floor at access)
+
     # Rate limiting (P0-7, atlas-aci pattern)
     rate_limit_per_minute: int = 200
 
@@ -236,6 +249,10 @@ class Config:
             dream_stc=_env_bool("CRYSTALIUM_DREAM_STC", False),
             stc_threshold=_env_float("CRYSTALIUM_STC_THRESHOLD", 0.5),
             stc_window_s=_env_int("CRYSTALIUM_STC_WINDOW_S", 3600),
+            forgetting_fsrs=_env_bool("CRYSTALIUM_FORGETTING_FSRS", False),
+            r_floor=_env_float("CRYSTALIUM_R_FLOOR", 0.7),
+            resurface_floor=_env_float("CRYSTALIUM_RESURFACE_FLOOR", 0.85),
+            evb_percentile=_env_float("CRYSTALIUM_EVB_PERCENTILE", 0.5),
         )
 
     @classmethod
@@ -256,6 +273,7 @@ class Config:
         for bool_field in (
             "http_json_response", "http_stateless", "evb_enabled",
             "dream_replay_evb", "dream_interleave", "dream_stc",
+            "forgetting_fsrs",
         ):
             if bool_field in data:
                 kwargs[bool_field] = bool(data[bool_field])
@@ -286,6 +304,13 @@ class Config:
             "importance_recency_halflife_days",
             "dream_interleave_ratio",
             "stc_threshold",
+            "r_floor",
+            "resurface_floor",
+            "evb_percentile",
+            "fsrs_initial_stability",
+            "fsrs_initial_difficulty",
+            "fsrs_boost_factor",
+            "fsrs_lapse_stability",
         ):
             if float_field in data:
                 kwargs[float_field] = float(data[float_field])
