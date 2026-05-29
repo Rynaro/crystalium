@@ -154,19 +154,20 @@ def test_doctor_fail_shows_fail_marker(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# doctor — canary stub raises ClickException
+# canary — dispatches to the evals bench (no longer a W5 stub)
 # ---------------------------------------------------------------------------
 
 
-def test_canary_raises_w5_not_implemented() -> None:
-    """crystalium canary exits with a ClickException mentioning W5."""
+def test_canary_dispatches_to_bench_and_prints_headline() -> None:
+    """crystalium canary calls evals.run_all and prints the headline (no W5 stub)."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["canary"], catch_exceptions=True)
-
-    # ClickException → UsageError → exit code 1
-    assert result.exit_code != 0 or "W5" in result.output, (
-        "canary should exit non-zero or mention W5"
-    )
+    fake = {"headline": {"delta": 0.8, "headline_pass": True}, "mode": "both"}
+    with patch("evals.ab_memory_onoff.run_all", return_value=fake) as run_all:
+        result = runner.invoke(cli, ["canary", "--mode", "off_only", "--no-write"],
+                               catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    run_all.assert_called_once_with(mode="off_only", write_results=False)
+    assert "headline_pass" in result.output
 
 
 # ---------------------------------------------------------------------------
