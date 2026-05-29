@@ -63,13 +63,18 @@ def serve(config_path: Optional[Path]) -> None:
     else:
         config = Config.from_env()
 
-    if config.transport != "stdio":
-        raise click.ClickException(
-            f"Transport {config.transport!r} is not supported in v0.1. "
-            "Set CRYSTALIUM_TRANSPORT=stdio (or unset it)."
-        )
+    transport = (config.transport or "stdio").lower()
+    if transport == "stdio":
+        asyncio.run(run_stdio(config))
+    elif transport in ("http", "streamable-http", "streamable_http"):
+        from crystalium.server import run_http
 
-    asyncio.run(run_stdio(config))
+        asyncio.run(run_http(config))
+    else:
+        raise click.ClickException(
+            f"Transport {config.transport!r} is not supported. "
+            "Use CRYSTALIUM_TRANSPORT=stdio (default) or http."
+        )
 
 
 # ---------------------------------------------------------------------------

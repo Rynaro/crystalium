@@ -5,7 +5,8 @@ CRYSTALIUM tool implementations. Every call passes through the enforcement
 chokepoint before any storage layer is touched.
 
 Design anchors:
-  D2: stdio-only in v0.1; HTTP branch raises NotImplementedError("v0.2").
+  D2: stdio is the default transport; Streamable-HTTP (run_http) added in v0.2.
+      Both transports share _build_server + the @server.call_tool dispatch.
   D3: session_end triggers DreamScheduler.on_session_end() (enqueues; never inline).
   D4: every tool result emits ECL v2.0 sidecar via ecl.build_for_tool_result() +
       ecl.emit_sidecar().
@@ -416,18 +417,14 @@ def _emit_ecl_sidecar(
 # ---------------------------------------------------------------------------
 
 
-async def run_stdio(config: Config) -> None:
-    """Start the CRYSTALIUM MCP server over stdio.
+def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
+    """Build the MCP Server with all 7 tools wired, plus its DreamScheduler.
 
-    D2: stdio-only in v0.1.  HTTP raises NotImplementedError("v0.2").
+    Transport-agnostic: shared verbatim by both run_stdio and run_http (D2,
+    v0.2). The caller is responsible for starting the scheduler and running the
+    chosen transport. Components (_build_components) and the @server.call_tool
+    dispatch are reused as-is across transports.
     """
-    if config.transport != "stdio":
-        raise NotImplementedError(
-            f"Transport {config.transport!r} is not supported in v0.1. "
-            "Set CRYSTALIUM_TRANSPORT=stdio or omit the variable. "
-            "Streamable-HTTP is deferred to v0.2."
-        )
-
     server = Server("crystalium")
 
     (
@@ -441,9 +438,6 @@ async def run_stdio(config: Config) -> None:
         scheduler,
         relational,
     ) = _build_components(config)
-
-    # Start the background dream scheduler (APScheduler daemon thread)
-    scheduler.start()
 
     @server.list_tools()
     async def _list_tools() -> list[Tool]:
@@ -560,19 +554,90 @@ async def run_stdio(config: Config) -> None:
                 err_payload["advice"] = advice
             return [TextContent(type="text", text=json.dumps(err_payload, indent=2))]
 
+    return server, scheduler
+
+
+async def run_stdio(config: Config) -> None:
+    """Start the CRYSTALIUM MCP server over stdio (the default transport)."""
+    server, scheduler = _build_server(config)
+    scheduler.start()
     log.info(
         "server_starting",
-        transport=config.transport,
+        transport="stdio",
         data_dir=str(config.data_dir),
         version=__version__,
     )
-
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
             write_stream,
             server.create_initialization_options(),
         )
+
+
+def build_http_app(config: Config):
+    """Build the Starlette ASGI app for the Streamable-HTTP transport (D2, v0.2).
+
+    Returns (app, scheduler, session_manager). build_http_app starts nothing —
+    the caller (run_http) starts the scheduler and serves the app — so tests can
+    drive the app through an ASGI test client without a live socket or the
+    APScheduler daemon. Every tool result still flows through the shared
+    @server.call_tool dispatch, so the ECL v2.0 sidecar is emitted over HTTP too.
+    """
+    import contextlib
+
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    server, scheduler = _build_server(config)
+
+    session_manager = StreamableHTTPSessionManager(
+        app=server,
+        event_store=None,
+        json_response=config.http_json_response,
+        stateless=config.http_stateless,
+    )
+
+    async def handle_streamable_http(scope: Any, receive: Any, send: Any) -> None:
+        await session_manager.handle_request(scope, receive, send)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: Any):
+        async with session_manager.run():
+            yield
+
+    app = Starlette(
+        routes=[Mount(config.http_path, app=handle_streamable_http)],
+        lifespan=lifespan,
+    )
+    return app, scheduler, session_manager
+
+
+async def run_http(config: Config) -> None:
+    """Start the CRYSTALIUM MCP server over Streamable-HTTP (D2 unstubbed, v0.2)."""
+    import uvicorn
+
+    app, scheduler, _session_manager = build_http_app(config)
+    scheduler.start()
+    log.info(
+        "server_starting",
+        transport="streamable-http",
+        host=config.http_host,
+        port=config.http_port,
+        path=config.http_path,
+        data_dir=str(config.data_dir),
+        version=__version__,
+    )
+    uv = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=config.http_host,
+            port=config.http_port,
+            log_level="warning",
+        )
+    )
+    await uv.serve()
 
 
 # ---------------------------------------------------------------------------
