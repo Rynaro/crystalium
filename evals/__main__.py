@@ -67,6 +67,12 @@ def _cmd_axes(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _cmd_evb_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.evb_gate import run
+
+    return run()
+
+
 def _cmd_forget(args: argparse.Namespace) -> dict[str, Any]:
     from evals.ab_memory_onoff import _build_live_handlers
     from evals.selective_forgetting import run_test
@@ -122,6 +128,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     f = sub.add_parser("forget", help="selective-forgetting probe")
     f.set_defaults(func=_cmd_forget)
+
+    g = sub.add_parser("evb-gate", help="deterministic EVB ablation gate (W2 DoD)")
+    g.set_defaults(func=_cmd_evb_gate)
 
     return p
 

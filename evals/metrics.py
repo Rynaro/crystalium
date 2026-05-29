@@ -128,18 +128,28 @@ def promotion_precision(
 def high_value_retention(
     crystals: list[dict],
     *,
-    evb_threshold: float,
+    evb_threshold: float | None = None,
+    high_value_ids: set[str] | None = None,
 ) -> float | None:
-    """Fraction of high-EVB crystals still active (survived Dream eviction).
+    """Fraction of high-value crystals still active (survived Dream eviction).
 
-    crystals: snapshot dicts with status + evb. High-EVB = evb not None and
-    >= threshold. Returns None when there are no high-EVB crystals (undefined).
+    "High value" is identified one of two ways:
+      - high_value_ids: a GROUND-TRUTH set (scorer-independent) — the fair A/B
+        form, defined identically in both arms. Preferred for the gate.
+      - evb_threshold: high = persisted evb >= threshold. Only defined in the EVB
+        arm (legacy never persists evb), so NOT a fair cross-arm comparison; kept
+        for diagnostics.
+    Returns None when there are no high-value members (undefined).
     """
-    high = [c for c in crystals if c.get("evb") is not None and c["evb"] >= evb_threshold]
-    if not high:
+    if high_value_ids is not None:
+        members = [c for c in crystals if c.get("id") in high_value_ids]
+    elif evb_threshold is not None:
+        members = [c for c in crystals if c.get("evb") is not None and c["evb"] >= evb_threshold]
+    else:
+        raise ValueError("high_value_retention needs high_value_ids or evb_threshold")
+    if not members:
         return None
-    survivors = sum(1 for c in high if c.get("status") == "active")
-    return survivors / len(high)
+    return sum(1 for c in members if c.get("status") == "active") / len(members)
 
 
 def swe_bench_cl_axes(

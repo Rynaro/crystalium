@@ -1,0 +1,50 @@
+"""W2 — deterministic EVB ablation-gate workload (evals/evb_gate.py).
+
+Container-first:
+  docker run --rm crystalium:dev python -m evals evb-gate
+
+Asserts the gate is now EVALUABLE (defined metrics, both arms) and that EVB's
+multiplicative scorer evicts the single-axis distractors that the legacy additive
+blend keeps — the measurable EVB effect, deterministic on the fixed population.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from evals.evb_gate import run, run_arm
+
+
+def test_gate_metrics_are_defined_both_arms(tmp_path: Path) -> None:
+    on = run_arm(True, data_root=str(tmp_path))
+    off = run_arm(False, data_root=str(tmp_path))
+    for arm in (on, off):
+        assert arm["promotion_precision"] is not None
+        assert arm["high_value_retention"] is not None
+        assert arm["distractor_eviction"] is not None
+
+
+def test_evb_evicts_distractors_legacy_keeps_them(tmp_path: Path) -> None:
+    on = run_arm(True, data_root=str(tmp_path))
+    off = run_arm(False, data_root=str(tmp_path))
+    # EVB (Gain x Need) devalues high-need/low-gain distractors → evicts them all.
+    assert on["distractor_eviction"] == pytest.approx(1.0)
+    # Legacy additive blend keeps them → evicts none.
+    assert off["distractor_eviction"] == pytest.approx(0.0)
+
+
+def test_high_value_retained_in_both_arms(tmp_path: Path) -> None:
+    # Both scorers keep genuine high-value memories — the DoD metrics tie at 1.0.
+    on = run_arm(True, data_root=str(tmp_path))
+    off = run_arm(False, data_root=str(tmp_path))
+    assert on["high_value_retention"] == pytest.approx(1.0)
+    assert off["high_value_retention"] == pytest.approx(1.0)
+
+
+def test_run_returns_verdict_off_on_tie(tmp_path: Path) -> None:
+    result = run(data_root=str(tmp_path))
+    # Ties on the two DoD axes ⇒ does not strictly beat ⇒ gate_pass False.
+    assert result["gate_pass"] is False
+    assert "axes" in result and "distractor_eviction" in result["axes"]

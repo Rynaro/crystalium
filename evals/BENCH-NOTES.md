@@ -103,8 +103,41 @@ The EVB machinery (evb.py, persistence, routing, recompute-on-event,
 instrumentation, axes) all ship **behind the OFF flag** and are fully tested. The
 keystone is in place; the canary simply cannot yet *demonstrate* it beats legacy.
 
-**[GAP — later wave]** Strengthen the canary to exercise continual-learning
+**[GAP — addressed below]** Strengthen the canary to exercise continual-learning
 dynamics that EVB targets: missions that (a) commit k corroborating witnesses so
 promotions actually fire, (b) run a full Dream prune cycle so high-EVB survival
-is observable, and (c) attach outcomes to recalled crystals. Only then can the
-gate give EVB a fair vs-legacy comparison. Until then `evb_enabled` remains OFF.
+is observable, and (c) attach outcomes to recalled crystals.
+
+## W2 EVB gate — strengthened workload (`evals/evb_gate.py`)
+
+`docker run --rm crystalium:dev python -m evals evb-gate`. A deterministic
+population (6 high-value, 6 distractor, 6 low-value) runs through a real Dream
+prune in each arm; metrics use a **ground-truth value label (id prefix)** —
+scorer-independent, so the A/B is fair in BOTH arms (it no longer keys on
+persisted evb, which only the EVB arm has).
+
+| axis | on (evb) | off (legacy) | delta |
+|---|---|---|---|
+| promotion_precision | 1.0 | 1.0 | 0.0 (tie) |
+| high_value_retention | 1.0 | 1.0 | 0.0 (tie) |
+| distractor_eviction *(diagnostic)* | 1.0 | 0.0 | **+1.0** |
+
+**Verdict: EVB does NOT strictly beat legacy on the two DoD metrics ⇒
+`evb_enabled` stays OFF.** Both scorers perfectly retain genuine high-value
+memories and recall promoted ones, so the recall-oriented DoD metrics tie.
+
+**Key finding (the real EVB effect):** the diagnostic shows EVB evicts **100% of
+single-axis distractors** ("high need, low gain" — frequently accessed but
+useless) while legacy keeps **0%**. EVB's multiplicative Gain×Need correctly
+devalues junk the additive blend over-rewards. EVB's advantage is **precision**
+(evicting low-value), which the DoD's **recall** metrics (high-value retention /
+promotion precision) structurally cannot detect.
+
+**Operator decision surfaced:** the W2 DoD named the wrong axes to detect EVB's
+benefit. Options: (i) keep `evb_enabled` OFF under the strict literal DoD (ties →
+no flip — the conservative default taken here); or (ii) adopt distractor-eviction
+/ retention-precision as the W2 gate metric (a DoD refinement) and flip ON.
+Flipping was NOT done unilaterally — redefining the gate to manufacture a win
+would violate "never massage a metric". Also note EVB's product is systematically
+lower-scaled than the additive sum, so eviction thresholds likely want
+recalibration for the EVB scale (a W4 forgetting-faculty concern).
