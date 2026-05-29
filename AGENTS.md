@@ -131,41 +131,47 @@ crystalium/
 │       ├── config.py               # Pydantic models
 │       ├── importance.py           # importance_score (frozen sig)
 │       ├── composer.py             # working-set composer
-│       ├── ecl_envelope.py         # envelope sidecar helper
+│       ├── ecl.py                  # ECL envelope sidecar helper
 │       ├── layers/
 │       │   ├── episodic.py
 │       │   ├── semantic.py
 │       │   ├── procedural.py
 │       │   └── execution.py
 │       ├── aetheryte/
-│       │   ├── recall.py
+│       │   ├── retrieve.py         # hybrid recall (BM25 + vector RRF)
 │       │   └── redact.py
 │       ├── dream/
 │       │   ├── scheduler.py
 │       │   └── worker.py
 │       ├── gate.py
 │       ├── storage/
-│       │   ├── sqlite.py
-│       │   ├── lance.py
-│       │   ├── kuzu.py
+│       │   ├── relational.py       # SQLite adapter
+│       │   ├── vector.py           # vector adapter
+│       │   ├── graph.py            # graph adapter
 │       │   └── blob.py
 │       └── telemetry.py
-└── mcp-server/tests/
-    ├── conftest.py
-    ├── test_enforcement.py         # G1, G2, G4
-    ├── test_trust_propagation.py   # G4
-    ├── test_skill_invoke.py        # G3
-    ├── test_promotion_gate.py      # G5
-    ├── test_composer.py            # G6
-    ├── test_ecl_conformance.py     # G7
-    ├── test_dream_scheduler.py     # G8
-    ├── test_schemas.py
-    ├── test_storage_sqlite.py
-    ├── test_storage_lance.py
-    ├── test_storage_kuzu.py
-    ├── test_storage_blob.py
-    └── canary/
-        └── test_canary_*.py        # 10 missions
+├── mcp-server/tests/
+│   ├── conftest.py
+│   ├── test_enforcement.py         # G1, G2, G4
+│   ├── test_trust_propagation.py   # G4
+│   ├── test_skill_invoke.py        # G3
+│   ├── test_promotion_gate.py      # G5
+│   ├── test_composer.py            # G6
+│   ├── test_ecl_envelope.py        # G7
+│   ├── test_dream_scheduler.py     # G8
+│   ├── test_schemas.py
+│   ├── test_storage_relational.py
+│   ├── test_storage_vector.py
+│   ├── test_storage_graph.py
+│   ├── test_storage_blob.py
+│   └── …                           # + aetheryte, bitemporal, cli, config,
+│                                    #   dream_worker, importance, redaction, rrf, server
+└── evals/                          # canary missions + memory-on/off A/B (run as scripts, NOT pytest;
+    ├── missions.py                 #   excluded from the install target — see conformance.yml)
+    ├── canary-missions.md
+    ├── ab_memory_onoff.py
+    ├── poisoning_resistance.py
+    └── selective_forgetting.py
 ```
 
 ---

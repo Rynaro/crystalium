@@ -636,7 +636,7 @@ def can_9_ecl_envelope_conformance(env: CanaryEnv) -> MissionResult:
         validation_errors.extend(validation_result.get("errors", []))
         passed = len(envelopes_found) > 0 and len(validation_errors) == 0
     else:
-        # Without an ecl_validator injected, defer to test_ecl_conformance.py
+        # Without an ecl_validator injected, defer to test_ecl_envelope.py
         passed = True  # vacuous in harness; tested by G7 test_anchor
 
     return MissionResult(

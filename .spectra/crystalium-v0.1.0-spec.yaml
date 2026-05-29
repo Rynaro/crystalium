@@ -150,7 +150,7 @@ gates:
     given: "Any crystalium.* MCP tool result that produces a payload artefact."
     when: "Result is written to disk."
     then: "Sibling ecl-envelope.<message_id>.json exists, validates against envelope.v2.json, carries all 11 required ECL v2.0 fields. integrity.method='sha256'. integrity.value == hashlib.sha256(payload_bytes).hexdigest() == artifact.sha256. from.eidolon='crystalium', from.version=__version__."
-    test_anchor: "mcp-server/tests/test_ecl_conformance.py::test_g7_every_tool_result_emits_valid_envelope"
+    test_anchor: "mcp-server/tests/test_ecl_envelope.py::test_g7_every_tool_result_emits_valid_envelope"
     failure_class: "EnvelopeMissing|EnvelopeInvalid|EnvelopeIntegrityMismatch"
     tier_violated: "n/a"
     severity: "P0"
@@ -440,7 +440,7 @@ file_layout:
     - "mcp-server/src/crystalium/config.py"
     - "mcp-server/src/crystalium/importance.py"
     - "mcp-server/src/crystalium/composer.py"
-    - "mcp-server/src/crystalium/ecl_envelope.py"
+    - "mcp-server/src/crystalium/ecl.py"
     - "mcp-server/src/crystalium/gate.py"
     - "mcp-server/src/crystalium/telemetry.py"
     - "mcp-server/src/crystalium/layers/__init__.py"
@@ -449,14 +449,14 @@ file_layout:
     - "mcp-server/src/crystalium/layers/procedural.py"
     - "mcp-server/src/crystalium/layers/execution.py"
     - "mcp-server/src/crystalium/aetheryte/__init__.py"
-    - "mcp-server/src/crystalium/aetheryte/recall.py"
+    - "mcp-server/src/crystalium/aetheryte/retrieve.py"
     - "mcp-server/src/crystalium/aetheryte/redact.py"
     - "mcp-server/src/crystalium/dream/__init__.py"
     - "mcp-server/src/crystalium/dream/scheduler.py"
     - "mcp-server/src/crystalium/dream/worker.py"
-    - "mcp-server/src/crystalium/storage/sqlite.py"
-    - "mcp-server/src/crystalium/storage/lance.py"
-    - "mcp-server/src/crystalium/storage/kuzu.py"
+    - "mcp-server/src/crystalium/storage/relational.py"
+    - "mcp-server/src/crystalium/storage/vector.py"
+    - "mcp-server/src/crystalium/storage/graph.py"
     - "mcp-server/src/crystalium/storage/blob.py"
   mcp_server_tests:
     - "mcp-server/tests/conftest.py"
@@ -465,22 +465,37 @@ file_layout:
     - "mcp-server/tests/test_skill_invoke.py"
     - "mcp-server/tests/test_promotion_gate.py"
     - "mcp-server/tests/test_composer.py"
-    - "mcp-server/tests/test_ecl_conformance.py"
+    - "mcp-server/tests/test_ecl_envelope.py"
     - "mcp-server/tests/test_dream_scheduler.py"
+    - "mcp-server/tests/test_dream_worker.py"
     - "mcp-server/tests/test_schemas.py"
-    - "mcp-server/tests/test_storage_sqlite.py"
-    - "mcp-server/tests/test_storage_lance.py"
-    - "mcp-server/tests/test_storage_kuzu.py"
+    - "mcp-server/tests/test_storage_relational.py"
+    - "mcp-server/tests/test_storage_vector.py"
+    - "mcp-server/tests/test_storage_graph.py"
     - "mcp-server/tests/test_storage_blob.py"
-    - "mcp-server/tests/test_meta.py"
-    - "mcp-server/tests/test_e2e.py"
-    - "mcp-server/tests/canary/test_canary_*.py"
-    - "mcp-server/tests/canary/test_ab_headline.py"
+    - "mcp-server/tests/test_aetheryte.py"
+    - "mcp-server/tests/test_redaction.py"
+    - "mcp-server/tests/test_importance.py"
+    - "mcp-server/tests/test_bitemporal.py"
+    - "mcp-server/tests/test_rrf.py"
+    - "mcp-server/tests/test_config.py"
+    - "mcp-server/tests/test_server.py"
+    - "mcp-server/tests/test_cli.py"
+  # Canary / memory-on-off A/B lives in the top-level evals/ package (run as
+  # scripts, NOT pytest; evals/ is excluded from the install target — see
+  # conformance.yml FORBIDDEN_DIRS). Planned mcp-server/tests/canary/ was never built.
+  eval_harness:
+    - "evals/missions.py"
+    - "evals/canary-missions.md"
+    - "evals/ab_memory_onoff.py"
+    - "evals/poisoning_resistance.py"
+    - "evals/selective_forgetting.py"
+    - "evals/fixtures/"
 
 source_of_truth_attribution:
   "mcp-server/src/crystalium/enforcement.py": "atlas-aci/mcp-server/src/atlas_aci/enforcement.py (FINDING-001)"
   "mcp-server/src/crystalium/server.py": "atlas-aci/mcp-server/src/atlas_aci/server.py (FINDING-001 wiring)"
-  "mcp-server/src/crystalium/ecl_envelope.py": "eidolons-ecl/schemas/envelope.v2.json + conformance/lib/integrity.sh (FINDING-002)"
+  "mcp-server/src/crystalium/ecl.py": "eidolons-ecl/schemas/envelope.v2.json + conformance/lib/integrity.sh (FINDING-002)"
   "install.sh": "eidolons-eiis/spec/eiis-1.4.md Appendix A cleanup_inventory_sweep (FINDING-003)"
   "EIIS_VERSION content": "EIIS v1.4 §1.1"
   "ECL_VERSION content": "FORGE D4; EIIS §3.7.1 install obligation"
@@ -505,14 +520,14 @@ waves:
       - "schemas/install.manifest.v1.json"
       - "mcp-server/src/crystalium/__init__.py"
       - "mcp-server/src/crystalium/config.py"
-      - "mcp-server/src/crystalium/storage/sqlite.py"
-      - "mcp-server/src/crystalium/storage/lance.py"
-      - "mcp-server/src/crystalium/storage/kuzu.py"
+      - "mcp-server/src/crystalium/storage/relational.py"
+      - "mcp-server/src/crystalium/storage/vector.py"
+      - "mcp-server/src/crystalium/storage/graph.py"
       - "mcp-server/src/crystalium/storage/blob.py"
       - "mcp-server/tests/test_schemas.py"
-      - "mcp-server/tests/test_storage_sqlite.py"
-      - "mcp-server/tests/test_storage_lance.py"
-      - "mcp-server/tests/test_storage_kuzu.py"
+      - "mcp-server/tests/test_storage_relational.py"
+      - "mcp-server/tests/test_storage_vector.py"
+      - "mcp-server/tests/test_storage_graph.py"
       - "mcp-server/tests/test_storage_blob.py"
       - "Dockerfile"
       - "docker-compose.yml"
@@ -521,7 +536,7 @@ waves:
       - "Makefile"
     gates_required: []
     gates_deferred: ["G1","G2","G3","G4","G5","G6","G7","G8"]
-    container_test: "docker compose run --rm crystalium pytest mcp-server/tests/test_schemas.py mcp-server/tests/test_storage_sqlite.py mcp-server/tests/test_storage_lance.py mcp-server/tests/test_storage_kuzu.py mcp-server/tests/test_storage_blob.py -v"
+    container_test: "docker compose run --rm crystalium pytest mcp-server/tests/test_schemas.py mcp-server/tests/test_storage_relational.py mcp-server/tests/test_storage_vector.py mcp-server/tests/test_storage_graph.py mcp-server/tests/test_storage_blob.py -v"
     commit_subject: "feat(schemas,storage): land crystal/skill schemas + Pydantic + SQLite/LanceDB/Kuzu adapters"
 
   W2:
@@ -547,7 +562,7 @@ waves:
       - "mcp-server/src/crystalium/layers/procedural.py"
       - "mcp-server/src/crystalium/layers/execution.py"
       - "mcp-server/src/crystalium/gate.py"
-      - "mcp-server/src/crystalium/aetheryte/recall.py"
+      - "mcp-server/src/crystalium/aetheryte/retrieve.py"
       - "mcp-server/src/crystalium/dream/scheduler.py"
       - "mcp-server/src/crystalium/dream/worker.py"
       - "mcp-server/src/crystalium/composer.py"
@@ -565,33 +580,31 @@ waves:
     files:
       - "mcp-server/src/crystalium/server.py"
       - "mcp-server/src/crystalium/__main__.py"
-      - "mcp-server/src/crystalium/ecl_envelope.py"
-      - "mcp-server/tests/test_ecl_conformance.py"
+      - "mcp-server/src/crystalium/ecl.py"
+      - "mcp-server/tests/test_ecl_envelope.py"
     gates_required: ["G1","G2","G3","G4","G5","G6","G7","G8"]
     gates_deferred: []
-    container_test: "docker compose run --rm crystalium pytest mcp-server/tests/test_ecl_conformance.py mcp-server/tests/ -v"
+    container_test: "docker compose run --rm crystalium pytest mcp-server/tests/test_ecl_envelope.py mcp-server/tests/ -v"
     commit_subject: "feat(server,cli,ecl): wire MCP stdio server + CLI + ECL v2.0 envelope sidecar emission"
 
   W5:
     scope: "full test suite + canary suite (10 missions + memory on/off A/B)"
     files:
-      - "mcp-server/tests/canary/test_canary_recall_hit.py"
-      - "mcp-server/tests/canary/test_canary_t3_blocked.py"
-      - "mcp-server/tests/canary/test_canary_t2_procedural_candidate.py"
-      - "mcp-server/tests/canary/test_canary_poisoning_resistance.py"
-      - "mcp-server/tests/canary/test_canary_selective_forget.py"
-      - "mcp-server/tests/canary/test_canary_multi_agent_isolation.py"
-      - "mcp-server/tests/canary/test_canary_procedural_verifier_pass.py"
-      - "mcp-server/tests/canary/test_canary_working_set_budget.py"
-      - "mcp-server/tests/canary/test_canary_ecl_conformance.py"
-      - "mcp-server/tests/canary/test_canary_dream_dedup.py"
-      - "mcp-server/tests/canary/test_ab_headline.py"
-      - "mcp-server/tests/test_e2e.py"
+      - "evals/__init__.py"
+      - "evals/missions.py"
+      - "evals/canary-missions.md"
+      - "evals/ab_memory_onoff.py"
+      - "evals/poisoning_resistance.py"
+      - "evals/selective_forgetting.py"
+      - "evals/fixtures/"
     gates_required: ["G1","G2","G3","G4","G5","G6","G7","G8"]
     extra_pass_criteria:
       - "canary memory-on/off A/B pass rate >= 0.80"
-    container_test: "docker compose run --rm crystalium pytest mcp-server/tests/ mcp-server/tests/canary/ -v"
-    commit_subject: "test(suite,canary): land full test suite + 10-mission canary + memory-on/off A/B harness"
+    # Implemented as the top-level evals/ package (canary missions + A/B harness),
+    # not mcp-server/tests/canary/. Pytest gates run over mcp-server/tests/; the
+    # A/B canary harness runs from evals/ as scripts.
+    container_test: "docker compose run --rm crystalium pytest mcp-server/tests/ -v  # + evals/ memory-on/off A/B over 10 canary missions"
+    commit_subject: "test(suite,evals): full pytest suite + 10-mission canary + memory-on/off A/B harness (evals/)"
 
   W6:
     scope: "install.sh + Dockerfile/compose hardening + CI workflows + DESIGN-RATIONALE.md + CHANGELOG.md"
@@ -712,7 +725,7 @@ ecl_v2_0_conformance:
     - "REFUSE"
     - "ACKNOWLEDGE"
   sidecar_naming: "ecl-envelope.<message_id>.json (sibling to payload)"
-  helper_module: "mcp-server/src/crystalium/ecl_envelope.py"
+  helper_module: "mcp-server/src/crystalium/ecl.py"
 
 # --------------------------------------------------------------------------
 # Canary suite (10 missions)
@@ -903,4 +916,5 @@ scorecard:
   - id: 8
     criterion: "Importance function frozen at signature level"
     how_to_score: "config_defaults.importance_weights tuple present; source_of_truth_attribution flags importance.py as FROZEN signature."
-  pass_bar: ">= 4 on every criterion. Any criterion at <=3 triggers SPECTRA re-run before W1 starts."
+
+scorecard_pass_bar: ">= 4 on every criterion. Any criterion at <=3 triggers SPECTRA re-run before W1 starts."

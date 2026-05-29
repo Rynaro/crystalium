@@ -133,6 +133,6 @@ Every CRYSTALIUM spec MUST respect these (from the frozen MISSION P0 set + DESIG
 | 17 P0 non-negotiables | `.spectra/crystalium-v0.1.0-spec.yaml:31-82`, `MISSION.md` | HIGH |
 | EIIS v1.4 / ECL v2.0 | `EIIS_VERSION`, `ECL_VERSION`, `CLAUDE.md:47-52` | HIGH |
 | Commit scopes + Conventional Commits | `AGENTS.md:195-252` | HIGH |
-| Implemented filenames override spec.yaml planned names (relational vs sqlite, retrieve vs recall, ecl vs ecl_envelope, evals vs tests/canary) | implemented tree glob vs `spec.yaml:495-614` + `AGENTS.md:124-168` | MEDIUM (intentional rename vs in-progress — confirm) |
-| Gate test-anchor names may lag impl (e.g. `test_ecl_conformance.py` → `test_ecl_envelope.py`) | `spec.yaml:153` vs `mcp-server/tests/test_ecl_envelope.py` | MEDIUM |
-| `install.sh` / `.github/workflows/` / `crystalium.yaml` / `commit-result.v1.json` | referenced (`CLAUDE.md`, `AGENTS.md`, spec.yaml W6) but absent from tree at scan | LOW (pending W6 / runtime-side) |
+| Implemented filenames are CANONICAL (relational/vector/graph not sqlite/lance/kuzu; retrieve not recall; ecl not ecl_envelope; top-level `evals/` not `tests/canary/`) | implemented tree glob; all docs reconciled (`AGENTS.md`, `spec.{md,yaml}`, `CLAUDE.md`, `CHANGELOG.md`) | HIGH (resolved — use implemented names, never the planned ones) |
+| Gate test-anchors use implemented names (G7 → `test_ecl_envelope.py`) | `spec.yaml:153`, `mcp-server/tests/test_ecl_envelope.py` | HIGH (resolved) |
+| `install.sh`, `.github/workflows/{ci,conformance,release}.yml`, `schemas/commit-result.v1.json` all EXIST; only `crystalium.yaml` (runtime config loader) is absent/deferred | repo tree | HIGH (corrected — earlier "absent" flags were wrong) |

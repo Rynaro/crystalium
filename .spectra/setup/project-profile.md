@@ -122,7 +122,7 @@ canonical `test_anchor`. Source: `.spectra/crystalium-v0.1.0-spec.yaml:87-163`.
 | G4 | Trust-tier propagation blocks T3 laundering | D7 | `test_trust_propagation.py::test_g4_min_tier_blocks_semantic_laundering` |
 | G5 | Human-confirm default window (promotion gate) | D8 | `test_promotion_gate.py::test_g5_human_confirm_default_window` |
 | G6 | Working-set budget invariant (≤3500 tokens) | D9 | `test_composer.py::test_g6_working_set_budget_invariant` |
-| G7 | Every tool result emits valid ECL envelope | D4 | `test_ecl_conformance.py::test_g7_every_tool_result_emits_valid_envelope` |
+| G7 | Every tool result emits valid ECL envelope | D4 | `test_ecl_envelope.py::test_g7_every_tool_result_emits_valid_envelope` |
 | G8 | Dream dedup on concurrent triggers | D3 | `test_dream_scheduler.py::test_g8_dream_dedup_on_concurrent_triggers` |
 
 Additional CI gates: `agent.md ≤1000 tokens` (tiktoken), `install.sh idempotent` (second-run-no-diff),
@@ -333,22 +333,26 @@ crystalium/
 
 ---
 
-## 15. Known ambiguities (for human curation)
+## 15. Resolved drift (reconciled — canonical = implemented tree)
 
-1. **Spec.yaml planned filenames ≠ implemented filenames.** The prior spec (W1/W3/W4) and AGENTS.md
-   §project-structure name modules `storage/sqlite.py`, `storage/lance.py`, `storage/kuzu.py`,
-   `aetheryte/recall.py`, `ecl_envelope.py`, and tests `test_storage_sqlite.py` /
-   `test_ecl_conformance.py` / `mcp-server/tests/canary/`. The **actual** tree implements
-   `storage/relational.py`, `storage/vector.py`, `storage/graph.py`, `aetheryte/retrieve.py`,
-   `ecl.py`, `test_storage_relational.py`, `test_ecl_envelope.py`, and `evals/`.
-   → `spectra-conventions.md` uses the **implemented** names. Confirm this is the intended final
-   layout (and consider updating spec.yaml/AGENTS.md to match) or correct the conventions if the
-   tree is mid-rename.
-2. **`commit-result.v1.json` missing.** Referenced by spec.yaml W1 + AGENTS.md but absent from
-   `schemas/`. Confirm whether it should exist or the reference is stale.
-3. **`install.sh`, `.github/workflows/`, `crystalium.yaml` not in working tree.** All are referenced
-   (EIIS conformance, CI, config loader) but are W6 deliverables / runtime-side files not yet landed.
-   Re-run detection after W6 closes.
-4. **Test-anchor names in spec.yaml** (e.g. `test_ecl_conformance.py::test_g7_...`) may not match the
-   actual `test_ecl_envelope.py`. Verify the canonical gate→test mapping when SPECTRA writes specs
-   that reference gates.
+The **implemented tree is canonical** (shipped v0.1.0, CI-green). The items below were flagged
+as ambiguities during the initial fit pass and have since been reconciled across `AGENTS.md`,
+`.spectra/crystalium-v0.1.0-spec.{md,yaml}`, `CLAUDE.md`, and `CHANGELOG.md`.
+
+1. **Planned filenames → implemented filenames (RESOLVED).** The planned names
+   `storage/{sqlite,lance,kuzu}.py`, `aetheryte/recall.py`, `ecl_envelope.py`, tests
+   `test_storage_{sqlite,lance,kuzu}.py` / `test_ecl_conformance.py`, and
+   `mcp-server/tests/canary/` are **superseded** by the implemented
+   `storage/{relational,vector,graph}.py`, `aetheryte/retrieve.py`, `ecl.py`,
+   `test_storage_{relational,vector,graph}.py`, `test_ecl_envelope.py`, and the top-level
+   `evals/` package. All docs now use the implemented names. SPECTRA must treat the implemented
+   names as authoritative — do **not** re-emit the planned names.
+2. **`commit-result.v1.json` (CORRECTION — it exists).** `schemas/commit-result.v1.json` **is**
+   present; the earlier "missing" flag was wrong.
+3. **`install.sh` + `.github/workflows/` (CORRECTION — they exist).** Both are present
+   (`install.sh` at root; `ci.yml` / `conformance.yml` / `release.yml` under `.github/workflows/`).
+   Only **`crystalium.yaml`** is genuinely absent — it is a runtime config-loader file, deferred.
+4. **Gate test-anchor (RESOLVED).** G7 anchors `test_ecl_envelope.py::test_g7_...` (not
+   `test_ecl_conformance.py`); the §4 gate table and spec.yaml are reconciled.
+
+> If the tree is later restructured, re-run `adaptation-prompt.md` to refresh these mappings.

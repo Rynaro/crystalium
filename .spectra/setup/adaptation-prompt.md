@@ -62,9 +62,10 @@ project's language. You produce a vocabulary map, never code, never a plan.
 - **MCP surface:** `server.py` `build_tool_manifest()` lists the 7 `crystalium.*` tools. Each result
   emits an **ECL v2.0** sidecar via `ecl.py`.
 - **Gates G1–G8:** read `.spectra/crystalium-v0.1.0-spec.yaml` `gates:` for the canonical
-  name/derivation/`test_anchor`. Cross-check each `test_anchor` against the ACTUAL test file names
-  (e.g. spec says `test_ecl_conformance.py` but the impl may be `test_ecl_envelope.py`) and record
-  the real one.
+  name/derivation/`test_anchor`. The **implemented tree is always authoritative** — if a
+  `test_anchor` ever disagrees with the real test file, the real file wins and the doc is the
+  drift to fix (as of the v0.1.0 reconciliation, spec.yaml + AGENTS.md already match the impl;
+  G7 → `test_ecl_envelope.py`). Record the real path.
 - **Conformance versions:** read `EIIS_VERSION` and `ECL_VERSION` verbatim.
 
 ---

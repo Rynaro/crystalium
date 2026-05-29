@@ -176,7 +176,7 @@ Each gate is GIVEN/WHEN/THEN plus three SPECTRA-added fields: `test_anchor`, `fa
 - **GIVEN** any `crystalium.*` MCP tool result that produces a payload artefact,
 - **WHEN** the result is written to disk,
 - **THEN** a sibling `ecl-envelope.<message_id>.json` file exists at the same directory, valid against `envelope.v2.json`, carrying all 11 required ECL v2.0 fields; `integrity.method = "sha256"`; `integrity.value == hashlib.sha256(payload_bytes).hexdigest()`; `artifact.sha256 == integrity.value`; `from.eidolon = "crystalium"`; `from.version` matches `__version__`.
-- **test_anchor:** `mcp-server/tests/test_ecl_conformance.py::test_g7_every_tool_result_emits_valid_envelope`
+- **test_anchor:** `mcp-server/tests/test_ecl_envelope.py::test_g7_every_tool_result_emits_valid_envelope`
 - **failure_class:** `EnvelopeMissing` | `EnvelopeInvalid` | `EnvelopeIntegrityMismatch`
 - **tier_violated:** n/a
 - **severity:** **P0**
@@ -424,7 +424,7 @@ crystalium/
 │       ├── config.py                       # Pydantic; loads crystalium.yaml
 │       ├── importance.py                   # FROZEN signature, FORGE D6
 │       ├── composer.py                     # working-set composer (§6)
-│       ├── ecl_envelope.py                 # envelope helper; hashlib.sha256
+│       ├── ecl.py                 # envelope helper; hashlib.sha256
 │       ├── layers/
 │       │   ├── __init__.py
 │       │   ├── episodic.py
@@ -453,12 +453,12 @@ crystalium/
     ├── test_skill_invoke.py                # G3
     ├── test_promotion_gate.py              # G5
     ├── test_composer.py                    # G6
-    ├── test_ecl_conformance.py             # G7
+    ├── test_ecl_envelope.py             # G7
     ├── test_dream_scheduler.py             # G8
     ├── test_schemas.py                     # JSON Schema validity + Pydantic round-trip
-    ├── test_storage_sqlite.py
-    ├── test_storage_lance.py
-    ├── test_storage_kuzu.py
+    ├── test_storage_relational.py
+    ├── test_storage_vector.py
+    ├── test_storage_graph.py
     └── test_storage_blob.py
 ```
 
@@ -468,7 +468,7 @@ crystalium/
 |---|---|
 | `mcp-server/src/crystalium/enforcement.py` | `atlas-aci/mcp-server/src/atlas_aci/enforcement.py` (FINDING-001) |
 | `mcp-server/src/crystalium/server.py` | `atlas-aci/mcp-server/src/atlas_aci/server.py` (FINDING-001 wiring) |
-| `mcp-server/src/crystalium/ecl_envelope.py` | `eidolons-ecl/schemas/envelope.v2.json` + `conformance/lib/integrity.sh` (FINDING-002) |
+| `mcp-server/src/crystalium/ecl.py` | `eidolons-ecl/schemas/envelope.v2.json` + `conformance/lib/integrity.sh` (FINDING-002) |
 | `install.sh` | EIIS v1.4 Appendix A `cleanup_inventory_sweep` reference (FINDING-003) |
 | `EIIS_VERSION` content `"1.4"` | EIIS §1.1 source-repo MUST |
 | `ECL_VERSION` content `"2.0"` | FORGE D4; EIIS §3.7.1 install obligation |
@@ -498,7 +498,7 @@ Sequential. No parallel waves. Each wave's `container_test` command runs INSIDE 
   - `Dockerfile`, `docker-compose.yml`, `docker-compose.dev.yml`, `pyproject.toml`, `Makefile`
 - **Gates MUST pass:** none. W1 is the foundation; gate tests come in W2+.
 - **Gates MAY defer:** all (G1–G8).
-- **container_test:** `docker compose run --rm crystalium pytest mcp-server/tests/test_schemas.py mcp-server/tests/test_storage_sqlite.py mcp-server/tests/test_storage_lance.py mcp-server/tests/test_storage_kuzu.py mcp-server/tests/test_storage_blob.py -v`
+- **container_test:** `docker compose run --rm crystalium pytest mcp-server/tests/test_schemas.py mcp-server/tests/test_storage_relational.py mcp-server/tests/test_storage_vector.py mcp-server/tests/test_storage_graph.py mcp-server/tests/test_storage_blob.py -v`
 - **commit_subject:** `feat(schemas,storage): land crystal/skill schemas + Pydantic + SQLite/LanceDB/Kuzu adapters`
 
 ### W2 — Enforcement chokepoint
@@ -521,7 +521,7 @@ Sequential. No parallel waves. Each wave's `container_test` command runs INSIDE 
 - **Files touched:**
   - `mcp-server/src/crystalium/layers/{episodic,semantic,procedural,execution}.py`
   - `mcp-server/src/crystalium/gate.py`
-  - `mcp-server/src/crystalium/aetheryte/recall.py`
+  - `mcp-server/src/crystalium/aetheryte/retrieve.py`
   - `mcp-server/src/crystalium/dream/{scheduler,worker}.py`
   - `mcp-server/src/crystalium/composer.py`
   - `mcp-server/tests/test_promotion_gate.py`, `test_composer.py`, `test_dream_scheduler.py`
@@ -532,27 +532,27 @@ Sequential. No parallel waves. Each wave's `container_test` command runs INSIDE 
 
 ### W4 — MCP wiring + CLI + ECL envelope
 
-- **Scope:** `server.py` (atlas-aci-shaped `@server.list_tools()` / `@server.call_tool()` decorators); `__main__.py` CLI (`crystalium serve`, `crystalium promote list/review`); `ecl_envelope.py` helper.
+- **Scope:** `server.py` (atlas-aci-shaped `@server.list_tools()` / `@server.call_tool()` decorators); `__main__.py` CLI (`crystalium serve`, `crystalium promote list/review`); `ecl.py` helper.
 - **Files touched:**
   - `mcp-server/src/crystalium/server.py`
   - `mcp-server/src/crystalium/__main__.py`
-  - `mcp-server/src/crystalium/ecl_envelope.py`
-  - `mcp-server/tests/test_ecl_conformance.py`
+  - `mcp-server/src/crystalium/ecl.py`
+  - `mcp-server/tests/test_ecl_envelope.py`
 - **Gates MUST pass before commit:** **G7** (every tool result emits valid envelope); regression sweep keeps G1–G6, G8 green.
 - **Gates MAY defer:** none.
-- **container_test:** `docker compose run --rm crystalium pytest mcp-server/tests/test_ecl_conformance.py mcp-server/tests/ -v`
+- **container_test:** `docker compose run --rm crystalium pytest mcp-server/tests/test_ecl_envelope.py mcp-server/tests/ -v`
 - **commit_subject:** `feat(server,cli,ecl): wire MCP stdio server + CLI + ECL v2.0 envelope sidecar emission`
 
 ### W5 — Full test suite + canary suite
 
 - **Scope:** complete cross-cutting test pass; canary missions (§13); memory-on/off A/B harness.
 - **Files touched:**
-  - `mcp-server/tests/canary/` (new dir): `test_canary_*.py`, fixtures, A/B runner
-  - `mcp-server/tests/test_e2e.py` (cross-cutting end-to-end)
+  - `evals/` (top-level package): `missions.py`, `canary-missions.md`, `ab_memory_onoff.py`, `poisoning_resistance.py`, `selective_forgetting.py`, `fixtures/`
+  - _(Implemented as the top-level `evals/` package — run as scripts — not `mcp-server/tests/canary/`; `evals/` is excluded from the install target. The planned per-canary `test_canary_*.py` and `test_e2e.py` were never built.)_
 - **Gates MUST pass before commit:** **G1–G8 all green** + canary pass rate ≥ 0.80 (memory-on beats memory-off on at least 80% of canaries — §13 headline metric).
 - **Gates MAY defer:** none.
-- **container_test:** `docker compose run --rm crystalium pytest mcp-server/tests/ mcp-server/tests/canary/ -v`
-- **commit_subject:** `test(suite,canary): land full test suite + 10-mission canary + memory-on/off A/B harness`
+- **container_test:** `docker compose run --rm crystalium pytest mcp-server/tests/ -v` (+ `evals/` memory-on/off A/B over the canary missions)
+- **commit_subject:** `test(suite,evals): full pytest suite + 10-mission canary + memory-on/off A/B harness (evals/)`
 
 ### W6 — install.sh + Docker hardening + CI + DESIGN-RATIONALE
 
@@ -638,7 +638,7 @@ Per FORGE D4 + FINDING-002. CRYSTALIUM declares `ECL_VERSION = "2.0"` in the sou
 
 **`edge_origin`:** `"implicit"` for v0.1.0 (no contracts/ entry yet — FINDING-002 guidance for pre-roster Eidolons).
 
-**Integrity helper** (`ecl_envelope.py`):
+**Integrity helper** (`ecl.py`):
 
 ```python
 import hashlib, json, uuid
@@ -720,13 +720,13 @@ Restated from `MISSION.md:144-166` with measurable test targets.
 
 | Bar | Measurable target | Test anchor |
 |---|---|---|
-| `agent.md` ≤ ~1,000 tokens | `wc -l agent.md` ≤ 60 lines (proxy) AND `tiktoken cl100k_base` count ≤ 1000 | `mcp-server/tests/test_meta.py::test_agent_md_token_cap` |
+| `agent.md` ≤ ~1,000 tokens | `wc -l agent.md` ≤ 60 lines (proxy) AND `tiktoken cl100k_base` count ≤ 1000 | _planned `test_meta.py` never built — verify manually (`tiktoken` proxy)_ |
 | Composer ≤ 3,500 tokens | G6 invariant | `test_composer.py::test_g6_working_set_budget_invariant` |
 | Every §2.2 P0 invariant covered | G1–G8 all passing | `pytest mcp-server/tests/` exit 0 |
 | `install.sh` idempotent | Second run produces identical install target | CI "second-run-no-diff" job (W6 container_test) |
-| DESIGN-RATIONALE.md cites every non-obvious decision | Citation count ≥ 10 (per anchor list in `MISSION.md:149-162`) | `mcp-server/tests/test_meta.py::test_design_rationale_citations` |
+| DESIGN-RATIONALE.md cites every non-obvious decision | Citation count ≥ 10 (per anchor list in `MISSION.md:149-162`) | _planned `test_meta.py` never built — verify manually against MISSION.md citation list_ |
 | `[UNVERIFIED]` markers on unverifiable claims | grep for `[UNVERIFIED]` returns ≥ 1 (uuid7 lib + tiktoken fallback at minimum) | manual review at W6 commit |
-| Memory-on/off A/B headline | ≥ 0.80 pass rate on §13 canaries | `mcp-server/tests/canary/test_ab_headline.py` |
+| Memory-on/off A/B headline | ≥ 0.80 pass rate on §13 canaries | `evals/ab_memory_onoff.py` |
 | CHANGELOG.md Keep-a-Changelog under v0.1.0 | Section header `## [0.1.0] - 2026-XX-XX` present | manual W6 review |
 | Branch naming | `feat/crystalium-v0.1.0`; no push, no PR | git branch check at W6 |
 
