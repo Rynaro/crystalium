@@ -129,6 +129,18 @@ class Config:
     # Enabled when k_gt exceeds this threshold; false by default to keep hot path lean.
     reranker_enabled: bool = False
 
+    # EVB importance (W2, Mattar & Daw 2018). When True, evb_score replaces the
+    # legacy importance_score as the single source of truth for eviction + the
+    # composer (the roadmap's "importance.mode: legacy|evb"). Default OFF until the
+    # ablation bench shows it beating legacy (ablation-or-revert). See evb.py.
+    evb_enabled: bool = False
+    # Hand-tuned EVB proxy weights (SFMA-style). gain over
+    # (outcome_success, novelty, corroboration_potential); need over
+    # (recency, access_frequency, predicted_next_task_match). Sum within each
+    # need not be 1.0 (evb is unbounded). The D11-style swap point for W2.
+    evb_gain_weights: tuple[float, float, float] = (0.5, 0.3, 0.2)
+    evb_need_weights: tuple[float, float, float] = (0.5, 0.3, 0.2)
+
     # Rate limiting (P0-7, atlas-aci pattern)
     rate_limit_per_minute: int = 200
 
@@ -202,6 +214,7 @@ class Config:
             embed_backend=_env("CRYSTALIUM_EMBED_BACKEND", "sentence-transformers")
             or "sentence-transformers",
             rate_limit_per_minute=_env_int("CRYSTALIUM_RATE_LIMIT_PER_MINUTE", 200),
+            evb_enabled=_env_bool("CRYSTALIUM_EVB_ENABLED", False),
         )
 
     @classmethod
@@ -219,9 +232,13 @@ class Config:
             if simple in data:
                 kwargs[simple] = data[simple]
 
-        for bool_field in ("http_json_response", "http_stateless"):
+        for bool_field in ("http_json_response", "http_stateless", "evb_enabled"):
             if bool_field in data:
                 kwargs[bool_field] = bool(data[bool_field])
+
+        for weight_field in ("evb_gain_weights", "evb_need_weights"):
+            if weight_field in data:
+                kwargs[weight_field] = tuple(float(x) for x in data[weight_field])
 
         if "http_port" in data:
             kwargs["http_port"] = int(data["http_port"])
