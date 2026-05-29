@@ -89,6 +89,12 @@ class DreamWorker:
         importance_fn: Callable[..., float],
         prune_thresholds: dict[str, float] | None = None,
         persist_dynamics: bool = False,
+        replay_evb: bool = False,
+        interleave: bool = False,
+        interleave_ratio: float = 0.5,
+        stc: bool = False,
+        stc_threshold: float = 0.5,
+        stc_window_s: int = 3600,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -101,6 +107,15 @@ class DreamWorker:
         # the recomputed value back to memory_dynamics.evb (persist-only — no
         # net-new replay ranking). Set from config.evb_enabled at build time.
         self.persist_dynamics = persist_dynamics
+        # W3 Dream-intelligence flags (each default OFF -> byte-identical chronological
+        # behaviour; the test helper _make_worker omits them). Set from Config in
+        # server._build_components.
+        self.replay_evb = replay_evb
+        self.interleave = interleave
+        self.interleave_ratio = interleave_ratio
+        self.stc = stc
+        self.stc_threshold = stc_threshold
+        self.stc_window_s = stc_window_s
 
     # ------------------------------------------------------------------
     # Public API
@@ -249,6 +264,81 @@ class DreamWorker:
     # Phase: gather
     # ------------------------------------------------------------------
 
+    def _interleave_semantic(self, cluster: list[dict[str, Any]], now: datetime) -> None:
+        """W3 CLS interleave: mix a sampled ratio of existing semantic facts into
+        *cluster* in place. Deterministic top-N by (created_at, id) — no RNG — so
+        the bench A/B is reproducible. No-op when the flag is off or no semantics.
+        """
+        if not self.interleave or not cluster:
+            return
+        n = round(self.interleave_ratio * len(cluster))
+        if n <= 0:
+            return
+        try:
+            with self.relational._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id FROM crystals WHERE layer='semantic' AND status='active' "
+                    "ORDER BY created_at, id LIMIT ?",
+                    (n,),
+                ).fetchall()
+            for r in rows:
+                rec = self.relational.get_crystal(r[0])
+                if rec:
+                    cluster.append(rec)
+        except Exception as exc:
+            log.debug("interleave_skipped", error=str(exc))
+
+    @staticmethod
+    def _parse_ts(raw: Any) -> datetime | None:
+        if isinstance(raw, str):
+            try:
+                dt = datetime.fromisoformat(raw)
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def _stc_k_override(self, cluster: list[dict[str, Any]], now: datetime) -> int | None:
+        """W3 STC: if a salient episode (EVB >= stc_threshold) has another episode
+        within stc_window_s, lower the corroboration bar by 1 (floored at 1) for
+        this consolidation. Returns None (baseline) when off / no capture.
+        """
+        if not self.stc or not cluster:
+            return None
+        episodes = [
+            (rec.get("id"), self._parse_ts(rec.get("created_at")), self._evb(rec, now))
+            for rec in cluster
+            if rec.get("layer") == "episodic"
+        ]
+        episodes = [(i, t, e) for (i, t, e) in episodes if t is not None]
+        salient = [(i, t) for (i, t, e) in episodes if e >= self.stc_threshold]
+        for si, st in salient:
+            for ei, et, _ in episodes:
+                if ei != si and abs((et - st).total_seconds()) <= self.stc_window_s:
+                    base_k = getattr(getattr(self.gate, "config", None), "k_corroboration", 3)
+                    return max(1, int(base_k) - 1)
+        return None
+
+    def _evb(self, rec: dict[str, Any], now: datetime) -> float:
+        """EVB score for a gathered crystal row (W3 replay/STC ordering).
+
+        Uses evb_score directly (default proxy weights) so 'dream.replay=evb'
+        orders by EVB regardless of evb_enabled (which only swaps the eviction
+        scorer). Malformed utility -> 0.0 so any sort stays total/deterministic.
+        """
+        from crystalium.evb import evb_score
+
+        util = rec.get("utility") or {}
+        if isinstance(util, str):
+            try:
+                util = json.loads(util)
+            except (ValueError, TypeError):
+                util = {}
+        try:
+            return float(evb_score(_UtilityStub(util, now), now=now))
+        except Exception:
+            return 0.0
+
     def _gather(self, now: datetime) -> list[list[dict[str, Any]]]:
         """Fetch candidate clusters for consolidation.
 
@@ -263,11 +353,27 @@ class DreamWorker:
 
         try:
             # Cluster type 1: Episodic records with shared graph neighbours
-            with self.relational._connect() as conn:
-                rows = conn.execute(
-                    "SELECT id FROM crystals WHERE layer='episodic' AND status='active' LIMIT 20"
-                ).fetchall()
-            seed_ids = [r[0] for r in rows]
+            if self.replay_evb:
+                # W3 prioritized replay: score a larger candidate pool by EVB and
+                # take the highest (reverse replay of high-Gain episodes). Ties
+                # broken by (created_at, id) for a total, deterministic order.
+                with self.relational._connect() as conn:
+                    pool = conn.execute(
+                        "SELECT id, utility, created_at FROM crystals "
+                        "WHERE layer='episodic' AND status='active' LIMIT 50"
+                    ).fetchall()
+                scored = [
+                    (-self._evb({"utility": r[1]}, now), r[2] or "", r[0])
+                    for r in pool
+                ]
+                scored.sort()
+                seed_ids = [t[2] for t in scored[:20]]
+            else:
+                with self.relational._connect() as conn:
+                    rows = conn.execute(
+                        "SELECT id FROM crystals WHERE layer='episodic' AND status='active' LIMIT 20"
+                    ).fetchall()
+                seed_ids = [r[0] for r in rows]
 
             if seed_ids:
                 try:
@@ -281,6 +387,7 @@ class DreamWorker:
                             if rec:
                                 cluster.append(rec)
                         if cluster:
+                            self._interleave_semantic(cluster, now)
                             clusters.append(cluster)
                 except Exception as exc:
                     log.debug("gather_graph_expand_skipped", error=str(exc))
@@ -368,6 +475,17 @@ class DreamWorker:
         summaries = [rec.get("summary", "") for rec in cluster]
         consolidated_summary = "; ".join(s for s in summaries if s)[:512]
 
+        # W3 OBJ-4 abstraction metric (log-only): a promotion that doesn't compress
+        # isn't generalization. Ratio ~1 -> flag. Summary-length proxy (no blob dep).
+        source_len = sum(len(s) for s in summaries)
+        compression_ratio = (len(consolidated_summary) / source_len) if source_len else None
+        log.info(
+            "dream_compression",
+            compression_ratio=compression_ratio,
+            no_generalization=(compression_ratio is not None and compression_ratio >= 0.95),
+            cluster_size=len(cluster),
+        )
+
         consolidated_crystal: dict[str, Any] = {
             "id": _make_crystal_id(),
             "layer": "semantic",
@@ -409,18 +527,24 @@ class DreamWorker:
             for rec in cluster
         ]
 
+        # W3 STC: a salient nearby episode lowers the corroboration bar (k_override).
+        # Chokepoint-preserving — the gate still counts witnesses + human-confirm.
+        k_override = self._stc_k_override(cluster, now)
+
         try:
             result = self.gate.propose_semantic(
                 crystal=consolidated_crystal,
                 witnesses=witnesses,
                 caller_tier=_DREAM_TIER,
                 force=False,
+                k_override=k_override,
             )
             log.info(
                 "dream_consolidate_proposed",
                 decision=result.decision,
                 cluster_size=len(cluster),
                 consolidated_tier=str(consolidated_tier),
+                stc_k_override=k_override,
             )
             return consolidated_crystal if result.decision == "admit" else None
 
