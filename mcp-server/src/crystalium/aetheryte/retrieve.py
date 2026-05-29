@@ -302,13 +302,31 @@ class Aetheryte:
                     except Exception:
                         raw_scope = {}
 
+                # W2: when a persisted EVB value exists (written by Dream/recall
+                # under evb_enabled), it is the composer's single source of truth
+                # for ranking. Legacy path is byte-identical: with no evb, fall back
+                # to utility.importance exactly as before.
+                md = crystal.get("memory_dynamics")
+                if isinstance(md, str):
+                    import json
+                    try:
+                        md = json.loads(md)
+                    except Exception:
+                        md = None
+                evb_cached = md.get("evb") if isinstance(md, dict) else None
+                importance_val = (
+                    float(evb_cached)
+                    if evb_cached is not None
+                    else float(utility.get("importance", 0.0))
+                )
+
                 return _ComposerRecord(
                     id=crystal["id"],
                     layer=crystal.get("layer", "episodic"),
                     summary=crystal.get("summary", ""),
                     trust_tier=crystal.get("trust_tier", "T1"),
                     validation_state=crystal.get("validation_state", "unverified"),
-                    importance=float(utility.get("importance", 0.0)),
+                    importance=importance_val,
                     last_access=last_access_dt,
                     content_ref=crystal.get("content_ref"),
                     scope_sensitivity_tag=(raw_scope.get("sensitivity_tag") or "none"),
