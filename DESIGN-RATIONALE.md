@@ -130,6 +130,28 @@ This document traces every non-obvious decision in CRYSTALIUM v0.1.0 to its sour
 
 ---
 
+### D6.3. Forgetting as a Faculty — W4 (v0.5.0)
+
+**Decision:** Behind `forgetting_fsrs` (default OFF), forgetting becomes a principled FSRS/DSR faculty: (1) decay `R = exp(ln(0.9)·elapsed/stability)` with recall **boosting** stability and a lapse **resetting** it; (2) **value-aware eviction** — deprecate only when `R < r_floor` AND `EVB < percentile` (never age alone); (3) **spaced re-surfacing** of valuable aging crystals before `R` crosses the floor; (4) a **Ricoeur-protected class** (`protected` flag — human provenance / `[DECISION]` / explicit / audit rows) exempt from decay/eviction; (5) **right-to-be-forgotten** — the one sanctioned, operator-gated (`forget` op, T0-only), audited hard-tombstone.
+
+**Rationale:**
+- **FSRS-DSR** (open-spaced-repetition; **[verified]**, runs fully local): Difficulty/Stability/Retrievability with `R=0.9` at `elapsed=S`; ~20–30% fewer reviews than SM-2 for equal retention.
+- **Reconsolidation** — Nader 2000; Schiller 2010 **[CONTESTED: Chalkia 2020]**: retrieval restabilizes a memory ("recall boosts stability"). The implementation stands on **engineering grounds** regardless of the human-evidence dispute — a recalled memory is demonstrably worth keeping longer.
+- **Active forgetting** — Nietzsche (*Uses & Disadvantages of History*); Borges (*Funes*): forgetting is a positive faculty; abstraction requires discarding detail.
+- **Duty of memory** — Ricoeur (*Memory, History, Forgetting*, 2000): some traces must never be lost → the protected class.
+
+**Never-hard-delete (P0-5) preserved:** soft-delete (`mark_superseded`, prune `deprecated`, `blob.delete` blocked) is untouched; RTBF `tombstone` is a *physically separate*, audited, T0-only path through the `forget` enforcement op — the sole exception.
+
+**Stance — ablation-as-arbiter:** **W4 gate result: INCONCLUSIVE — `forgetting_fsrs` stays OFF.** `python -m evals forgetting-gate` (24-tick session) showed FSRS not strictly beating LRU on all three DoD axes (plateau 1.0=1.0 — neither plateaus at default params; high-value retention 1.0=1.0; latency marginally lower under FSRS). Honest null; the faculty ships behind the off flag, fully tested. **[GAP]** the roadmap-flagged "noisiest wave" needs longer sessions / more aggressive eviction params to separate the arms — a tuning follow-up, not a redesign.
+
+**[PROXY]** plateau is a slope heuristic; wall-clock latency is relative. **[CONTESTED]** reconsolidation as above.
+
+**Reversibility:** all behaviour flag-gated; OFF reproduces W3 byte-identically.
+
+**Source:** `roadmap-v1/W4-forgetting-faculty.md`; FSRS-DSR [verified]; Nader 2000 / Schiller 2010 [CONTESTED: Chalkia 2020]; Ricoeur 2000; Nietzsche; Borges.
+
+---
+
 ### D7. Cross-cutting trust-tier propagation
 
 **Decision:** Consolidated tier = MIN(inputs.tier). Admission checks `consolidated.tier ≤ layer.ceiling`. T3 input → Semantic admission denied. Error message: structured advice "exclude T3 inputs or commit to Episodic instead."
