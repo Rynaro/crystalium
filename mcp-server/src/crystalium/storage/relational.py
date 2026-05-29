@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS crystals (
     provenance       TEXT NOT NULL,    -- JSON
     utility          TEXT NOT NULL,    -- JSON
     temporal         TEXT NOT NULL,    -- JSON
+    memory_dynamics  TEXT,             -- JSON, nullable (W2: stability/retrievability/difficulty/evb/...)
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
@@ -147,8 +148,22 @@ class RelationalStore:
         conn = self._connect()
         try:
             conn.executescript(_DDL)
+            self._migrate(conn)
         finally:
             conn.close()
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Forward, idempotent migrations for pre-W2 databases.
+
+        CREATE TABLE IF NOT EXISTS does not alter an existing table, so the
+        memory_dynamics column (W2) is added here for DBs created before it.
+        ALTER TABLE ADD COLUMN errors if the column exists, so we guard on
+        PRAGMA table_info — making a second run a no-op (additive, NULL default).
+        """
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(crystals)").fetchall()}
+        if "memory_dynamics" not in cols:
+            conn.execute("ALTER TABLE crystals ADD COLUMN memory_dynamics TEXT")
+            conn.commit()
 
     # ------------------------------------------------------------------
     # Crystal CRUD
@@ -163,11 +178,13 @@ class RelationalStore:
                 INSERT INTO crystals
                     (id, layer, trust_tier, validation_state, status, importance,
                      summary, content_ref, embedding_ref,
-                     scope, provenance, utility, temporal, created_at, updated_at)
+                     scope, provenance, utility, temporal, memory_dynamics,
+                     created_at, updated_at)
                 VALUES
                     (:id, :layer, :trust_tier, :validation_state, :status, :importance,
                      :summary, :content_ref, :embedding_ref,
-                     :scope, :provenance, :utility, :temporal, :created_at, :updated_at)
+                     :scope, :provenance, :utility, :temporal, :memory_dynamics,
+                     :created_at, :updated_at)
                 """,
                 {
                     "id": crystal["id"],
@@ -183,6 +200,11 @@ class RelationalStore:
                     "provenance": _to_json(crystal.get("provenance", {})),
                     "utility": _to_json(crystal.get("utility", {})),
                     "temporal": _to_json(crystal.get("temporal", {})),
+                    "memory_dynamics": (
+                        _to_json(crystal["memory_dynamics"])
+                        if crystal.get("memory_dynamics") is not None
+                        else None
+                    ),
                     "created_at": crystal.get("provenance", {}).get("created_at", now),
                     "updated_at": now,
                 },
@@ -201,10 +223,54 @@ class RelationalStore:
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
-        for json_col in ("scope", "provenance", "utility", "temporal"):
+        for json_col in ("scope", "provenance", "utility", "temporal", "memory_dynamics"):
             if d.get(json_col):
                 d[json_col] = _from_json(d[json_col])
         return d
+
+    def update_dynamics(self, crystal_id: str, dynamics: dict[str, Any]) -> bool:
+        """Merge *dynamics* into the crystal's memory_dynamics JSON (W2 evb write-back).
+
+        Returns False if the crystal does not exist. Existing keys are overwritten;
+        other dynamics keys (W4 FSRS fields) are preserved.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT memory_dynamics FROM crystals WHERE id = ?", (crystal_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            current = _from_json(row["memory_dynamics"]) if row["memory_dynamics"] else {}
+            current.update(dynamics)
+            conn.execute(
+                "UPDATE crystals SET memory_dynamics = ?, updated_at = ? WHERE id = ?",
+                (_to_json(current), _now_iso(), crystal_id),
+            )
+            conn.commit()
+        return True
+
+    def record_access(self, crystal_id: str, *, now: datetime) -> bool:
+        """Bump access_count and set last_access in the crystal's utility JSON.
+
+        The access event for EVB's Need term (W2). Returns False if not found.
+        Importance/evb recompute is the caller's responsibility (kept out of the
+        store so storage stays free of scoring logic).
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT utility FROM crystals WHERE id = ?", (crystal_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            util = _from_json(row["utility"]) if row["utility"] else {}
+            util["access_count"] = int(util.get("access_count", 0)) + 1
+            util["last_access"] = now.isoformat()
+            conn.execute(
+                "UPDATE crystals SET utility = ?, updated_at = ? WHERE id = ?",
+                (_to_json(util), _now_iso(), crystal_id),
+            )
+            conn.commit()
+        return True
 
     # ------------------------------------------------------------------
     # BM25 / FTS5 search
