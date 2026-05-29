@@ -34,9 +34,12 @@ RUN uv sync --extra dev --no-cache
 # Copy source tree
 COPY mcp-server/src ./src
 COPY schemas ./schemas
+# Copy the evals package so the ablation/canary bench runs in-container + CI.
+COPY evals ./evals
 
-# Set PYTHONPATH so crystalium package is importable without install
-ENV PYTHONPATH="/app/src"
+# Set PYTHONPATH so crystalium (in src/) AND the evals package (at /app) are
+# importable without install.
+ENV PYTHONPATH="/app/src:/app"
 
 # Default entry point — override in docker-compose for specific commands
 ENTRYPOINT ["uv", "run"]
