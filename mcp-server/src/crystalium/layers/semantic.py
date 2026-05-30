@@ -169,6 +169,9 @@ class SemanticLayer:
                 "novelty_at_write": payload.get("novelty_at_write", 0.5),
             }
 
+            from crystalium.protection import resolve_protection
+            protected, tags = resolve_protection(payload, prov_dict.get("source"))
+
             crystal_record: dict[str, Any] = {
                 "id": crystal_id,
                 "layer": "semantic",
@@ -186,6 +189,8 @@ class SemanticLayer:
                 },
                 "utility": utility,
                 "status": "active",
+                "protected": protected,
+                "tags": tags,
             }
 
             # 5. Insert stores

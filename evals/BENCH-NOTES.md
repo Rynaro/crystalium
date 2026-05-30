@@ -176,3 +176,33 @@ gate. Until then all W3 flags remain OFF.
 consolidation count*, NOT semantic-row growth — the Dream **proposes** (the gate
 admits + records a promotion) but `_consolidate` never inserts the semantic
 crystal, so row-count growth is structurally 0.
+
+## W4 forgetting-faculty gate (`evals/forgetting_gate.py`) — INCONCLUSIVE, flag OFF
+
+`docker run --rm crystalium:dev python -m evals forgetting-gate`. A 24-tick
+synthetic session in two arms (LRU vs FSRS) over a recalled high-value set + a
+never-recalled noise stream.
+
+| axis | on (fsrs) | off (lru) | delta |
+|---|---|---|---|
+| memory_size_plateau (lower=flatter) | 1.0 | 1.0 | 0.0 |
+| high_value_retention | 1.0 | 1.0 | 0.0 |
+| recall_latency_ms | ~0.0047 | ~0.0071 | −0.0024 |
+
+**Verdict: FSRS does NOT strictly beat LRU on all three DoD axes ⇒
+`forgetting_fsrs` stays OFF.** High-value retention ties at 1.0 (both keep the
+recalled keystones) and FSRS latency is marginally lower, but **neither arm
+plateaus** at default params (both grow ~+1 active/tick in the latter half) — so
+the plateau axis ties and the gate fails. Honest null; the faculty (FSRS decay,
+value-aware eviction, re-surfacing, protected class, RTBF) ships fully tested
+behind the off flag.
+
+**[GAP — the noisiest-wave tuning follow-up]** To separate the arms, a later pass
+needs a **longer session** and/or **more aggressive eviction** (higher r_floor,
+more frequent prune, larger noise:signal ratio) so FSRS's value-aware eviction
+visibly plateaus memory while LRU grows. This is parameter/iteration tuning
+(roadmap budgeted "several A/B iterations"), not a redesign. Until then the flag
+stays OFF.
+
+**Note:** the right-to-be-forgotten op is exercised by `test_rtbf.py`, not this
+gate; it is an operator action, not an A/B axis.

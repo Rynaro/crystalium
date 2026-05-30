@@ -134,6 +134,9 @@ class EpisodicLayer:
             scope = payload.get("scope", {})
             summary = payload.get("summary", "")
 
+            from crystalium.protection import resolve_protection
+            protected, tags = resolve_protection(payload, prov_dict.get("source"))
+
             crystal_record: dict[str, Any] = {
                 "id": crystal_id,
                 "layer": "episodic",
@@ -151,6 +154,8 @@ class EpisodicLayer:
                 },
                 "utility": utility,
                 "status": "active",
+                "protected": protected,
+                "tags": tags,
             }
 
             # 5. Insert into relational store

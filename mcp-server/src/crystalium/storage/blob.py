@@ -94,3 +94,20 @@ class BlobStore:
             "set temporal.t_valid_to + temporal.superseded_by on the old crystal, "
             "then write the new crystal."
         )
+
+    def tombstone(self, blob_id: str) -> bool:
+        """Physically drop a blob — the W4 right-to-be-forgotten exception (P0).
+
+        DISTINCT from delete() (which stays blocked): tombstone is reached ONLY
+        via the operator-gated `forget` op after a forget_audit row is written.
+        Returns True if a blob was removed, False if it was absent. Never raises
+        on a missing/invalid id.
+        """
+        try:
+            path = self._blob_path(blob_id)
+        except ValueError:
+            return False
+        if path.exists():
+            path.unlink()
+            return True
+        return False

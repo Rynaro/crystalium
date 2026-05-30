@@ -112,6 +112,12 @@ class Aetheryte:
         importance_fn: Callable[..., float],
         composer: "Composer",
         persist_dynamics: bool = False,
+        forgetting_fsrs: bool = False,
+        r_floor: float = 0.7,
+        fsrs_boost_factor: float = 1.5,
+        fsrs_initial_stability: float = 2.0,
+        fsrs_initial_difficulty: float = 0.3,
+        fsrs_lapse_stability: float = 0.5,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -124,6 +130,13 @@ class Aetheryte:
         # returned crystal. The access-count bump itself is unconditional (a layer
         # fact applied to BOTH A/B arms so the only difference is the scorer).
         self.persist_dynamics = persist_dynamics
+        # W4: when True (forgetting_fsrs), recall boosts FSRS stability / resets on lapse.
+        self.forgetting_fsrs = forgetting_fsrs
+        self.r_floor = r_floor
+        self.fsrs_boost_factor = fsrs_boost_factor
+        self.fsrs_initial_stability = fsrs_initial_stability
+        self.fsrs_initial_difficulty = fsrs_initial_difficulty
+        self.fsrs_lapse_stability = fsrs_lapse_stability
 
     # ------------------------------------------------------------------
     # Public recall API
@@ -353,6 +366,28 @@ class Aetheryte:
             # composer's evb cache stay fresh. Never let this break a recall.
             for rec in composed.records:
                 try:
+                    # W4: successful recall boosts FSRS stability (reconsolidation),
+                    # or resets it on a lapse. Computed from the PRE-recall last_access
+                    # (rec.last_access) BEFORE record_access bumps it.
+                    if self.forgetting_fsrs:
+                        from crystalium import fsrs as _fsrs
+
+                        full = self.relational.get_crystal(rec.id)
+                        md = (full or {}).get("memory_dynamics") or {}
+                        elapsed = _fsrs.elapsed_days(rec.last_access, now)
+                        new_s, r = _fsrs.on_recall(
+                            md.get("stability"),
+                            elapsed,
+                            r_floor=self.r_floor,
+                            boost_factor=self.fsrs_boost_factor,
+                            initial_stability=self.fsrs_initial_stability,
+                            lapse_stability=self.fsrs_lapse_stability,
+                        )
+                        self.relational.update_dynamics(rec.id, {
+                            "stability": new_s,
+                            "retrievability": r,
+                            "difficulty": md.get("difficulty", self.fsrs_initial_difficulty),
+                        })
                     self.relational.record_access(rec.id, now=now)
                     if self.persist_dynamics:
                         full = self.relational.get_crystal(rec.id)

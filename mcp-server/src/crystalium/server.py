@@ -357,6 +357,12 @@ def _build_components(
         importance_fn=importance_fn,
         composer=composer,
         persist_dynamics=config.evb_enabled,
+        forgetting_fsrs=config.forgetting_fsrs,
+        r_floor=config.r_floor,
+        fsrs_boost_factor=config.fsrs_boost_factor,
+        fsrs_initial_stability=config.fsrs_initial_stability,
+        fsrs_initial_difficulty=config.fsrs_initial_difficulty,
+        fsrs_lapse_stability=config.fsrs_lapse_stability,
     )
 
     worker = DreamWorker(
@@ -373,6 +379,13 @@ def _build_components(
         stc=config.dream_stc,
         stc_threshold=config.stc_threshold,
         stc_window_s=config.stc_window_s,
+        forgetting_fsrs=config.forgetting_fsrs,
+        r_floor=config.r_floor,
+        resurface_floor=config.resurface_floor,
+        evb_percentile=config.evb_percentile,
+        fsrs_initial_stability=config.fsrs_initial_stability,
+        fsrs_boost_factor=config.fsrs_boost_factor,
+        fsrs_lapse_stability=config.fsrs_lapse_stability,
     )
     scheduler = DreamScheduler(config=config, worker=worker, store=relational)
 

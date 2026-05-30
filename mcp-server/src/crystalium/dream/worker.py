@@ -95,6 +95,13 @@ class DreamWorker:
         stc: bool = False,
         stc_threshold: float = 0.5,
         stc_window_s: int = 3600,
+        forgetting_fsrs: bool = False,
+        r_floor: float = 0.7,
+        resurface_floor: float = 0.85,
+        evb_percentile: float = 0.5,
+        fsrs_initial_stability: float = 2.0,
+        fsrs_boost_factor: float = 1.5,
+        fsrs_lapse_stability: float = 0.5,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -116,6 +123,14 @@ class DreamWorker:
         self.stc = stc
         self.stc_threshold = stc_threshold
         self.stc_window_s = stc_window_s
+        # W4 forgetting faculty (default OFF -> legacy importance-threshold prune).
+        self.forgetting_fsrs = forgetting_fsrs
+        self.r_floor = r_floor
+        self.resurface_floor = resurface_floor
+        self.evb_percentile = evb_percentile
+        self.fsrs_initial_stability = fsrs_initial_stability
+        self.fsrs_boost_factor = fsrs_boost_factor
+        self.fsrs_lapse_stability = fsrs_lapse_stability
 
     # ------------------------------------------------------------------
     # Public API
@@ -201,6 +216,12 @@ class DreamWorker:
                 if result:
                     proposals += 1
             consolidate_summary = f"Proposed {proposals} Semantic upsert(s)."
+
+            # Phase 3b: Spaced re-surfacing (W4) — boost stability of valuable,
+            # aging crystals BEFORE retrievability crosses the floor. Runs only
+            # under forgetting_fsrs, after consolidate and before prune.
+            if self.forgetting_fsrs:
+                self._resurface(now)
 
             # Phase 4: Prune
             prune_summary = self._prune(now)
@@ -338,6 +359,63 @@ class DreamWorker:
             return float(evb_score(_UtilityStub(util, now), now=now))
         except Exception:
             return 0.0
+
+    def _resurface(self, now: datetime) -> int:
+        """W4 spaced re-surfacing: boost stability of valuable, aging crystals
+        (r_floor < R < resurface_floor AND EVB above the percentile) before they
+        fade. Never deprecates; protected/un-aged/low-value are skipped. Returns
+        the number boosted.
+        """
+        from crystalium import fsrs as _fsrs
+
+        cutoff = self._evb_percentile_cutoff()
+        boosted = 0
+        try:
+            with self.relational._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, utility, memory_dynamics, protected FROM crystals "
+                    "WHERE status='active'"
+                ).fetchall()
+        except Exception as exc:
+            log.debug("resurface_skipped", error=str(exc))
+            return 0
+        for row in rows:
+            cid = row[0]
+            if bool(row[3]):  # protected — no need to re-surface; never fades
+                continue
+            utility = json.loads(row[1]) if isinstance(row[1], str) else (row[1] or {})
+            md = json.loads(row[2]) if isinstance(row[2], str) else (row[2] or {})
+            evb = md.get("evb")
+            # high-value only: above the percentile cutoff (skip if no value signal)
+            if cutoff is None or evb is None or evb < cutoff:
+                continue
+            eff_s = md.get("stability") or self.fsrs_initial_stability
+            elapsed = _fsrs.elapsed_days(_UtilityStub(utility, now).last_access, now)
+            r = _fsrs.retrievability(eff_s, elapsed)
+            if self.r_floor < r < self.resurface_floor:
+                self.relational.update_dynamics(cid, {
+                    "stability": _fsrs.boost_stability(eff_s, factor=self.fsrs_boost_factor),
+                    "retrievability": r,
+                })
+                boosted += 1
+        if boosted:
+            log.info("dream_resurface", boosted=boosted)
+        return boosted
+
+    def _evb_percentile_cutoff(self) -> float | None:
+        """EVB at self.evb_percentile over the active set (None if no evb data)."""
+        try:
+            evbs = sorted(
+                c["evb"]
+                for c in self.relational.list_crystals_with_dynamics()
+                if c.get("status") == "active" and c.get("evb") is not None
+            )
+        except Exception:
+            return None
+        if not evbs:
+            return None
+        idx = min(len(evbs) - 1, int(self.evb_percentile * len(evbs)))
+        return evbs[idx]
 
     def _gather(self, now: datetime) -> list[list[dict[str, Any]]]:
         """Fetch candidate clusters for consolidation.
@@ -572,15 +650,21 @@ class DreamWorker:
         deprecated_count = 0
         layers = list(_DEFAULT_PRUNE_THRESHOLDS.keys())
 
+        # W4: when forgetting_fsrs, eviction is value-aware — compute the EVB
+        # percentile cutoff once over the whole active set (never age alone).
+        evb_cutoff = self._evb_percentile_cutoff() if self.forgetting_fsrs else None
+
         for layer in layers:
             threshold = self.prune_thresholds.get(layer, _DEFAULT_PRUNE_THRESHOLDS[layer])
             t0_prune = now_ms()
 
             try:
-                # Fetch active records for this layer
+                # Fetch active records for this layer (W4 also reads memory_dynamics
+                # + protected so eviction can see R/stability and the protected flag).
                 with self.relational._connect() as conn:
                     rows = conn.execute(
-                        "SELECT id, utility, status FROM crystals WHERE layer=? AND status='active'",
+                        "SELECT id, utility, status, memory_dynamics, protected "
+                        "FROM crystals WHERE layer=? AND status='active'",
                         (layer,),
                     ).fetchall()
 
@@ -589,6 +673,13 @@ class DreamWorker:
                     cid = row[0]
                     utility_raw = row[1]
                     utility = json.loads(utility_raw) if isinstance(utility_raw, str) else utility_raw or {}
+                    md_raw = row[3]
+                    md = json.loads(md_raw) if isinstance(md_raw, str) else (md_raw or {})
+                    protected = bool(row[4])
+
+                    # W4 Ricoeur-protected class: never evicted (any mode).
+                    if protected:
+                        continue
 
                     rec_stub = _UtilityStub(utility, now)
                     score = self.importance_fn(rec_stub, now=now)
@@ -599,7 +690,22 @@ class DreamWorker:
                     if self.persist_dynamics:
                         self.relational.update_dynamics(cid, {"evb": score})
 
-                    if score < threshold:
+                    if self.forgetting_fsrs:
+                        # Value-aware: evict ONLY when retrievability has decayed
+                        # below r_floor AND value (EVB) is below the percentile —
+                        # never on age/threshold alone.
+                        from crystalium import fsrs as _fsrs
+
+                        eff_s = md.get("stability") or self.fsrs_initial_stability
+                        elapsed = _fsrs.elapsed_days(rec_stub.last_access, now)
+                        r = _fsrs.retrievability(eff_s, elapsed)
+                        evb = md.get("evb")
+                        # null EVB or no cutoff -> treat as below value (dead weight),
+                        # but R<r_floor is still required (null EVB alone never evicts).
+                        value_below = evb is None or evb_cutoff is None or evb < evb_cutoff
+                        if r < self.r_floor and value_below:
+                            to_deprecate.append(cid)
+                    elif score < threshold:
                         to_deprecate.append(cid)
 
                 for cid in to_deprecate:

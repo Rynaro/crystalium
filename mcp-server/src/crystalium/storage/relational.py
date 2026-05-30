@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS crystals (
     utility          TEXT NOT NULL,    -- JSON
     temporal         TEXT NOT NULL,    -- JSON
     memory_dynamics  TEXT,             -- JSON, nullable (W2: stability/retrievability/difficulty/evb/...)
+    protected        INTEGER NOT NULL DEFAULT 0,  -- W4 Ricoeur-protected: exempt from decay/eviction
+    tags             TEXT,             -- JSON array, nullable (W4)
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
@@ -86,6 +88,17 @@ CREATE TABLE IF NOT EXISTS promotions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     crystal_id  TEXT NOT NULL,
     gate        TEXT NOT NULL,    -- semantic | procedural
+    ts          TEXT NOT NULL
+);
+
+-- W4 right-to-be-forgotten audit ledger (append-only). Every hard-tombstone
+-- writes a row here BEFORE the delete; this table is itself protected from decay.
+CREATE TABLE IF NOT EXISTS forget_audit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    crystal_id  TEXT NOT NULL,
+    actor_tier  TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    layer       TEXT,
     ts          TEXT NOT NULL
 );
 
@@ -171,6 +184,13 @@ class RelationalStore:
         if "memory_dynamics" not in cols:
             conn.execute("ALTER TABLE crystals ADD COLUMN memory_dynamics TEXT")
             conn.commit()
+        # W4: protected/tags (added to crystal.v1.json in W1, persisted now).
+        if "protected" not in cols:
+            conn.execute("ALTER TABLE crystals ADD COLUMN protected INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        if "tags" not in cols:
+            conn.execute("ALTER TABLE crystals ADD COLUMN tags TEXT")
+            conn.commit()
 
     # ------------------------------------------------------------------
     # Crystal CRUD
@@ -186,12 +206,12 @@ class RelationalStore:
                     (id, layer, trust_tier, validation_state, status, importance,
                      summary, content_ref, embedding_ref,
                      scope, provenance, utility, temporal, memory_dynamics,
-                     created_at, updated_at)
+                     protected, tags, created_at, updated_at)
                 VALUES
                     (:id, :layer, :trust_tier, :validation_state, :status, :importance,
                      :summary, :content_ref, :embedding_ref,
                      :scope, :provenance, :utility, :temporal, :memory_dynamics,
-                     :created_at, :updated_at)
+                     :protected, :tags, :created_at, :updated_at)
                 """,
                 {
                     "id": crystal["id"],
@@ -212,6 +232,8 @@ class RelationalStore:
                         if crystal.get("memory_dynamics") is not None
                         else None
                     ),
+                    "protected": 1 if crystal.get("protected") else 0,
+                    "tags": _to_json(crystal["tags"]) if crystal.get("tags") else None,
                     "created_at": crystal.get("provenance", {}).get("created_at", now),
                     "updated_at": now,
                 },
@@ -230,9 +252,11 @@ class RelationalStore:
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
-        for json_col in ("scope", "provenance", "utility", "temporal", "memory_dynamics"):
+        for json_col in ("scope", "provenance", "utility", "temporal", "memory_dynamics", "tags"):
             if d.get(json_col):
                 d[json_col] = _from_json(d[json_col])
+        if "protected" in d:
+            d["protected"] = bool(d["protected"])
         return d
 
     def update_dynamics(self, crystal_id: str, dynamics: dict[str, Any]) -> bool:
@@ -428,6 +452,42 @@ class RelationalStore:
                 (_to_json(temporal), _now_iso(), old_id),
             )
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # W4 right-to-be-forgotten — the ONE sanctioned hard-delete
+    # ------------------------------------------------------------------
+
+    def tombstone(self, crystal_id: str, reason: str, *, actor_tier: str, now: datetime) -> bool:
+        """Hard-delete a crystal — the SOLE exception to never-hard-delete (P0-5).
+
+        Writes the forget_audit row BEFORE the delete, in the same transaction, so
+        an erased crystal always leaves an audit trail. Returns False if the
+        crystal does not exist (no audit row written). This is the only
+        `DELETE FROM crystals` in the codebase; it is reached only via the
+        operator-gated `forget` enforcement op (see __main__ `forget` CLI).
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT layer FROM crystals WHERE id = ?", (crystal_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute(
+                "INSERT INTO forget_audit (crystal_id, actor_tier, reason, layer, ts) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (crystal_id, actor_tier, reason, row["layer"], now.isoformat()),
+            )
+            conn.execute("DELETE FROM crystals WHERE id = ?", (crystal_id,))
+            conn.commit()
+        return True
+
+    def list_forget_audit(self) -> list[dict[str, Any]]:
+        """All right-to-be-forgotten audit rows (append-only)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT crystal_id, actor_tier, reason, layer, ts FROM forget_audit ORDER BY id"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Pending promotions (G5)
