@@ -344,6 +344,8 @@ def _build_components(
         dedup_merge=config.write_dedup_merge,
         sep_threshold=config.sep_threshold,
         link_cooccurrence=config.recall_completion,
+        write_conflict_detect=config.write_conflict_detect,
+        conflict_tau_lo=config.conflict_tau_lo,
     )
     procedural = ProceduralLayer(
         blob_store=blob_store,
