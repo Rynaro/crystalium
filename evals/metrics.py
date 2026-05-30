@@ -264,6 +264,19 @@ def write_amplification(rows_written: int, logical_writes: int) -> float | None:
     return rows_written / logical_writes
 
 
+def attack_success_rate(outcomes: Sequence[bool]) -> float | None:
+    """W6 ASR: fraction of poison attacks that succeeded (poison surfaced/won).
+
+    outcomes: one bool per injected attack (True = poison activated and won at
+    recall). Returns successes/total, or None when no attacks were run (undefined
+    — a documented sentinel, never silently 0.0). Lower is better; the poisoning
+    gate flips a defense ON only if ASR_on <= bar AND ASR_on < ASR_off."""
+    total = len(outcomes)
+    if total == 0:
+        return None
+    return sum(1 for o in outcomes if o) / total
+
+
 def cache_hit_rate(hits: int, misses: int) -> float | None:
     """hits / (hits + misses). None when the cache was never queried (undefined).
 

@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from evals.metrics import cache_hit_rate, precision_recall_f1, write_amplification
+from evals.metrics import (
+    attack_success_rate,
+    cache_hit_rate,
+    precision_recall_f1,
+    write_amplification,
+)
 
 
 def test_precision_recall_f1_perfect():
@@ -56,3 +61,10 @@ def test_cache_hit_rate():
     assert cache_hit_rate(3, 1) == 0.75
     assert cache_hit_rate(0, 5) == 0.0
     assert cache_hit_rate(0, 0) is None            # never queried -> undefined
+
+
+def test_attack_success_rate():
+    assert attack_success_rate([False, False, False, False]) == 0.0   # all blocked
+    assert attack_success_rate([True, False, False, False]) == 0.25
+    assert attack_success_rate([True, True]) == 1.0
+    assert attack_success_rate([]) is None         # no attacks -> undefined
