@@ -180,6 +180,16 @@ class Config:
     sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
     recall_prefetch: bool = False          # protention: pre-warm recall cache on plan_checkpoint
 
+    # Security & integrity hardening (W6) — each defense behind its own flag,
+    # default OFF (ablation-or-revert; the poisoning ASR gate is the arbiter).
+    # All OFF -> recall pipeline, Dream, and semantic commit are byte-identical to W5.
+    drift_detect: bool = False             # A-MemGuard belief-drift: flag same-subject lower-trust divergence
+    drift_tau_lo: float = 0.80             # cosine floor of the "same-subject but divergent" band
+    drift_tau_hi: float = 0.97             # cosine ceiling of that band (>=hi is a near-duplicate, not drift)
+    write_conflict_detect: bool = False    # multi-agent write conflict: LWW supersede + record both lineages
+    conflict_tau_lo: float = 0.80          # cosine floor for "same-subject" conflict candidacy
+    recall_active_only: bool = False       # exclude deprecated/superseded crystals from recall (defense)
+
     # Rate limiting (P0-7, atlas-aci pattern)
     rate_limit_per_minute: int = 200
 
@@ -271,6 +281,12 @@ class Config:
             write_dedup_merge=_env_bool("CRYSTALIUM_WRITE_DEDUP_MERGE", False),
             sep_threshold=_env_float("CRYSTALIUM_SEP_THRESHOLD", 0.92),
             recall_prefetch=_env_bool("CRYSTALIUM_RECALL_PREFETCH", False),
+            drift_detect=_env_bool("CRYSTALIUM_DRIFT_DETECT", False),
+            drift_tau_lo=_env_float("CRYSTALIUM_DRIFT_TAU_LO", 0.80),
+            drift_tau_hi=_env_float("CRYSTALIUM_DRIFT_TAU_HI", 0.97),
+            write_conflict_detect=_env_bool("CRYSTALIUM_WRITE_CONFLICT_DETECT", False),
+            conflict_tau_lo=_env_float("CRYSTALIUM_CONFLICT_TAU_LO", 0.80),
+            recall_active_only=_env_bool("CRYSTALIUM_RECALL_ACTIVE_ONLY", False),
         )
 
     @classmethod
@@ -293,6 +309,7 @@ class Config:
             "dream_replay_evb", "dream_interleave", "dream_stc",
             "forgetting_fsrs",
             "recall_completion", "recall_context_match", "write_dedup_merge", "recall_prefetch",
+            "drift_detect", "write_conflict_detect", "recall_active_only",
         ):
             if bool_field in data:
                 kwargs[bool_field] = bool(data[bool_field])
@@ -333,6 +350,9 @@ class Config:
             "fsrs_lapse_stability",
             "completion_decay",
             "sep_threshold",
+            "drift_tau_lo",
+            "drift_tau_hi",
+            "conflict_tau_lo",
         ):
             if float_field in data:
                 kwargs[float_field] = float(data[float_field])
