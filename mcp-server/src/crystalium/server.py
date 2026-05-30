@@ -374,6 +374,7 @@ def _build_components(
         completion_decay=config.completion_decay,
         context_match=config.recall_context_match,
         recall_cache=recall_cache,
+        recall_active_only=config.recall_active_only,
     )
     # Execution layer depends on aetheryte/recall_cache for W5 prefetch warming.
     execution = ExecutionLayer(

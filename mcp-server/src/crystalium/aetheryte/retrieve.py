@@ -123,6 +123,7 @@ class Aetheryte:
         completion_decay: float = 0.5,
         context_match: bool = False,
         recall_cache: Any = None,
+        recall_active_only: bool = False,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -148,6 +149,10 @@ class Aetheryte:
         self.completion_decay = completion_decay
         self.context_match = context_match
         self.recall_cache = recall_cache  # shared RecallCache (W5 prefetch); None = off
+        # W6: when True, recall excludes non-active (deprecated/superseded/expired)
+        # crystals — the defense that makes operator reject=deprecate and bi-temporal
+        # supersession actually bite. Off -> byte-identical to W5 (returns everything).
+        self.recall_active_only = recall_active_only
 
     # ------------------------------------------------------------------
     # Public recall API
@@ -350,9 +355,29 @@ class Aetheryte:
                         return False
                 return True
 
+            # W6 defense (recall_active_only): drop deprecated/superseded/expired
+            # crystals so a rejected (deprecated) or superseded fact cannot resurface.
+            # Active := status == "active" AND temporal.t_valid_to is unset. Off ->
+            # always True (byte-identical to W5).
+            def _is_active(crystal: dict[str, Any]) -> bool:
+                if not self.recall_active_only:
+                    return True
+                if crystal.get("status", "active") != "active":
+                    return False
+                temporal = crystal.get("temporal") or {}
+                if isinstance(temporal, str):
+                    import json
+                    try:
+                        temporal = json.loads(temporal)
+                    except Exception:
+                        temporal = {}
+                return temporal.get("t_valid_to") is None
+
             filtered_ids = [
                 cid for cid in fused_ids
-                if cid in all_candidates and _scope_matches(all_candidates[cid])
+                if cid in all_candidates
+                and _scope_matches(all_candidates[cid])
+                and _is_active(all_candidates[cid])
             ]
 
             # Build Crystal-like objects for the composer
