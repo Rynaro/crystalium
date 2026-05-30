@@ -492,6 +492,24 @@ class RelationalStore:
             conn.commit()
         return True
 
+    def recent_crystal_ids(self, project: str, *, exclude_id: str, limit: int = 5) -> list[str]:
+        """Most-recent active crystal ids in *project* (W5 co-occurrence linking).
+
+        Bounded to *limit* to avoid combinatorial edge blow-up; excludes
+        exclude_id. Returns [] on any error / no project.
+        """
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id FROM crystals "
+                    "WHERE json_extract(scope, '$.project') = ? AND status='active' AND id != ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (project, exclude_id, limit),
+                ).fetchall()
+            return [r[0] for r in rows]
+        except Exception:
+            return []
+
     def list_forget_audit(self) -> list[dict[str, Any]]:
         """All right-to-be-forgotten audit rows (append-only)."""
         with self._connect() as conn:

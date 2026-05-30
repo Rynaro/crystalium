@@ -413,6 +413,15 @@ class _NullGraphStore:
     def neighbor_expand(self, seed_ids: list[str], depth: int = 1) -> list[str]:
         return []
 
+    def decaying_walk(self, seed_ids: list[str], max_hops: int = 2, decay: float = 0.5) -> dict:
+        return {}
+
+    def add_node(self, *args, **kwargs) -> None:  # noqa: ARG002 — W5 edge writes no-op
+        return None
+
+    def add_edge(self, *args, **kwargs) -> None:  # noqa: ARG002 — W5 edge writes no-op
+        return None
+
 
 # ---------------------------------------------------------------------------
 # ECL sidecar helper (G7)

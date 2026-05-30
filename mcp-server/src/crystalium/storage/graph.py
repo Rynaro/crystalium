@@ -222,6 +222,37 @@ class GraphStore:
 
         return result_ids
 
+    def decaying_walk(
+        self,
+        seed_ids: list[str],
+        max_hops: int = 2,
+        decay: float = 0.5,
+    ) -> dict[str, float]:
+        """Bounded, decaying multi-hop walk (W5 pattern completion / CA3 analogue).
+
+        Returns {crystal_id: decay**hop} for nodes reachable within *max_hops*,
+        excluding the seeds; each node's score reflects its SHORTEST hop distance
+        (first time seen in a BFS frontier). Empty dict if the graph is edgeless.
+        Reuses the reliable depth-1 neighbor_expand per frontier so hop count is
+        tracked honestly (unlike the fixed-depth pattern which collapses distance).
+        """
+        if not seed_ids or max_hops < 1:
+            return {}
+        scores: dict[str, float] = {}
+        visited: set[str] = set(seed_ids)
+        frontier: set[str] = set(seed_ids)
+        for hop in range(1, max_hops + 1):
+            nxt = self.neighbor_expand(list(frontier), depth=1)
+            new = {n for n in nxt if n not in visited}
+            if not new:
+                break
+            w = decay ** hop
+            for n in new:
+                scores[n] = w  # shortest-hop weight
+            visited |= new
+            frontier = new
+        return scores
+
     def node_count(self) -> int:
         """Return the total number of Crystal nodes in the graph."""
         return self._node_count()

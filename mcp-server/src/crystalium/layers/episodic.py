@@ -51,6 +51,10 @@ class EpisodicLayer:
         enforcement: Enforcement,
         redactor: Redactor,
         importance_fn: Callable[..., float],
+        dedup_merge: bool = False,
+        sep_threshold: float = 0.92,
+        link_cooccurrence: bool = False,
+        cooccurrence_limit: int = 5,
     ) -> None:
         self.blob_store = blob_store
         self.relational = relational
@@ -59,6 +63,27 @@ class EpisodicLayer:
         self.enforcement = enforcement
         self.redactor = redactor
         self.importance_fn = importance_fn
+        # W5 retrieval (default off): write-time dedup-merge + co-occurrence edges.
+        self.dedup_merge = dedup_merge
+        self.sep_threshold = sep_threshold
+        self.link_cooccurrence = link_cooccurrence
+        self.cooccurrence_limit = cooccurrence_limit
+
+    def _link_cooccurrence(self, crystal_id: str, scope: dict) -> None:
+        """W5 D1: link this crystal to recent same-project crystals via LINKS_TO,
+        so the pattern-completion walk has edges. Bounded; best-effort."""
+        if not self.link_cooccurrence or self.graph_store is None:
+            return
+        project = scope.get("project") if isinstance(scope, dict) else None
+        if not project:
+            return
+        try:
+            for other in self.relational.recent_crystal_ids(
+                project, exclude_id=crystal_id, limit=self.cooccurrence_limit
+            ):
+                self.graph_store.add_edge(crystal_id, other, "LINKS_TO")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cooccurrence_link_skipped", error=str(exc))
 
     # ------------------------------------------------------------------
     # commit (P0-1: raw capture; quarantine if T3)
@@ -184,6 +209,7 @@ class EpisodicLayer:
                     self.graph_store.add_node(crystal_id=crystal_id, layer="episodic")
                 except Exception as exc:  # noqa: BLE001
                     log.warning("graph_insert_skipped", error=str(exc))
+                self._link_cooccurrence(crystal_id, scope)
 
             log.info(
                 "episodic_commit",
