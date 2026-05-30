@@ -487,3 +487,25 @@ class TestForcePromote:
         enforcement.assert_tier_allowed(
             "crystalium.commit", layer, Tier.T0, "force_promote"
         )
+
+
+# ---------------------------------------------------------------------------
+# W6 quarantine-review op (operator-only triage)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewOp:
+    def test_review_allowed_for_t0(self, enforcement: Enforcement) -> None:
+        """T0 operator may review (triage) a quarantined episodic crystal."""
+        enforcement.assert_tier_allowed("crystalium.review", "episodic", Tier.T0, "review")
+
+    @pytest.mark.parametrize("tier", [Tier.T1, Tier.T2, Tier.T3])
+    def test_review_blocked_for_non_t0(self, enforcement: Enforcement, tier: Tier) -> None:
+        """review is T0-only; everyone else raises TierViolation (operator-gated)."""
+        with pytest.raises(TierViolation):
+            enforcement.assert_tier_allowed("crystalium.review", "episodic", tier, "review")
+
+    def test_review_unknown_layer_denied(self, enforcement: Enforcement) -> None:
+        """An unknown (layer, op) is deny-by-default even for T0."""
+        with pytest.raises(TierViolation):
+            enforcement.assert_tier_allowed("crystalium.review", "bogus", Tier.T0, "review")
