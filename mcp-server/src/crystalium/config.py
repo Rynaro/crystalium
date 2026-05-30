@@ -188,7 +188,7 @@ class Config:
     drift_tau_hi: float = 0.97             # cosine ceiling of that band (>=hi is a near-duplicate, not drift)
     write_conflict_detect: bool = False    # multi-agent write conflict: LWW supersede + record both lineages
     conflict_tau_lo: float = 0.80          # cosine floor for "same-subject" conflict candidacy
-    recall_active_only: bool = False       # exclude deprecated/superseded crystals from recall (defense)
+    recall_active_only: bool = True        # W6 gate PASS + correctness: exclude deprecated/superseded from recall
 
     # Rate limiting (P0-7, atlas-aci pattern)
     rate_limit_per_minute: int = 200

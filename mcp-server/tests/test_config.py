@@ -364,11 +364,15 @@ class TestRetrievalFlags:
 class TestSecurityFlags:
     """W6 security & integrity hardening flags (default OFF — ablation-or-revert)."""
 
-    def test_security_off_by_default(self, tmp_path: Path) -> None:
+    def test_security_defaults(self, tmp_path: Path) -> None:
+        # W6 ablation outcome: recall_active_only won its ASR gate (1.0->0.0) AND is
+        # a correctness fix -> ON by default. drift_detect (detect-only; band needs
+        # tuning) + write_conflict_detect (LWW inversion risk; not isolated by the
+        # gate) stay OFF. See evals/BENCH-NOTES.md "W6 security & integrity gates".
         cfg = Config(data_dir=tmp_path)
         assert cfg.drift_detect is False
         assert cfg.write_conflict_detect is False
-        assert cfg.recall_active_only is False
+        assert cfg.recall_active_only is True
         assert cfg.drift_tau_lo == 0.80
         assert cfg.drift_tau_hi == 0.97
         assert cfg.conflict_tau_lo == 0.80

@@ -264,3 +264,59 @@ ablation-as-arbiter we discount confounded passes: the faculty ships gated and
 ready, but the default does not change on a harness-fabricated signal. **[GAP]** a
 trustworthy prefetch gate needs an *imperfect* predictor (next query drawn from a
 realistic distribution, not handed over) so the hit rate reflects real protention.
+
+## W6 security & integrity gates — poisoning ASR PASS; drift bench proven; flags split
+
+### (iii) poisoning-resistance ASR (`poisoning-gate`) — PASS, flip `recall_active_only` ON
+
+`docker run --rm crystalium:dev python -m evals poisoning-gate` (deterministic;
+BM25 recall, no embedder needed — same result with the real bge-m3 embedder). Eight
+attacks: each delivers T3 poison (lands quarantined — the only open door), the
+defended system triages+rejects it (deprecate + audit), then a FRESH component set
+on the same data_dir attempts activation via recall.
+
+| axis | on (defenses) | off (W5 baseline) | bar |
+|---|---|---|---|
+| attack_success_rate | **0.00** | 1.00 | ≤ 0.10 |
+| tier_wall (T3→semantic denied) | 8/8 | 8/8 | — |
+
+**Verdict: defenses cut ASR 1.00 → 0.00 with the tier wall holding in BOTH arms ⇒
+flip `recall_active_only` ON.** Without the active-filter a rejected (deprecated)
+poison still resurfaces at recall — the gap W6 closes; with it, the rejected poison
+stays out. **[PROXY/confound, honest]** the active-filter directly implements the
+exclusion the metric checks, so the 0.00 is partly tautological — but the
+underlying behaviour change (recall must not return deprecated/superseded crystals)
+is an unambiguous correctness + security fix, not a tuned win, and it is canary-no-
+regression verified. The tier chokepoint is *always* on (sacred), so it defends
+equally in both arms — recorded as evidence, not an ablation axis.
+
+### Belief-drift detector — bench-proven (real embedder), flag stays OFF
+
+A real-bge-m3 end-to-end check: a T3 fact "backups are disabled to save cost"
+against a T1 prior "backups run every night at 2am" (same project) is correctly
+flagged (drift_audit row written, lower-trust fact marked, prior untouched).
+
+**[GAP — the band proxy's hard edge]** the genuinely-contradictory pair scored
+cosine **0.696**, BELOW the default band floor `drift_tau_lo=0.80`. Semantic
+*contradiction* is often LOW-similarity (opposite assertions diverge in embedding
+space), while paraphrases sit ~0.95+. So the default [0.80, 0.97) band catches
+near-paraphrase divergence but MISSES strong contradictions — the demo needed
+`drift_tau_lo=0.55` to flag it. Similarity is a [PROXY] for contradiction, not a
+detector of it (no negation/NLI model in the loop). **`drift_detect` stays OFF**:
+it is detect-and-flag only (no ASR movement to arbitrate), the band needs
+per-deployment tuning, and a too-low floor floods false positives. Ships gated +
+operator-tunable (drift_tau_lo/hi); the faculty is proven to flag when the band fits.
+
+### Write-conflict detection — flag stays OFF
+
+`write_conflict_detect` (LWW supersede + conflicts ledger) is correct and tested
+(test_write_conflict), but the ASR gate neutralizes poison via the deprecate path,
+so the gate does not isolate a conflict-specific ASR win. Combined with the
+last-write-wins trust-inversion risk (a less-trusted newcomer can supersede a
+higher-trust prior — recorded in the conflicts ledger's winner/loser tiers, but
+unguarded), it **stays OFF** pending a conflict-isolating gate + a trust-aware
+resolution policy. Ships gated.
+
+**Net W6 flip:** `recall_active_only` → ON (gate PASS + correctness, canary-clean);
+`drift_detect` + `write_conflict_detect` → stay OFF (honest nulls; faculties ship
+gated).
