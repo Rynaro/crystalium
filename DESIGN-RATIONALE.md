@@ -177,6 +177,31 @@ This document traces every non-obvious decision in CRYSTALIUM v0.1.0 to its sour
 
 ---
 
+### D6.5. Security & Integrity Hardening — W6 (v0.7.0)
+
+**Decision:** Four defenses against memory poisoning, layered at/behind the sacred chokepoint, each flag-gated; the poisoning ASR gate is the arbiter. (1) **Belief-drift detection** (`drift_detect`) — a Dream phase between consolidate and prune flags an active semantic fact that is same-project, same-subject (cosine in `[drift_tau_lo, drift_tau_hi)`) but **less trusted** than a prior, into a `drift_audit` ledger; detect-and-flag only. (2) **Quarantine triage** — an operator T0 CLI (`quarantine list` / `review --accept|--reject --reason`) over `validation_state="quarantined"`; accept clears quarantine, reject **soft-deprecates** (never hard-deletes); both audited in `quarantine_audit`; routed through a new T0-only `review` enforcement op. (3) **Write-conflict detection** (`write_conflict_detect`) — in the semantic dedup slot, a same-subject **divergent** near-duplicate (cosine in `[conflict_tau_lo, sep_threshold)`) is resolved **last-write-wins** (`mark_superseded`) with **both lineages + both tiers** recorded in a `conflicts` ledger — surfaced, never silently absorbed as corroboration. (4) **Active-only recall** (`recall_active_only`) — recall excludes deprecated/superseded crystals so a rejected or superseded fact cannot resurface.
+
+**Rationale:**
+- **Memory poisoning is a catalogued threat** — OWASP ASI06; LTM Security Survey (arXiv:2604.16548) **[UNVERIFIED — arXiv id not validated]**; PoisonedRAG (USENIX Security 2025); MINJA. Its defining property is **temporal decoupling**: write and activation are separated in time, so retrieval-time filtering alone is insufficient — the defense lives on the write/promote path and in cross-session consistency.
+- **A-MemGuard** (separate consistency checks + a distinct lesson memory) **[UNVERIFIED — primary source not accessed]** motivates belief-drift detection as a consistency check over stored facts rather than a content filter.
+- **Trust-tier-MIN propagation** (P0-6, D7) is the existing backbone — W6 *extends* it: the chokepoint already denies T3 → semantic (tier wall held 8/8 in both ASR arms); the new defenses cover what tiering alone misses (a vetted-then-rejected fact resurfacing; two trusted agents disagreeing).
+- **Never-hard-delete (P0-5) preserved** — reject = soft-deprecate (`status="deprecated"`), drift = flag-only, conflict = bi-temporal supersede. The RTBF `tombstone` remains the sole audited hard-delete.
+
+**Stance — ablation-as-arbiter (W6 result: one flip, two holds):** `python -m evals poisoning-gate` (delayed cross-session activation; deterministic BM25 recall, same result with real bge-m3).
+- **`recall_active_only` → ON.** ASR **1.00 → 0.00**, tier wall 8/8 both arms ⇒ flip. **[PROXY/confound, honest]** the active-filter directly implements the exclusion the metric checks, so 0.00 is partly tautological — but not returning deprecated/superseded crystals is an unambiguous correctness + security fix, and it is canary-no-regression verified (identical headline to `main`).
+- **`drift_detect` → stays OFF.** Bench-proven end-to-end (a T3 "backups disabled" fact flagged against a T1 "backups nightly" prior), but the contradiction scored cosine **0.696 — below the default 0.80 band floor**: semantic *contradiction* is often LOW-similarity (opposite assertions diverge), while paraphrases sit ~0.95+. Similarity is a **[PROXY]** for contradiction, not a detector of it (no NLI/negation model). Detect-only (no ASR to arbitrate); ships gated + operator-tunable.
+- **`write_conflict_detect` → stays OFF.** Correct + tested, but the ASR gate neutralizes via the deprecate path so it isolates no conflict-specific win, and **last-write-wins can let a less-trusted newcomer supersede a higher-trust prior** (a trust inversion — recorded in the `conflicts` winner/loser tiers, but unguarded). Pending a conflict-isolating gate + trust-aware resolution.
+
+**Chokepoint preserved:** drift runs in Dream behind the chokepoint (read + ledger-append only); conflict detection in `semantic.commit` *after* rate/tier/ceiling; quarantine triage routes through `assert_tier_allowed(...,"review")` T0-only. All flags OFF (and `recall_active_only` ON over an all-active store) reproduce W5 byte-identically.
+
+**[PROXY]** ASR via a constructed fixture; "defenses off" arm = W5-baseline flags (the chokepoint is always on, never neutralized); cross-session = fresh components on the same `data_dir`; cosine-band as same-subject/contradiction proxy.
+
+**Reversibility:** every defense flag-gated; the `recall_active_only` flip is a one-line revert. OFF reproduces W5.
+
+**Source:** `roadmap-v1/W6-security-hardening.md`; OWASP ASI06; PoisonedRAG (USENIX Security 2025); MINJA; A-MemGuard [UNVERIFIED]; LTM Security Survey [UNVERIFIED]; `evals/BENCH-NOTES.md` (W6 gates); extends D7 / P0-5 / P0-6.
+
+---
+
 ### D7. Cross-cutting trust-tier propagation
 
 **Decision:** Consolidated tier = MIN(inputs.tier). Admission checks `consolidated.tier ≤ layer.ceiling`. T3 input → Semantic admission denied. Error message: structured advice "exclude T3 inputs or commit to Episodic instead."
