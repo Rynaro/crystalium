@@ -293,6 +293,27 @@ class Aetheryte:
                 rankings.append(completion_ranking)
             fused_ids = rrf_merge(rankings, k_rrf=60)
 
+            # 4b. W5 encoding-specificity: post-RRF re-rank that boosts crystals
+            # whose stored encoding_context overlaps the scope-derived query context
+            # (Tulving & Thomson 1973). Stable sort -> RRF order preserved within
+            # equal context-match. Off -> fused order unchanged (byte-identical).
+            if self.context_match:
+                q_ctx = {
+                    "project": getattr(scope, "project", None),
+                    "agent_class": getattr(scope, "agent_class_visibility", None),
+                }
+
+                def _ctx_overlap(cid: str) -> int:
+                    ec = all_candidates.get(cid, {}).get("encoding_context")
+                    if not isinstance(ec, dict):
+                        return 0
+                    return sum(
+                        1 for key in ("project", "agent_class")
+                        if q_ctx.get(key) is not None and ec.get(key) == q_ctx.get(key)
+                    )
+
+                fused_ids = sorted(fused_ids, key=lambda cid: -_ctx_overlap(cid))
+
             # 5. Optional reranker stub (default DISABLED, never executes in v0.1)
             # Reranker is BGE-reranker-v2-m3; activated when:
             #   len(candidates) > 20 AND config.reranker_enabled is True
