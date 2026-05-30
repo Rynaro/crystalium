@@ -320,3 +320,39 @@ class TestForgettingFlags:
         assert cfg.forgetting_fsrs is True
         assert cfg.evb_percentile == 0.25
         assert cfg.fsrs_boost_factor == 2.0
+
+
+class TestRetrievalFlags:
+    """W5 retrieval-intelligence flags (default OFF — ablation-or-revert)."""
+
+    def test_retrieval_off_by_default(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.recall_completion is False
+        assert cfg.recall_context_match is False
+        assert cfg.write_dedup_merge is False
+        assert cfg.recall_prefetch is False
+        assert cfg.completion_max_hops == 2
+        assert cfg.completion_decay == 0.5
+        assert cfg.sep_threshold == 0.92
+
+    def test_retrieval_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_RECALL_COMPLETION", "true")
+        monkeypatch.setenv("CRYSTALIUM_COMPLETION_MAX_HOPS", "3")
+        monkeypatch.setenv("CRYSTALIUM_WRITE_DEDUP_MERGE", "true")
+        monkeypatch.setenv("CRYSTALIUM_SEP_THRESHOLD", "0.88")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.recall_completion is True
+        assert cfg.completion_max_hops == 3
+        assert cfg.write_dedup_merge is True
+        assert cfg.sep_threshold == 0.88
+
+    def test_retrieval_from_dict(self) -> None:
+        cfg = Config._from_dict({
+            "recall_context_match": True,
+            "recall_prefetch": True,
+            "completion_decay": 0.7,
+        })
+        assert cfg.recall_context_match is True
+        assert cfg.recall_prefetch is True
+        assert cfg.completion_decay == 0.7

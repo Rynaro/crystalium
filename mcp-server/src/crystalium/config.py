@@ -169,6 +169,17 @@ class Config:
     fsrs_boost_factor: float = 1.5   # stability multiplier on successful recall (reconsolidation)
     fsrs_lapse_stability: float = 0.5  # stability reset on a lapse (R<r_floor at access)
 
+    # Retrieval intelligence (W5, Aetheryte II) — each faculty behind its own flag,
+    # default OFF (ablation-or-revert). The recall pipeline + chokepoint are unchanged
+    # when all are off.
+    recall_completion: bool = False        # pattern completion: decaying multi-hop graph walk
+    completion_max_hops: int = 2
+    completion_decay: float = 0.5
+    recall_context_match: bool = False     # encoding-specificity: post-RRF context re-rank
+    write_dedup_merge: bool = False        # pattern separation: merge near-dups at write
+    sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
+    recall_prefetch: bool = False          # protention: pre-warm recall cache on plan_checkpoint
+
     # Rate limiting (P0-7, atlas-aci pattern)
     rate_limit_per_minute: int = 200
 
@@ -253,6 +264,13 @@ class Config:
             r_floor=_env_float("CRYSTALIUM_R_FLOOR", 0.7),
             resurface_floor=_env_float("CRYSTALIUM_RESURFACE_FLOOR", 0.85),
             evb_percentile=_env_float("CRYSTALIUM_EVB_PERCENTILE", 0.5),
+            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", False),
+            completion_max_hops=_env_int("CRYSTALIUM_COMPLETION_MAX_HOPS", 2),
+            completion_decay=_env_float("CRYSTALIUM_COMPLETION_DECAY", 0.5),
+            recall_context_match=_env_bool("CRYSTALIUM_RECALL_CONTEXT_MATCH", False),
+            write_dedup_merge=_env_bool("CRYSTALIUM_WRITE_DEDUP_MERGE", False),
+            sep_threshold=_env_float("CRYSTALIUM_SEP_THRESHOLD", 0.92),
+            recall_prefetch=_env_bool("CRYSTALIUM_RECALL_PREFETCH", False),
         )
 
     @classmethod
@@ -274,6 +292,7 @@ class Config:
             "http_json_response", "http_stateless", "evb_enabled",
             "dream_replay_evb", "dream_interleave", "dream_stc",
             "forgetting_fsrs",
+            "recall_completion", "recall_context_match", "write_dedup_merge", "recall_prefetch",
         ):
             if bool_field in data:
                 kwargs[bool_field] = bool(data[bool_field])
@@ -296,6 +315,7 @@ class Config:
             "rate_limit_per_minute",
             "total_cap",
             "stc_window_s",
+            "completion_max_hops",
         ):
             if int_field in data:
                 kwargs[int_field] = int(data[int_field])
@@ -311,6 +331,8 @@ class Config:
             "fsrs_initial_difficulty",
             "fsrs_boost_factor",
             "fsrs_lapse_stability",
+            "completion_decay",
+            "sep_threshold",
         ):
             if float_field in data:
                 kwargs[float_field] = float(data[float_field])

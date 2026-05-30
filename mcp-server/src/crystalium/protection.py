@@ -25,6 +25,24 @@ def _has_decision_tag(tags: list[Any]) -> bool:
     return False
 
 
+def resolve_encoding_context(
+    payload: dict[str, Any], prov_dict: dict[str, Any], scope: dict[str, Any]
+) -> dict[str, Any]:
+    """W5: the encoding context captured at commit (for encoding-specificity recall).
+
+    Uses an explicit payload.encoding_context if given, else derives a minimal
+    context from scope + provenance (project / agent class / author agent). Pure.
+    """
+    explicit = payload.get("encoding_context")
+    if isinstance(explicit, dict):
+        return explicit
+    return {
+        "project": scope.get("project") if isinstance(scope, dict) else None,
+        "agent_class": scope.get("agent_class_visibility") if isinstance(scope, dict) else None,
+        "author_agent": prov_dict.get("author_agent") if isinstance(prov_dict, dict) else None,
+    }
+
+
 def resolve_protection(payload: dict[str, Any], provenance_source: str | None) -> tuple[bool, list[str]]:
     """Return (protected, tags) for a commit.
 
