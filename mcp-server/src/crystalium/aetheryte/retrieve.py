@@ -203,6 +203,13 @@ class Aetheryte:
                 "crystalium.recall", "episodic", caller_tier, "recall"
             )
 
+            # 2b. W5 prefetch: serve a pre-warmed result from the recall cache.
+            # The chokepoint above still ran. Off (recall_cache None) -> no cache.
+            if self.recall_cache is not None:
+                cached = self.recall_cache.get(getattr(scope, "project", None), query)
+                if cached is not None:
+                    return cached
+
             target_layers = layers if layers else _ALL_LAYERS
 
             # 3. Hybrid retrieve per layer
@@ -498,6 +505,10 @@ class Aetheryte:
                 evicted=composed.evicted_count,
                 caller_tier=str(caller_tier),
             )
+
+            # W5 prefetch: cache this (cold) result so a pre-warmed read hits later.
+            if self.recall_cache is not None:
+                self.recall_cache.put(getattr(scope, "project", None), query, result)
 
             return result
 

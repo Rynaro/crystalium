@@ -34,6 +34,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from crystalium import __version__
+from crystalium.aetheryte.cache import RecallCache
 from crystalium.aetheryte.redact import Redactor
 from crystalium.aetheryte.retrieve import Aetheryte
 from crystalium.composer import Composer
@@ -314,6 +315,11 @@ def _build_components(
         else importance_score
     )
 
+    # W5 retrieval intelligence (all default OFF). Shared in-process recall cache
+    # only exists when prefetch is on; layers learn co-occurrence edges only when
+    # completion is on (so OFF arms stay byte-identical to W4).
+    recall_cache = RecallCache() if config.recall_prefetch else None
+
     episodic = EpisodicLayer(
         blob_store=blob_store,
         relational=relational,
@@ -322,6 +328,9 @@ def _build_components(
         enforcement=enforcement,
         redactor=redactor,
         importance_fn=importance_fn,
+        dedup_merge=config.write_dedup_merge,
+        sep_threshold=config.sep_threshold,
+        link_cooccurrence=config.recall_completion,
     )
     semantic = SemanticLayer(
         blob_store=blob_store,
@@ -332,6 +341,9 @@ def _build_components(
         gate=gate,
         redactor=redactor,
         importance_fn=importance_fn,
+        dedup_merge=config.write_dedup_merge,
+        sep_threshold=config.sep_threshold,
+        link_cooccurrence=config.recall_completion,
     )
     procedural = ProceduralLayer(
         blob_store=blob_store,
@@ -341,12 +353,6 @@ def _build_components(
         redactor=redactor,
         importance_fn=importance_fn,
         data_dir=config.data_dir,
-    )
-    execution = ExecutionLayer(
-        blob_store=blob_store,
-        relational=relational,
-        enforcement=enforcement,
-        importance_fn=importance_fn,
     )
     aetheryte = Aetheryte(
         relational=relational,
@@ -363,6 +369,21 @@ def _build_components(
         fsrs_initial_stability=config.fsrs_initial_stability,
         fsrs_initial_difficulty=config.fsrs_initial_difficulty,
         fsrs_lapse_stability=config.fsrs_lapse_stability,
+        completion=config.recall_completion,
+        completion_max_hops=config.completion_max_hops,
+        completion_decay=config.completion_decay,
+        context_match=config.recall_context_match,
+        recall_cache=recall_cache,
+    )
+    # Execution layer depends on aetheryte/recall_cache for W5 prefetch warming.
+    execution = ExecutionLayer(
+        blob_store=blob_store,
+        relational=relational,
+        enforcement=enforcement,
+        importance_fn=importance_fn,
+        aetheryte=aetheryte,
+        recall_cache=recall_cache,
+        recall_prefetch=config.recall_prefetch,
     )
 
     worker = DreamWorker(
@@ -513,7 +534,10 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
 
                 elif name == "crystalium.commit":
                     layer_hint = arguments.get("layer")
-                    result = _handle_commit(arguments, episodic, semantic, procedural, execution, caller_tier)
+                    result = _handle_commit(
+                        arguments, episodic, semantic, procedural, execution, caller_tier,
+                        recall_cache=execution.recall_cache,
+                    )
                     scheduler.record_activity()
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "commit-result"
@@ -720,6 +744,7 @@ def _handle_commit(
     procedural: ProceduralLayer,
     execution: ExecutionLayer,
     caller_tier: Tier,
+    recall_cache: Any = None,
 ) -> dict[str, Any]:
     """Dispatch crystalium.commit to the correct layer adapter."""
     import datetime as _dt
@@ -736,6 +761,13 @@ def _handle_commit(
         task_id=raw_prov.get("task_id"),
         created_at=created_at_raw,
     )
+
+    # W5: a write into a project invalidates that project's cached recalls
+    # (staleness guard). No-op when prefetch is off (recall_cache is None).
+    if recall_cache is not None:
+        project = (payload.get("scope") or {}).get("project") if isinstance(payload, dict) else None
+        if project:
+            recall_cache.invalidate_project(project)
 
     if layer == "episodic":
         return episodic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
