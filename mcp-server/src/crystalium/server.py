@@ -408,6 +408,9 @@ def _build_components(
         fsrs_initial_stability=config.fsrs_initial_stability,
         fsrs_boost_factor=config.fsrs_boost_factor,
         fsrs_lapse_stability=config.fsrs_lapse_stability,
+        drift_detect=config.drift_detect,
+        drift_tau_lo=config.drift_tau_lo,
+        drift_tau_hi=config.drift_tau_hi,
     )
     scheduler = DreamScheduler(config=config, worker=worker, store=relational)
 
