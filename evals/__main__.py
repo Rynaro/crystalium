@@ -103,6 +103,12 @@ def _cmd_prefetch_gate(args: argparse.Namespace) -> dict[str, Any]:
     return run()
 
 
+def _cmd_poisoning_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.poisoning_gate import run
+
+    return run()
+
+
 def _cmd_forget(args: argparse.Namespace) -> dict[str, Any]:
     from evals.ab_memory_onoff import _build_live_handlers
     from evals.selective_forgetting import run_test
@@ -176,6 +182,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     pg = sub.add_parser("prefetch-gate", help="predictive-prefetch cache-hit ablation gate (W5 DoD)")
     pg.set_defaults(func=_cmd_prefetch_gate)
+
+    pog = sub.add_parser("poisoning-gate", help="poisoning-resistance ASR ablation gate (W6 DoD)")
+    pog.set_defaults(func=_cmd_poisoning_gate)
 
     return p
 

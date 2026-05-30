@@ -343,6 +343,12 @@ _MATRIX: dict[tuple[str, str], dict[Tier, str]] = {
     ("semantic", "forget"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
     ("procedural", "forget"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
     ("execution", "forget"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
+    # W6 quarantine review — operator-only (T0) triage over quarantined crystals
+    # (accept clears quarantine; reject soft-deprecates). Same shape as forget.
+    ("episodic", "review"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
+    ("semantic", "review"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
+    ("procedural", "review"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
+    ("execution", "review"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
 }
 
 # Make the matrix immutable at the module level

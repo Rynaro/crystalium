@@ -60,6 +60,8 @@ class SemanticLayer:
         sep_threshold: float = 0.92,
         link_cooccurrence: bool = False,
         cooccurrence_limit: int = 5,
+        write_conflict_detect: bool = False,
+        conflict_tau_lo: float = 0.80,
     ) -> None:
         self.blob_store = blob_store
         self.relational = relational
@@ -74,6 +76,52 @@ class SemanticLayer:
         self.sep_threshold = sep_threshold
         self.link_cooccurrence = link_cooccurrence
         self.cooccurrence_limit = cooccurrence_limit
+        # W6 multi-agent write-conflict detection (default off). A near-duplicate
+        # that is same-subject (cosine in [conflict_tau_lo, sep_threshold)) but
+        # DIVERGENT in content is a conflict, not a corroboration -> last-write-wins.
+        self.write_conflict_detect = write_conflict_detect
+        self.conflict_tau_lo = conflict_tau_lo
+
+    def _conflict_target(self, text: str, scope: dict) -> dict | None:
+        """W6 write-conflict: a same-project, same-subject prior whose content
+        DIVERGES from *text* — cosine in [conflict_tau_lo, sep_threshold) (similar
+        enough to be the same subject, below the dedup threshold so it isn't a
+        near-duplicate) and a different summary. Returns {id, similarity, summary,
+        tier} of the loser, or None. Best-effort; None on any miss/error."""
+        if not self.write_conflict_detect or self.vector_store is None or not text:
+            return None
+        project = scope.get("project") if isinstance(scope, dict) else None
+        if not project:
+            return None
+        try:
+            vec = self.vector_store.embed(text)
+            if not vec:
+                return None
+            hits = self.vector_store.dense_search(vec, layer_filter="semantic", k=5)
+            for hit in hits:
+                dist = hit.get("_distance")
+                if dist is None:
+                    continue
+                sim = 1.0 - float(dist)
+                if not (self.conflict_tau_lo <= sim < self.sep_threshold):
+                    continue
+                prior = self.relational.get_crystal(hit.get("id"))
+                if not prior or prior.get("status") != "active":
+                    continue
+                pscope = prior.get("scope") or {}
+                if (pscope.get("project") if isinstance(pscope, dict) else None) != project:
+                    continue
+                if (prior.get("summary") or "") == text:
+                    continue  # identical summary -> not a divergence
+                return {
+                    "id": prior["id"],
+                    "similarity": sim,
+                    "summary": prior.get("summary"),
+                    "tier": prior.get("trust_tier"),
+                }
+        except Exception as exc:  # noqa: BLE001
+            log.debug("conflict_check_skipped", error=str(exc))
+        return None
 
     def _dedup_target(self, text: str, layer: str) -> str | None:
         """W5 pattern separation: id of an existing near-duplicate (cosine >
@@ -182,6 +230,15 @@ class SemanticLayer:
                     "importance": 0.0,
                 }
 
+            # W6 write-conflict detection: a same-subject-but-divergent prior is a
+            # conflict (not a corroboration). Detected here in the dedup slot (after
+            # the chokepoint); resolved last-write-wins AFTER the new crystal is
+            # admitted + inserted below. Off / null vector store -> None.
+            conflict_loser = self._conflict_target(
+                payload.get("summary", "") or str(payload)[:256],
+                payload.get("scope", {}),
+            )
+
             # Build a stub crystal for the gate
             crystal_id = str(uuid.uuid4())
             stub_crystal = {"id": crystal_id, **payload}
@@ -257,6 +314,34 @@ class SemanticLayer:
             # 5. Insert stores
             self.relational.insert_crystal(crystal_record)
 
+            # W6 conflict resolution: last-write-wins. The new (just-inserted)
+            # crystal wins; bi-temporally supersede the divergent prior and record
+            # BOTH lineages (+ both tiers) so the conflict is surfaced, never
+            # silently absorbed as corroboration. Pure LWW ignores trust ordering —
+            # the recorded tiers make any inversion auditable.
+            conflict_recorded = False
+            if conflict_loser is not None:
+                try:
+                    self.relational.mark_superseded(conflict_loser["id"], crystal_id, now)
+                    self.relational.record_conflict(
+                        crystal_id, conflict_loser["id"],
+                        winner_summary=summary or str(payload)[:256],
+                        loser_summary=conflict_loser.get("summary"),
+                        winner_tier=str(caller_tier),
+                        loser_tier=conflict_loser.get("tier"),
+                        similarity=conflict_loser.get("similarity"),
+                        scope=scope if isinstance(scope, dict) else None,
+                        now=now,
+                    )
+                    conflict_recorded = True
+                    log.info(
+                        "semantic_write_conflict",
+                        winner=crystal_id, loser=conflict_loser["id"],
+                        similarity=conflict_loser.get("similarity"),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("conflict_resolution_skipped", error=str(exc))
+
             # VectorStore.upsert needs an embedded vector; embed at write time.
             if self.vector_store is not None:
                 try:
@@ -284,7 +369,7 @@ class SemanticLayer:
                 caller_tier=str(caller_tier),
             )
 
-            return {
+            result: dict[str, Any] = {
                 "status": "committed",
                 "id": crystal_id,
                 "layer": "semantic",
@@ -292,6 +377,9 @@ class SemanticLayer:
                 "importance": 0.0,
                 "content_ref": content_ref,
             }
+            if conflict_recorded:
+                result["conflict_superseded"] = conflict_loser["id"]
+            return result
 
         except Exception as exc:
             outcome = "error" if not hasattr(exc, "reason_code") else "rejected"

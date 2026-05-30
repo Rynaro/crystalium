@@ -344,6 +344,8 @@ def _build_components(
         dedup_merge=config.write_dedup_merge,
         sep_threshold=config.sep_threshold,
         link_cooccurrence=config.recall_completion,
+        write_conflict_detect=config.write_conflict_detect,
+        conflict_tau_lo=config.conflict_tau_lo,
     )
     procedural = ProceduralLayer(
         blob_store=blob_store,
@@ -374,6 +376,7 @@ def _build_components(
         completion_decay=config.completion_decay,
         context_match=config.recall_context_match,
         recall_cache=recall_cache,
+        recall_active_only=config.recall_active_only,
     )
     # Execution layer depends on aetheryte/recall_cache for W5 prefetch warming.
     execution = ExecutionLayer(
@@ -407,6 +410,9 @@ def _build_components(
         fsrs_initial_stability=config.fsrs_initial_stability,
         fsrs_boost_factor=config.fsrs_boost_factor,
         fsrs_lapse_stability=config.fsrs_lapse_stability,
+        drift_detect=config.drift_detect,
+        drift_tau_lo=config.drift_tau_lo,
+        drift_tau_hi=config.drift_tau_hi,
     )
     scheduler = DreamScheduler(config=config, worker=worker, store=relational)
 

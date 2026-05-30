@@ -102,6 +102,9 @@ class DreamWorker:
         fsrs_initial_stability: float = 2.0,
         fsrs_boost_factor: float = 1.5,
         fsrs_lapse_stability: float = 0.5,
+        drift_detect: bool = False,
+        drift_tau_lo: float = 0.80,
+        drift_tau_hi: float = 0.97,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -131,6 +134,13 @@ class DreamWorker:
         self.fsrs_initial_stability = fsrs_initial_stability
         self.fsrs_boost_factor = fsrs_boost_factor
         self.fsrs_lapse_stability = fsrs_lapse_stability
+        # W6 belief-drift detection (A-MemGuard-style; default OFF). A flag-gated
+        # phase between consolidate and prune flags a lower-trust semantic fact that
+        # is same-subject-but-divergent (cosine in [tau_lo, tau_hi)) from a
+        # higher-trust prior. Detect-and-flag only (no remediation).
+        self.drift_detect = drift_detect
+        self.drift_tau_lo = drift_tau_lo
+        self.drift_tau_hi = drift_tau_hi
 
     # ------------------------------------------------------------------
     # Public API
@@ -222,6 +232,13 @@ class DreamWorker:
             # under forgetting_fsrs, after consolidate and before prune.
             if self.forgetting_fsrs:
                 self._resurface(now)
+
+            # Phase 3c: Belief-drift detection (W6) — scan active semantic facts for
+            # silent divergence from a higher-trust prior. Flag-gated; runs after
+            # consolidate, before prune; behind the chokepoint (read + ledger-append
+            # only, never a mutation tool).
+            if self.drift_detect:
+                self._check_drift(now)
 
             # Phase 4: Prune
             prune_summary = self._prune(now)
@@ -401,6 +418,95 @@ class DreamWorker:
         if boosted:
             log.info("dream_resurface", boosted=boosted)
         return boosted
+
+    def _check_drift(self, now: datetime) -> int:
+        """W6 belief-drift: flag active semantic facts that silently diverge from a
+        higher-trust prior on the same subject.
+
+        Predicate (similarity-band + trust-gap): for a candidate C, find a prior P
+        (same project) with cosine(C,P) in [drift_tau_lo, drift_tau_hi) — same
+        subject but NOT a near-duplicate — where C is strictly LESS trusted than P
+        (tier int greater). Flag C: append a drift_audit row + set
+        memory_dynamics.drift_flagged=true. Detect-and-flag ONLY; no supersede /
+        deprecate / tier change. Null/SKIP_SLOW embedder -> graceful no-op.
+        Returns the number of crystals newly flagged.
+        """
+        from crystalium.trust import Tier
+
+        # Embedder availability guard (null stub / SKIP_SLOW -> empty vectors).
+        try:
+            if not self.vector_store.embed("probe"):
+                log.info("drift_skipped", reason="no_embedder")
+                return 0
+        except Exception:
+            log.info("drift_skipped", reason="no_embedder")
+            return 0
+
+        # Active semantic crystals to scan.
+        try:
+            with self.relational._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, summary, trust_tier, scope FROM crystals "
+                    "WHERE layer='semantic' AND status='active'"
+                ).fetchall()
+        except Exception as exc:
+            log.debug("drift_skipped", error=str(exc))
+            return 0
+
+        # Don't re-flag the same (candidate, prior) pair across runs.
+        seen_pairs = {
+            (r["crystal_id"], r["prior_id"]) for r in self.relational.list_drift_audit()
+        }
+
+        def _tier_int(t: str | None) -> int:
+            try:
+                return int(Tier.from_str(t))
+            except Exception:
+                return int(Tier.T3)  # fail-closed: unparseable = least trusted
+
+        flagged = 0
+        for row in rows:
+            cid, summary = row[0], row[1] or ""
+            cand_tier = row[2]
+            cand_scope = json.loads(row[3]) if isinstance(row[3], str) else (row[3] or {})
+            cand_project = cand_scope.get("project") if isinstance(cand_scope, dict) else None
+            if not summary or not cand_project:
+                continue
+            try:
+                vec = self.vector_store.embed(summary)
+                if not vec:
+                    continue
+                hits = self.vector_store.dense_search(query_vec=vec, layer_filter="semantic", k=5)
+            except Exception:
+                continue
+            for hit in hits:
+                pid = hit.get("id")
+                if not pid or pid == cid or (cid, pid) in seen_pairs:
+                    continue
+                dist = hit.get("_distance")
+                if dist is None:
+                    continue
+                sim = 1.0 - float(dist)
+                if not (self.drift_tau_lo <= sim < self.drift_tau_hi):
+                    continue
+                prior = self.relational.get_crystal(pid)
+                if not prior:
+                    continue
+                prior_scope = prior.get("scope") or {}
+                if (prior_scope.get("project") if isinstance(prior_scope, dict) else None) != cand_project:
+                    continue
+                prior_tier = prior.get("trust_tier")
+                # candidate must be STRICTLY less trusted than the prior (higher int)
+                if _tier_int(cand_tier) <= _tier_int(prior_tier):
+                    continue
+                self.relational.record_drift(cid, pid, sim, cand_tier, prior_tier, now=now)
+                self.relational.update_dynamics(cid, {"drift_flagged": True})
+                seen_pairs.add((cid, pid))
+                flagged += 1
+                break  # one flag per candidate per run
+        if flagged:
+            log.info("dream_drift_flagged", count=flagged)
+        return flagged
 
     def _evb_percentile_cutoff(self) -> float | None:
         """EVB at self.evb_percentile over the active set (None if no evb data)."""

@@ -359,3 +359,42 @@ class TestRetrievalFlags:
         assert cfg.recall_context_match is True
         assert cfg.recall_prefetch is True
         assert cfg.completion_decay == 0.7
+
+
+class TestSecurityFlags:
+    """W6 security & integrity hardening flags (default OFF — ablation-or-revert)."""
+
+    def test_security_defaults(self, tmp_path: Path) -> None:
+        # W6 ablation outcome: recall_active_only won its ASR gate (1.0->0.0) AND is
+        # a correctness fix -> ON by default. drift_detect (detect-only; band needs
+        # tuning) + write_conflict_detect (LWW inversion risk; not isolated by the
+        # gate) stay OFF. See evals/BENCH-NOTES.md "W6 security & integrity gates".
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.drift_detect is False
+        assert cfg.write_conflict_detect is False
+        assert cfg.recall_active_only is True
+        assert cfg.drift_tau_lo == 0.80
+        assert cfg.drift_tau_hi == 0.97
+        assert cfg.conflict_tau_lo == 0.80
+
+    def test_security_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_DRIFT_DETECT", "true")
+        monkeypatch.setenv("CRYSTALIUM_DRIFT_TAU_LO", "0.75")
+        monkeypatch.setenv("CRYSTALIUM_WRITE_CONFLICT_DETECT", "true")
+        monkeypatch.setenv("CRYSTALIUM_RECALL_ACTIVE_ONLY", "true")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.drift_detect is True
+        assert cfg.drift_tau_lo == 0.75
+        assert cfg.write_conflict_detect is True
+        assert cfg.recall_active_only is True
+
+    def test_security_from_dict(self) -> None:
+        cfg = Config._from_dict({
+            "drift_detect": True,
+            "recall_active_only": True,
+            "conflict_tau_lo": 0.85,
+        })
+        assert cfg.drift_detect is True
+        assert cfg.recall_active_only is True
+        assert cfg.conflict_tau_lo == 0.85
