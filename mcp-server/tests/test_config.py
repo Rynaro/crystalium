@@ -325,11 +325,14 @@ class TestForgettingFlags:
 class TestRetrievalFlags:
     """W5 retrieval-intelligence flags (default OFF — ablation-or-revert)."""
 
-    def test_retrieval_off_by_default(self, tmp_path: Path) -> None:
+    def test_retrieval_defaults(self, tmp_path: Path) -> None:
+        # W5 ablation outcome: dedup-merge won its gate confound-free -> ON by
+        # default; completion/context (inconclusive) + prefetch (confounded pass)
+        # stay OFF. See evals/BENCH-NOTES.md "W5 retrieval-faculty gates".
         cfg = Config(data_dir=tmp_path)
         assert cfg.recall_completion is False
         assert cfg.recall_context_match is False
-        assert cfg.write_dedup_merge is False
+        assert cfg.write_dedup_merge is True
         assert cfg.recall_prefetch is False
         assert cfg.completion_max_hops == 2
         assert cfg.completion_decay == 0.5

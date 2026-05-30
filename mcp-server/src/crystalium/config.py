@@ -176,7 +176,7 @@ class Config:
     completion_max_hops: int = 2
     completion_decay: float = 0.5
     recall_context_match: bool = False     # encoding-specificity: post-RRF context re-rank
-    write_dedup_merge: bool = False        # pattern separation: merge near-dups at write
+    write_dedup_merge: bool = True         # W5 gate PASS (confound-free): merge near-dups at write
     sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
     recall_prefetch: bool = False          # protention: pre-warm recall cache on plan_checkpoint
 
