@@ -171,7 +171,9 @@ class VectorStore:
             k:            Number of results to return.
 
         Returns:
-            List of metadata dicts with '_distance' appended.
+            List of metadata dicts with '_distance' appended. The metric is pinned
+            to COSINE (embeddings are L2-normalized at embed time), so for any row
+            cosine_similarity == 1.0 - row['_distance'] (W5 dedup relies on this).
             Empty list if table does not exist yet.
         """
         table = self._get_table()
@@ -179,7 +181,7 @@ class VectorStore:
             return []
 
         try:
-            query = table.search(query_vec).limit(k)
+            query = table.search(query_vec).metric("cosine").limit(k)
             if layer_filter:
                 query = query.where(f"layer = '{layer_filter}'", prefilter=True)
             results = query.to_list()

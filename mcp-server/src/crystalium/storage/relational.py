@@ -492,6 +492,42 @@ class RelationalStore:
             conn.commit()
         return True
 
+    def merge_provenance(self, existing_id: str, provenance: dict[str, Any]) -> bool:
+        """W5 pattern separation: union a new commit's provenance INTO an existing
+        crystal in place (no new row) + bump a corroboration counter.
+
+        This is the dedup-merge write — distinct from mark_superseded (bi-temporal,
+        which grows rows). Tracks contributing authors/sources as deduped lists in
+        provenance.merged_authors / merged_sources and increments
+        provenance.corroboration. Returns False if the crystal does not exist.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT provenance FROM crystals WHERE id = ?", (existing_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            prov = _from_json(row["provenance"]) if row["provenance"] else {}
+            authors = set(prov.get("merged_authors") or [])
+            sources = set(prov.get("merged_sources") or [])
+            if prov.get("author_agent"):
+                authors.add(prov["author_agent"])
+            if prov.get("source"):
+                sources.add(prov["source"])
+            if provenance.get("author_agent"):
+                authors.add(provenance["author_agent"])
+            if provenance.get("source"):
+                sources.add(provenance["source"])
+            prov["merged_authors"] = sorted(authors)
+            prov["merged_sources"] = sorted(sources)
+            prov["corroboration"] = int(prov.get("corroboration", 1)) + 1
+            conn.execute(
+                "UPDATE crystals SET provenance = ?, updated_at = ? WHERE id = ?",
+                (_to_json(prov), _now_iso(), existing_id),
+            )
+            conn.commit()
+        return True
+
     def recent_crystal_ids(self, project: str, *, exclude_id: str, limit: int = 5) -> list[str]:
         """Most-recent active crystal ids in *project* (W5 co-occurrence linking).
 

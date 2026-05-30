@@ -75,6 +75,24 @@ class SemanticLayer:
         self.link_cooccurrence = link_cooccurrence
         self.cooccurrence_limit = cooccurrence_limit
 
+    def _dedup_target(self, text: str, layer: str) -> str | None:
+        """W5 pattern separation: id of an existing near-duplicate (cosine >
+        sep_threshold) in *layer*, or None (cosine_sim = 1 - _distance)."""
+        if not self.dedup_merge or self.vector_store is None or not text:
+            return None
+        try:
+            vec = self.vector_store.embed(text)
+            if not vec:
+                return None
+            hits = self.vector_store.dense_search(vec, layer_filter=layer, k=1)
+            if hits:
+                dist = hits[0].get("_distance")
+                if dist is not None and (1.0 - float(dist)) > self.sep_threshold:
+                    return hits[0].get("id")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("dedup_check_skipped", error=str(exc))
+        return None
+
     def _link_cooccurrence(self, crystal_id: str, scope: dict) -> None:
         """W5 D1: link this crystal to recent same-project crystals via LINKS_TO."""
         if not self.link_cooccurrence or self.graph_store is None:
@@ -146,6 +164,23 @@ class SemanticLayer:
                 if hasattr(provenance, "model_dump")
                 else dict(provenance)
             )
+
+            # W5 pattern separation: a near-duplicate semantic fact merges its
+            # provenance (corroboration bump) into the existing crystal instead of
+            # a blind append. After the chokepoint (rate-limit + tier + ceiling),
+            # before the gate/insert. Off / null vector store -> normal flow.
+            dup_id = self._dedup_target(payload.get("summary", "") or str(payload)[:256], "semantic")
+            if dup_id is not None:
+                self.relational.merge_provenance(dup_id, prov_dict)
+                log.info("semantic_dedup_merged", merged_into=dup_id)
+                return {
+                    "status": "merged",
+                    "id": dup_id,
+                    "layer": "semantic",
+                    "merged_into": dup_id,
+                    "validation_state": "validated",
+                    "importance": 0.0,
+                }
 
             # Build a stub crystal for the gate
             crystal_id = str(uuid.uuid4())
