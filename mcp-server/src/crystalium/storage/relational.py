@@ -115,6 +115,48 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     error       TEXT,
     ts          TEXT NOT NULL
 );
+
+-- W6 belief-drift audit ledger (append-only). A flagged lower-trust semantic
+-- fact that silently diverges from a higher-trust prior is recorded here by the
+-- Dream drift phase. Detect-and-flag only; no remediation.
+CREATE TABLE IF NOT EXISTS drift_audit (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    crystal_id    TEXT NOT NULL,   -- the flagged (lower-trust) candidate
+    prior_id      TEXT NOT NULL,   -- the higher-trust prior it diverges from
+    similarity    REAL NOT NULL,   -- cosine in [tau_lo, tau_hi)
+    candidate_tier TEXT NOT NULL,
+    prior_tier    TEXT NOT NULL,
+    ts            TEXT NOT NULL
+);
+
+-- W6 quarantine-review audit ledger (append-only). Every operator accept/reject
+-- over a quarantined crystal records a reason here. T0-gated through the chokepoint.
+CREATE TABLE IF NOT EXISTS quarantine_audit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    crystal_id  TEXT NOT NULL,
+    actor_tier  TEXT NOT NULL,
+    action      TEXT NOT NULL,   -- accept | reject
+    reason      TEXT NOT NULL,
+    ts          TEXT NOT NULL
+);
+
+-- W6 write-conflict ledger (append-only). When two agents write conflicting
+-- semantic facts about the same subject, last-write-wins supersedes the prior and
+-- BOTH lineages are recorded here so the conflict is surfaced, never silently
+-- absorbed as corroboration. Winner/loser tiers are stored to make any
+-- last-write-wins trust inversion auditable.
+CREATE TABLE IF NOT EXISTS conflicts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    winner_id      TEXT NOT NULL,
+    loser_id       TEXT NOT NULL,
+    winner_summary TEXT,
+    loser_summary  TEXT,
+    winner_tier    TEXT,
+    loser_tier     TEXT,
+    similarity     REAL,
+    scope          TEXT,
+    ts             TEXT NOT NULL
+);
 """
 
 
@@ -553,6 +595,136 @@ class RelationalStore:
                 "SELECT crystal_id, actor_tier, reason, layer, ts FROM forget_audit ORDER BY id"
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # W6 security & integrity — validation-state filter, status edit, ledgers
+    # ------------------------------------------------------------------
+
+    def list_by_validation_state(
+        self, state: str, *, layer_filter: str | None = None, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """Active crystals whose validation_state == *state* (e.g. 'quarantined').
+
+        The triage queue (W6) reads this; there was previously no validation_state
+        filter. Bounded; newest first. Only status='active' rows (already-reviewed
+        deprecated rows drop out)."""
+        sql = ("SELECT * FROM crystals WHERE validation_state = ? AND status = 'active'")
+        params: list[Any] = [state]
+        if layer_filter:
+            sql += " AND layer = ?"
+            params.append(layer_filter)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def set_validation_state(self, crystal_id: str, state: str) -> bool:
+        """Set a crystal's validation_state in place (e.g. quarantined -> unverified
+        on operator accept). Returns False if the crystal does not exist. Not
+        bi-temporal — a triage decision is metadata, not a new revision."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE crystals SET validation_state = ?, updated_at = ? WHERE id = ?",
+                (state, _now_iso(), crystal_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def set_status(self, crystal_id: str, status: str) -> bool:
+        """Set a crystal's status in place (e.g. active -> deprecated on operator
+        reject — a soft-delete, NOT a hard tombstone; P0-5 preserved). Returns
+        False if the crystal does not exist."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE crystals SET status = ?, updated_at = ? WHERE id = ?",
+                (status, _now_iso(), crystal_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def record_drift(
+        self, crystal_id: str, prior_id: str, similarity: float,
+        candidate_tier: str, prior_tier: str, *, now: datetime | None = None,
+    ) -> None:
+        """Append a belief-drift flag (W6 Obj 1). Append-only; detect-and-flag only."""
+        ts = (now or datetime.now(timezone.utc)).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO drift_audit "
+                "(crystal_id, prior_id, similarity, candidate_tier, prior_tier, ts) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (crystal_id, prior_id, float(similarity), candidate_tier, prior_tier, ts),
+            )
+            conn.commit()
+
+    def list_drift_audit(self) -> list[dict[str, Any]]:
+        """All belief-drift flags (append-only)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT crystal_id, prior_id, similarity, candidate_tier, prior_tier, ts "
+                "FROM drift_audit ORDER BY id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def record_quarantine_review(
+        self, crystal_id: str, action: str, reason: str, *,
+        actor_tier: str, now: datetime | None = None,
+    ) -> None:
+        """Append a quarantine triage decision (W6 Obj 2). Append-only."""
+        ts = (now or datetime.now(timezone.utc)).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO quarantine_audit (crystal_id, actor_tier, action, reason, ts) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (crystal_id, actor_tier, action, reason, ts),
+            )
+            conn.commit()
+
+    def list_quarantine_audit(self) -> list[dict[str, Any]]:
+        """All quarantine triage decisions (append-only)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT crystal_id, actor_tier, action, reason, ts "
+                "FROM quarantine_audit ORDER BY id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def record_conflict(
+        self, winner_id: str, loser_id: str, *,
+        winner_summary: str | None = None, loser_summary: str | None = None,
+        winner_tier: str | None = None, loser_tier: str | None = None,
+        similarity: float | None = None, scope: dict[str, Any] | None = None,
+        now: datetime | None = None,
+    ) -> None:
+        """Append a write-conflict resolution (W6 Obj 4). Records BOTH lineages +
+        both tiers so a last-write-wins trust inversion is auditable. Append-only."""
+        ts = (now or datetime.now(timezone.utc)).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO conflicts (winner_id, loser_id, winner_summary, loser_summary, "
+                "winner_tier, loser_tier, similarity, scope, ts) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (winner_id, loser_id, winner_summary, loser_summary, winner_tier, loser_tier,
+                 None if similarity is None else float(similarity),
+                 None if scope is None else _to_json(scope), ts),
+            )
+            conn.commit()
+
+    def list_conflicts(self) -> list[dict[str, Any]]:
+        """All write-conflict resolutions (append-only)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT winner_id, loser_id, winner_summary, loser_summary, "
+                "winner_tier, loser_tier, similarity, scope, ts FROM conflicts ORDER BY id"
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            if d.get("scope"):
+                d["scope"] = _from_json(d["scope"])
+            out.append(d)
+        return out
 
     # ------------------------------------------------------------------
     # Pending promotions (G5)
