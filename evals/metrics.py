@@ -224,6 +224,57 @@ def compression_ratio(source_sizes: list[int], summary_size: int) -> float | Non
     return summary_size / total
 
 
+# ---------------------------------------------------------------------------
+# W5 retrieval-intelligence gate axes (pure; ground-truth based)
+# ---------------------------------------------------------------------------
+
+
+def precision_recall_f1(
+    retrieved: Sequence[str],
+    relevant: Sequence[str],
+) -> dict[str, float | None]:
+    """Set-based precision / recall / F1 of a retrieval against ground truth.
+
+    retrieved: ids the system returned. relevant: the ground-truth relevant ids.
+    precision = |hit| / |retrieved|, recall = |hit| / |relevant|, F1 the harmonic
+    mean. Each component is None when its denominator is empty (undefined — a
+    documented sentinel, never silently 0.0). F1 is None when precision+recall is
+    0 (no overlap) OR either component is undefined.
+    """
+    ret = set(retrieved)
+    rel = set(relevant)
+    hit = len(ret & rel)
+    precision = hit / len(ret) if ret else None
+    recall = hit / len(rel) if rel else None
+    if precision is None or recall is None or (precision + recall) == 0:
+        f1: float | None = None
+    else:
+        f1 = 2 * precision * recall / (precision + recall)
+    return {"precision": precision, "recall": recall, "f1": f1}
+
+
+def write_amplification(rows_written: int, logical_writes: int) -> float | None:
+    """Stored rows per logical commit (dedup-merge drives this DOWN, D6.4-iii).
+
+    rows_written: net new crystal rows persisted. logical_writes: commit calls
+    issued. 1.0 = no dedup (every commit a row); <1.0 = merges collapsed writes.
+    None when no logical writes were issued (undefined)."""
+    if logical_writes <= 0:
+        return None
+    return rows_written / logical_writes
+
+
+def cache_hit_rate(hits: int, misses: int) -> float | None:
+    """hits / (hits + misses). None when the cache was never queried (undefined).
+
+    Prefetch quality proxy (D6.4-ii): a higher rate means protention anticipated
+    the actual recall more often."""
+    total = hits + misses
+    if total <= 0:
+        return None
+    return hits / total
+
+
 def swe_bench_cl_axes(
     R: Matrix,
     *,

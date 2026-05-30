@@ -51,6 +51,10 @@ class EpisodicLayer:
         enforcement: Enforcement,
         redactor: Redactor,
         importance_fn: Callable[..., float],
+        dedup_merge: bool = False,
+        sep_threshold: float = 0.92,
+        link_cooccurrence: bool = False,
+        cooccurrence_limit: int = 5,
     ) -> None:
         self.blob_store = blob_store
         self.relational = relational
@@ -59,6 +63,46 @@ class EpisodicLayer:
         self.enforcement = enforcement
         self.redactor = redactor
         self.importance_fn = importance_fn
+        # W5 retrieval (default off): write-time dedup-merge + co-occurrence edges.
+        self.dedup_merge = dedup_merge
+        self.sep_threshold = sep_threshold
+        self.link_cooccurrence = link_cooccurrence
+        self.cooccurrence_limit = cooccurrence_limit
+
+    def _dedup_target(self, text: str, layer: str) -> str | None:
+        """W5 pattern separation: id of an existing near-duplicate (cosine >
+        sep_threshold) in *layer*, or None. Cosine is pinned via dense_search
+        (cosine_sim = 1 - _distance). Best-effort; None on any miss/error."""
+        if not self.dedup_merge or self.vector_store is None or not text:
+            return None
+        try:
+            vec = self.vector_store.embed(text)
+            if not vec:
+                return None
+            hits = self.vector_store.dense_search(vec, layer_filter=layer, k=1)
+            if hits:
+                dist = hits[0].get("_distance")
+                if dist is not None and (1.0 - float(dist)) > self.sep_threshold:
+                    return hits[0].get("id")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("dedup_check_skipped", error=str(exc))
+        return None
+
+    def _link_cooccurrence(self, crystal_id: str, scope: dict) -> None:
+        """W5 D1: link this crystal to recent same-project crystals via LINKS_TO,
+        so the pattern-completion walk has edges. Bounded; best-effort."""
+        if not self.link_cooccurrence or self.graph_store is None:
+            return
+        project = scope.get("project") if isinstance(scope, dict) else None
+        if not project:
+            return
+        try:
+            for other in self.relational.recent_crystal_ids(
+                project, exclude_id=crystal_id, limit=self.cooccurrence_limit
+            ):
+                self.graph_store.add_edge(crystal_id, other, "LINKS_TO")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cooccurrence_link_skipped", error=str(exc))
 
     # ------------------------------------------------------------------
     # commit (P0-1: raw capture; quarantine if T3)
@@ -115,6 +159,23 @@ class EpisodicLayer:
                 else dict(provenance)
             )
 
+            # W5 pattern separation: if a near-duplicate already exists, merge
+            # provenance in place (no new row/blob) instead of a blind append.
+            # Runs AFTER the chokepoint (rate-limit + tier) above, so the gate is
+            # preserved. Off / null vector store -> normal append.
+            dup_id = self._dedup_target(payload.get("summary", "") or str(payload)[:256], "episodic")
+            if dup_id is not None:
+                self.relational.merge_provenance(dup_id, prov_dict)
+                log.info("episodic_dedup_merged", merged_into=dup_id)
+                return {
+                    "status": "merged",
+                    "id": dup_id,
+                    "layer": "episodic",
+                    "merged_into": dup_id,
+                    "validation_state": validation_state,
+                    "importance": 0.0,
+                }
+
             # Serialize payload to bytes for blob storage
             import json
             payload_bytes = json.dumps(payload, default=str).encode()
@@ -134,8 +195,9 @@ class EpisodicLayer:
             scope = payload.get("scope", {})
             summary = payload.get("summary", "")
 
-            from crystalium.protection import resolve_protection
+            from crystalium.protection import resolve_encoding_context, resolve_protection
             protected, tags = resolve_protection(payload, prov_dict.get("source"))
+            enc_ctx = resolve_encoding_context(payload, prov_dict, scope)
 
             crystal_record: dict[str, Any] = {
                 "id": crystal_id,
@@ -156,6 +218,7 @@ class EpisodicLayer:
                 "status": "active",
                 "protected": protected,
                 "tags": tags,
+                "encoding_context": enc_ctx,
             }
 
             # 5. Insert into relational store
@@ -182,6 +245,7 @@ class EpisodicLayer:
                     self.graph_store.add_node(crystal_id=crystal_id, layer="episodic")
                 except Exception as exc:  # noqa: BLE001
                     log.warning("graph_insert_skipped", error=str(exc))
+                self._link_cooccurrence(crystal_id, scope)
 
             log.info(
                 "episodic_commit",

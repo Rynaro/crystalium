@@ -206,3 +206,61 @@ stays OFF.
 
 **Note:** the right-to-be-forgotten op is exercised by `test_rtbf.py`, not this
 gate; it is an operator action, not an A/B axis.
+
+## W5 retrieval-faculty gates (`retrieval-gate` / `dedup-gate` / `prefetch-gate`) — MIXED
+
+`docker run --rm crystalium:dev python -m evals {retrieval-gate,dedup-gate,prefetch-gate}`
+(real bge-m3 embedder; kuzu graph). Three independent two-arm ablations, one per
+DoD axis. Result: **one clean win (dedup), two non-flips (completion/context
+inconclusive; prefetch confounded).**
+
+### (i) completion + context_match — INCONCLUSIVE, flags OFF
+
+| axis | flat | completion | both |
+|---|---|---|---|
+| multihop_f1 | 0.60 | 0.60 | 0.60 |
+| context_rank (lower=better) | 1 | 1 (context arm) | 1 |
+
+**Verdict: neither lifts ⇒ `recall_completion` and `recall_context_match` stay
+OFF.** With a 7-crystal corpus and k=10, the dense arm already retrieves *every*
+crystal, so the seeded hub→spoke edges add nothing the flat fusion didn't already
+surface — there is no "missed-by-similarity but reachable-by-graph" gap for
+completion to fill, and the context-matching crystal already ranks at 1 without
+the re-rank. Honest null; the synthetic fixture is too small to create the
+multi-hop gap the faculty targets. **[GAP]** a discriminating fixture needs a
+corpus large enough (k ≪ |relevant|) that similarity recall misses graph-reachable
+relevants — a larger-fixture follow-up, not a redesign.
+
+### (ii) dedup-merge (pattern separation) — PASS, flip `write_dedup_merge` ON
+
+| axis | on (dedup) | off (append) |
+|---|---|---|
+| write_amplification (lower=better) | 0.667 | 1.0 |
+| merged | 2 | — |
+| precision_held | true | true |
+
+**Verdict: write amplification drops 1.0 → 0.667 (2 of 3 paraphrases merged by
+real bge-m3 cosine > 0.92) with the canonical fact still recalled in both arms ⇒
+flip `write_dedup_merge` ON.** This is the one **confound-free** win: the merge
+decision is made by the real embedder on genuine paraphrases, not handed to the
+faculty by the harness. The deliberate cost (the exact paraphrase wording is no
+longer separately stored — pattern separation's inverse) is the intended trade;
+precision (returning the relevant fact) holds.
+
+### (iii) predictive prefetch — PASS-BUT-CONFOUNDED, `recall_prefetch` stays OFF
+
+| axis | on (prefetch) | off (no cache) |
+|---|---|---|
+| cache_hit_rate | 0.50 | null (no cache) |
+| recall_p95_ms | 0.09 | 235.1 |
+
+**Verdict: the gate passes by the letter (hit rate > 0, p95 down ~2600×) but the
+pass is CONFOUNDED ⇒ `recall_prefetch` stays OFF.** The harness feeds the
+checkpoint the *exact verbatim* query the agent then recalls (`predicted_next_query
+== recall query`), so the 0.50 hit rate is fabricated perfect prediction, not an
+earned predictor — and the p95 drop is the warming recall's cost *prepaid at
+checkpoint time* (shifted off the recall critical path, not eliminated). Per
+ablation-as-arbiter we discount confounded passes: the faculty ships gated and
+ready, but the default does not change on a harness-fabricated signal. **[GAP]** a
+trustworthy prefetch gate needs an *imperfect* predictor (next query drawn from a
+realistic distribution, not handed over) so the hit rate reflects real protention.

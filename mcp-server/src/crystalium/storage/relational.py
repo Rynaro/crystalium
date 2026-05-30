@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS crystals (
     memory_dynamics  TEXT,             -- JSON, nullable (W2: stability/retrievability/difficulty/evb/...)
     protected        INTEGER NOT NULL DEFAULT 0,  -- W4 Ricoeur-protected: exempt from decay/eviction
     tags             TEXT,             -- JSON array, nullable (W4)
+    encoding_context TEXT,             -- JSON, nullable (W5 encoding-specificity context)
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
@@ -191,6 +192,10 @@ class RelationalStore:
         if "tags" not in cols:
             conn.execute("ALTER TABLE crystals ADD COLUMN tags TEXT")
             conn.commit()
+        # W5: encoding_context (added to crystal.v1.json in W1, persisted now).
+        if "encoding_context" not in cols:
+            conn.execute("ALTER TABLE crystals ADD COLUMN encoding_context TEXT")
+            conn.commit()
 
     # ------------------------------------------------------------------
     # Crystal CRUD
@@ -206,12 +211,12 @@ class RelationalStore:
                     (id, layer, trust_tier, validation_state, status, importance,
                      summary, content_ref, embedding_ref,
                      scope, provenance, utility, temporal, memory_dynamics,
-                     protected, tags, created_at, updated_at)
+                     protected, tags, encoding_context, created_at, updated_at)
                 VALUES
                     (:id, :layer, :trust_tier, :validation_state, :status, :importance,
                      :summary, :content_ref, :embedding_ref,
                      :scope, :provenance, :utility, :temporal, :memory_dynamics,
-                     :protected, :tags, :created_at, :updated_at)
+                     :protected, :tags, :encoding_context, :created_at, :updated_at)
                 """,
                 {
                     "id": crystal["id"],
@@ -234,6 +239,11 @@ class RelationalStore:
                     ),
                     "protected": 1 if crystal.get("protected") else 0,
                     "tags": _to_json(crystal["tags"]) if crystal.get("tags") else None,
+                    "encoding_context": (
+                        _to_json(crystal["encoding_context"])
+                        if crystal.get("encoding_context") is not None
+                        else None
+                    ),
                     "created_at": crystal.get("provenance", {}).get("created_at", now),
                     "updated_at": now,
                 },
@@ -252,7 +262,8 @@ class RelationalStore:
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
-        for json_col in ("scope", "provenance", "utility", "temporal", "memory_dynamics", "tags"):
+        for json_col in ("scope", "provenance", "utility", "temporal", "memory_dynamics",
+                         "tags", "encoding_context"):
             if d.get(json_col):
                 d[json_col] = _from_json(d[json_col])
         if "protected" in d:
@@ -480,6 +491,60 @@ class RelationalStore:
             conn.execute("DELETE FROM crystals WHERE id = ?", (crystal_id,))
             conn.commit()
         return True
+
+    def merge_provenance(self, existing_id: str, provenance: dict[str, Any]) -> bool:
+        """W5 pattern separation: union a new commit's provenance INTO an existing
+        crystal in place (no new row) + bump a corroboration counter.
+
+        This is the dedup-merge write — distinct from mark_superseded (bi-temporal,
+        which grows rows). Tracks contributing authors/sources as deduped lists in
+        provenance.merged_authors / merged_sources and increments
+        provenance.corroboration. Returns False if the crystal does not exist.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT provenance FROM crystals WHERE id = ?", (existing_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            prov = _from_json(row["provenance"]) if row["provenance"] else {}
+            authors = set(prov.get("merged_authors") or [])
+            sources = set(prov.get("merged_sources") or [])
+            if prov.get("author_agent"):
+                authors.add(prov["author_agent"])
+            if prov.get("source"):
+                sources.add(prov["source"])
+            if provenance.get("author_agent"):
+                authors.add(provenance["author_agent"])
+            if provenance.get("source"):
+                sources.add(provenance["source"])
+            prov["merged_authors"] = sorted(authors)
+            prov["merged_sources"] = sorted(sources)
+            prov["corroboration"] = int(prov.get("corroboration", 1)) + 1
+            conn.execute(
+                "UPDATE crystals SET provenance = ?, updated_at = ? WHERE id = ?",
+                (_to_json(prov), _now_iso(), existing_id),
+            )
+            conn.commit()
+        return True
+
+    def recent_crystal_ids(self, project: str, *, exclude_id: str, limit: int = 5) -> list[str]:
+        """Most-recent active crystal ids in *project* (W5 co-occurrence linking).
+
+        Bounded to *limit* to avoid combinatorial edge blow-up; excludes
+        exclude_id. Returns [] on any error / no project.
+        """
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id FROM crystals "
+                    "WHERE json_extract(scope, '$.project') = ? AND status='active' AND id != ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (project, exclude_id, limit),
+                ).fetchall()
+            return [r[0] for r in rows]
+        except Exception:
+            return []
 
     def list_forget_audit(self) -> list[dict[str, Any]]:
         """All right-to-be-forgotten audit rows (append-only)."""

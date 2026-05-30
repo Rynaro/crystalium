@@ -50,12 +50,65 @@ class ExecutionLayer:
         enforcement: Enforcement,
         importance_fn: Callable[..., float],
         ttl_hours: int = _DEFAULT_TTL_HOURS,
+        aetheryte: Any = None,
+        recall_cache: Any = None,
+        recall_prefetch: bool = False,
     ) -> None:
         self.blob_store = blob_store
         self.relational = relational
         self.enforcement = enforcement
         self.importance_fn = importance_fn
         self.ttl_hours = ttl_hours
+        # W5 predictive prefetch (protention; default off). When on, a checkpoint
+        # whose state declares a predicted next query pre-warms the recall cache;
+        # the per-checkpoint prediction_error records whether that need was
+        # already anticipated (cache warm) at prediction time.
+        self.aetheryte = aetheryte
+        self.recall_cache = recall_cache
+        self.recall_prefetch = recall_prefetch
+
+    def _prefetch(
+        self,
+        checkpoint_id: str,
+        query: str,
+        scope: dict[str, Any],
+        caller_tier: Tier,
+    ) -> None:
+        """W5 protention: pre-warm the recall cache for the predicted next query
+        and record prediction_error on the checkpoint crystal. prediction_error
+        is 1.0 when the predicted need was cold (not anticipated) at this point,
+        0.0 when it was already warm. Best-effort; never breaks the checkpoint."""
+        if self.aetheryte is None or self.recall_cache is None or not query:
+            return
+        try:
+            project = scope.get("project") if isinstance(scope, dict) else None
+            if not project:
+                return
+            warm = self.recall_cache.peek(project, query)
+            prediction_error = 0.0 if warm else 1.0
+            if not warm:
+                # Warm the cache so the actual recall lands as a hit.
+                from crystalium.schemas import Scope
+
+                self.aetheryte.recall(
+                    Scope(
+                        project=project,
+                        agent_class_visibility=scope.get("agent_class_visibility"),
+                        sensitivity_tag=scope.get("sensitivity_tag"),
+                    ),
+                    query,
+                    10,
+                    None,
+                    caller_tier,
+                )
+            try:
+                self.relational.update_dynamics(
+                    checkpoint_id, {"prediction_error": prediction_error}
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.debug("prediction_error_write_skipped", error=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            log.debug("prefetch_skipped", error=str(exc))
 
     # ------------------------------------------------------------------
     # checkpoint (spec.md §5.5)
@@ -137,6 +190,13 @@ class ExecutionLayer:
             }
 
             self.relational.insert_crystal(crystal_record)
+
+            # W5 prefetch (default off): pre-warm the recall cache for the plan's
+            # predicted next query + record prediction_error on this checkpoint.
+            if self.recall_prefetch:
+                predicted = state.get("predicted_next_query") or state.get("next_query")
+                if predicted:
+                    self._prefetch(crystal_id, str(predicted), scope, caller_tier)
 
             log.info(
                 "execution_checkpoint",

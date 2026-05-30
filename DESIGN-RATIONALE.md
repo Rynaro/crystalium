@@ -152,6 +152,31 @@ This document traces every non-obvious decision in CRYSTALIUM v0.1.0 to its sour
 
 ---
 
+### D6.4. Retrieval Intelligence — Aetheryte II — W5 (v0.6.0)
+
+**Decision:** Four retrieval faculties, each behind its own flag, layered on the unweighted-RRF hybrid recall without touching the chokepoint or the RRF signature: (1) **pattern completion** (`recall_completion`) — a bounded, decaying multi-hop graph walk (`decaying_walk`, weight `decay**hop`) seeded from the top sparse/dense candidates, fed into RRF as a 4th ranked list; (2) **encoding-specificity** (`recall_context_match`) — a stable post-RRF re-rank boosting crystals whose stored `encoding_context` overlaps the scope-derived query context; (3) **pattern separation at write** (`write_dedup_merge`) — at commit, after the tier gate, an embed → `dense_search(k=1)` → cosine > `sep_threshold` near-duplicate is merged in place (`merge_provenance` unions authors/sources + bumps corroboration; no new row) instead of blind-appended; (4) **predictive prefetch** (`recall_prefetch`) — a checkpoint declaring its predicted next query pre-warms an in-process LRU `RecallCache`; `recall()` reads it first; `prediction_error` is recorded on the checkpoint crystal.
+
+**Rationale:**
+- **Pattern completion** — CA3 attractor dynamics (Marr 1971; Rolls 2013 **[verified]** as neuroscience; **[PROXY]** as a mapping to a graph walk): the hippocampal CA3 recurrent network reconstructs a whole memory from a partial cue. The decaying walk is the deliberate engineering analogue, not a mechanistic claim.
+- **Encoding specificity** — Tulving & Thomson 1973 **[verified]**: retrieval succeeds to the degree the retrieval context overlaps the encoding context. Hence persisting `encoding_context` at write and re-ranking by overlap at read.
+- **Pattern separation** — Yassa & Stark 2011 **[verified]**: the dentate gyrus orthogonalizes similar inputs to keep them distinct. CRYSTALIUM applies the **deliberate inverse** for storage economy — collapsing near-identical *writes* (paraphrases of one fact) while the cost (the exact wording is no longer separately stored) is the acknowledged trade.
+- **Predictive coding / protention** — Friston & Kiebel 2009 **[verified]** (the brain minimizes prediction error over anticipated input); Husserl's *protention* (the just-about-to-come horizon of experience) **[PROXY]** as motivation. Prefetch is the system anticipating its next recall; `prediction_error` is the literal Friston signal when the anticipation misses.
+
+**Stance — ablation-as-arbiter (W5 result: MIXED — one flip, three holds):** `python -m evals {retrieval-gate,dedup-gate,prefetch-gate}` with the real bge-m3 embedder + kuzu graph.
+- **`write_dedup_merge` → ON.** The one **confound-free** win: write amplification 1.0 → 0.667 (2/3 paraphrases merged by genuine cosine > 0.92), precision held. The merge decision is the embedder's, not the harness's.
+- **`recall_completion` + `recall_context_match` → stay OFF (INCONCLUSIVE).** A 7-crystal corpus with k=10 leaves no similarity-missed-but-graph-reachable gap for completion to fill, and the context crystal already ranks first. The faculties ship gated; a larger discriminating fixture is the **[GAP]** follow-up.
+- **`recall_prefetch` → stays OFF (PASS-BUT-CONFOUNDED).** Hit rate 0.5 / p95 235 ms → 0.09 ms, but the harness feeds the *exact verbatim* future query (fabricated perfect prediction) and the p95 drop is checkpoint-prepaid cost. We discount confounded passes; an imperfect-predictor gate is the **[GAP]**.
+
+**Chokepoint + RRF preserved:** dedup-merge runs *after* `assert_tier_allowed`; completion is a 4th RRF list (RRF signature unchanged); context-match is a stable post-RRF re-rank. All four flags OFF (and dedup ON over a null/empty embedder) reproduce W4 byte-identically.
+
+**[PROXY]** F1 via a seeded fixture; write_amplification via row-count; cache_hit_rate as prefetch quality; CA3/protention as motivation, not mechanism.
+
+**Reversibility:** every faculty flag-gated; the dedup default flip is a one-line revert. OFF reproduces W4.
+
+**Source:** `roadmap-v1/W5-retrieval-intelligence.md`; Marr 1971 / Rolls 2013 [verified]; Tulving & Thomson 1973 [verified]; Yassa & Stark 2011 [verified]; Friston & Kiebel 2009 [verified]; Husserl [PROXY]; `evals/BENCH-NOTES.md` (W5 gates).
+
+---
+
 ### D7. Cross-cutting trust-tier propagation
 
 **Decision:** Consolidated tier = MIN(inputs.tier). Admission checks `consolidated.tier ≤ layer.ceiling`. T3 input → Semantic admission denied. Error message: structured advice "exclude T3 inputs or commit to Episodic instead."

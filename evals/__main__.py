@@ -85,6 +85,24 @@ def _cmd_forgetting_gate(args: argparse.Namespace) -> dict[str, Any]:
     return run()
 
 
+def _cmd_retrieval_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.retrieval_gate import run
+
+    return run()
+
+
+def _cmd_dedup_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.dedup_gate import run
+
+    return run()
+
+
+def _cmd_prefetch_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.prefetch_gate import run
+
+    return run()
+
+
 def _cmd_forget(args: argparse.Namespace) -> dict[str, Any]:
     from evals.ab_memory_onoff import _build_live_handlers
     from evals.selective_forgetting import run_test
@@ -149,6 +167,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     fg = sub.add_parser("forgetting-gate", help="long-session forgetting ablation gate (W4 DoD)")
     fg.set_defaults(func=_cmd_forgetting_gate)
+
+    rg = sub.add_parser("retrieval-gate", help="multi-hop completion + context-match ablation gate (W5 DoD)")
+    rg.set_defaults(func=_cmd_retrieval_gate)
+
+    ddg = sub.add_parser("dedup-gate", help="pattern-separation write-amplification ablation gate (W5 DoD)")
+    ddg.set_defaults(func=_cmd_dedup_gate)
+
+    pg = sub.add_parser("prefetch-gate", help="predictive-prefetch cache-hit ablation gate (W5 DoD)")
+    pg.set_defaults(func=_cmd_prefetch_gate)
 
     return p
 

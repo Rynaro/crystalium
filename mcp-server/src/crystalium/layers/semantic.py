@@ -56,6 +56,10 @@ class SemanticLayer:
         gate: PromotionGate,
         redactor: Redactor,
         importance_fn: Callable[..., float],
+        dedup_merge: bool = False,
+        sep_threshold: float = 0.92,
+        link_cooccurrence: bool = False,
+        cooccurrence_limit: int = 5,
     ) -> None:
         self.blob_store = blob_store
         self.relational = relational
@@ -65,6 +69,44 @@ class SemanticLayer:
         self.gate = gate
         self.redactor = redactor
         self.importance_fn = importance_fn
+        # W5 retrieval (default off): write-time dedup-merge + co-occurrence edges.
+        self.dedup_merge = dedup_merge
+        self.sep_threshold = sep_threshold
+        self.link_cooccurrence = link_cooccurrence
+        self.cooccurrence_limit = cooccurrence_limit
+
+    def _dedup_target(self, text: str, layer: str) -> str | None:
+        """W5 pattern separation: id of an existing near-duplicate (cosine >
+        sep_threshold) in *layer*, or None (cosine_sim = 1 - _distance)."""
+        if not self.dedup_merge or self.vector_store is None or not text:
+            return None
+        try:
+            vec = self.vector_store.embed(text)
+            if not vec:
+                return None
+            hits = self.vector_store.dense_search(vec, layer_filter=layer, k=1)
+            if hits:
+                dist = hits[0].get("_distance")
+                if dist is not None and (1.0 - float(dist)) > self.sep_threshold:
+                    return hits[0].get("id")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("dedup_check_skipped", error=str(exc))
+        return None
+
+    def _link_cooccurrence(self, crystal_id: str, scope: dict) -> None:
+        """W5 D1: link this crystal to recent same-project crystals via LINKS_TO."""
+        if not self.link_cooccurrence or self.graph_store is None:
+            return
+        project = scope.get("project") if isinstance(scope, dict) else None
+        if not project:
+            return
+        try:
+            for other in self.relational.recent_crystal_ids(
+                project, exclude_id=crystal_id, limit=self.cooccurrence_limit
+            ):
+                self.graph_store.add_edge(crystal_id, other, "LINKS_TO")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cooccurrence_link_skipped", error=str(exc))
 
     # ------------------------------------------------------------------
     # commit (G1 / G4 / G5)
@@ -123,6 +165,23 @@ class SemanticLayer:
                 else dict(provenance)
             )
 
+            # W5 pattern separation: a near-duplicate semantic fact merges its
+            # provenance (corroboration bump) into the existing crystal instead of
+            # a blind append. After the chokepoint (rate-limit + tier + ceiling),
+            # before the gate/insert. Off / null vector store -> normal flow.
+            dup_id = self._dedup_target(payload.get("summary", "") or str(payload)[:256], "semantic")
+            if dup_id is not None:
+                self.relational.merge_provenance(dup_id, prov_dict)
+                log.info("semantic_dedup_merged", merged_into=dup_id)
+                return {
+                    "status": "merged",
+                    "id": dup_id,
+                    "layer": "semantic",
+                    "merged_into": dup_id,
+                    "validation_state": "validated",
+                    "importance": 0.0,
+                }
+
             # Build a stub crystal for the gate
             crystal_id = str(uuid.uuid4())
             stub_crystal = {"id": crystal_id, **payload}
@@ -169,8 +228,9 @@ class SemanticLayer:
                 "novelty_at_write": payload.get("novelty_at_write", 0.5),
             }
 
-            from crystalium.protection import resolve_protection
+            from crystalium.protection import resolve_encoding_context, resolve_protection
             protected, tags = resolve_protection(payload, prov_dict.get("source"))
+            enc_ctx = resolve_encoding_context(payload, prov_dict, scope)
 
             crystal_record: dict[str, Any] = {
                 "id": crystal_id,
@@ -191,6 +251,7 @@ class SemanticLayer:
                 "status": "active",
                 "protected": protected,
                 "tags": tags,
+                "encoding_context": enc_ctx,
             }
 
             # 5. Insert stores
@@ -215,6 +276,7 @@ class SemanticLayer:
                     self.graph_store.add_node(crystal_id=crystal_id, layer="semantic")
                 except Exception as exc:  # noqa: BLE001
                     log.warning("graph_insert_skipped", error=str(exc))
+                self._link_cooccurrence(crystal_id, scope)
 
             log.info(
                 "semantic_commit",

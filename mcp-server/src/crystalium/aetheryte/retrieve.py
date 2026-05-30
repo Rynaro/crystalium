@@ -118,6 +118,11 @@ class Aetheryte:
         fsrs_initial_stability: float = 2.0,
         fsrs_initial_difficulty: float = 0.3,
         fsrs_lapse_stability: float = 0.5,
+        completion: bool = False,
+        completion_max_hops: int = 2,
+        completion_decay: float = 0.5,
+        context_match: bool = False,
+        recall_cache: Any = None,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -137,6 +142,12 @@ class Aetheryte:
         self.fsrs_initial_stability = fsrs_initial_stability
         self.fsrs_initial_difficulty = fsrs_initial_difficulty
         self.fsrs_lapse_stability = fsrs_lapse_stability
+        # W5 retrieval faculties (default off).
+        self.completion = completion
+        self.completion_max_hops = completion_max_hops
+        self.completion_decay = completion_decay
+        self.context_match = context_match
+        self.recall_cache = recall_cache  # shared RecallCache (W5 prefetch); None = off
 
     # ------------------------------------------------------------------
     # Public recall API
@@ -191,6 +202,13 @@ class Aetheryte:
             self.enforcement.assert_tier_allowed(
                 "crystalium.recall", "episodic", caller_tier, "recall"
             )
+
+            # 2b. W5 prefetch: serve a pre-warmed result from the recall cache.
+            # The chokepoint above still ran. Off (recall_cache None) -> no cache.
+            if self.recall_cache is not None:
+                cached = self.recall_cache.get(getattr(scope, "project", None), query)
+                if cached is not None:
+                    return cached
 
             target_layers = layers if layers else _ALL_LAYERS
 
@@ -254,10 +272,54 @@ class Aetheryte:
                 except Exception as exc:
                     log.warning("graph_expand_skipped", error=str(exc))
 
-            # 4. RRF fusion
-            fused_ids = rrf_merge(
-                [sparse_ranking, dense_ranking, graph_ranking], k_rrf=60
-            )
+            # 3b. W5 pattern completion: bounded, decaying multi-hop graph walk from
+            # the top seeds (CA3-analogue). Off -> no 4th arm (byte-identical RRF).
+            completion_ranking: list[str] = []
+            if self.completion:
+                completion_seeds = seed_ids or sparse_ranking[:k]
+                if completion_seeds:
+                    try:
+                        walked = self.graph_store.decaying_walk(
+                            seed_ids=completion_seeds,
+                            max_hops=self.completion_max_hops,
+                            decay=self.completion_decay,
+                        )
+                        for cid, _score in sorted(walked.items(), key=lambda kv: -kv[1]):
+                            if cid not in all_candidates:
+                                full = self.relational.get_crystal(cid)
+                                if full:
+                                    all_candidates[cid] = full
+                            if cid in all_candidates and cid not in completion_ranking:
+                                completion_ranking.append(cid)
+                    except Exception as exc:
+                        log.warning("completion_walk_skipped", error=str(exc))
+
+            # 4. RRF fusion (completion is a 4th ranked list only when non-empty)
+            rankings = [sparse_ranking, dense_ranking, graph_ranking]
+            if completion_ranking:
+                rankings.append(completion_ranking)
+            fused_ids = rrf_merge(rankings, k_rrf=60)
+
+            # 4b. W5 encoding-specificity: post-RRF re-rank that boosts crystals
+            # whose stored encoding_context overlaps the scope-derived query context
+            # (Tulving & Thomson 1973). Stable sort -> RRF order preserved within
+            # equal context-match. Off -> fused order unchanged (byte-identical).
+            if self.context_match:
+                q_ctx = {
+                    "project": getattr(scope, "project", None),
+                    "agent_class": getattr(scope, "agent_class_visibility", None),
+                }
+
+                def _ctx_overlap(cid: str) -> int:
+                    ec = all_candidates.get(cid, {}).get("encoding_context")
+                    if not isinstance(ec, dict):
+                        return 0
+                    return sum(
+                        1 for key in ("project", "agent_class")
+                        if q_ctx.get(key) is not None and ec.get(key) == q_ctx.get(key)
+                    )
+
+                fused_ids = sorted(fused_ids, key=lambda cid: -_ctx_overlap(cid))
 
             # 5. Optional reranker stub (default DISABLED, never executes in v0.1)
             # Reranker is BGE-reranker-v2-m3; activated when:
@@ -443,6 +505,10 @@ class Aetheryte:
                 evicted=composed.evicted_count,
                 caller_tier=str(caller_tier),
             )
+
+            # W5 prefetch: cache this (cold) result so a pre-warmed read hits later.
+            if self.recall_cache is not None:
+                self.recall_cache.put(getattr(scope, "project", None), query, result)
 
             return result
 
