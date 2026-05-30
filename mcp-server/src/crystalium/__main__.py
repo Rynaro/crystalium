@@ -542,6 +542,98 @@ def promote_review(
 
 
 # ---------------------------------------------------------------------------
+# quarantine — operator triage over validation_state='quarantined' (W6)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def quarantine() -> None:
+    """Operator triage queue for quarantined crystals (W6; T0-gated, audited)."""
+
+
+@quarantine.command("list")
+@click.option("--config", "config_path", type=click.Path(exists=False, path_type=Path), default=None)
+@click.option("--layer", default=None, help="Filter by layer (default: all).")
+def quarantine_list(config_path: Optional[Path], layer: Optional[str]) -> None:
+    """List crystals awaiting quarantine triage (validation_state='quarantined')."""
+    from crystalium.config import Config
+
+    config = Config.from_yaml(config_path) if (config_path and config_path.exists()) else Config.from_env()
+    relational = RelationalStore(db_path=config.sqlite_path)
+
+    rows = relational.list_by_validation_state("quarantined", layer_filter=layer)
+    if not rows:
+        click.echo("No quarantined crystals.")
+        return
+    click.echo(f"{'crystal_id':<38}  {'layer':<10}  {'tier':<5}  {'summary'}")
+    click.echo("-" * 100)
+    for r in rows:
+        click.echo(f"{r.get('id','?'):<38}  {r.get('layer','?'):<10}  "
+                   f"{r.get('trust_tier','?'):<5}  {(r.get('summary') or '')[:48]}")
+
+
+@quarantine.command("review")
+@click.argument("crystal_id")
+@click.option("--accept", "action", flag_value="accept", default=True,
+              help="Clear quarantine (validation_state -> unverified).")
+@click.option("--reject", "action", flag_value="reject",
+              help="Soft-deprecate the crystal (status -> deprecated; not a hard-delete).")
+@click.option("--reason", required=True, help="Audited reason for the decision.")
+@click.option("--config", "config_path", type=click.Path(exists=False, path_type=Path), default=None)
+@click.option("--yes", is_flag=True, default=False, help="Skip the interactive confirmation.")
+def quarantine_review(
+    crystal_id: str, action: str, reason: str, config_path: Optional[Path], yes: bool
+) -> None:
+    """Accept or reject a quarantined crystal (T0 operator, audited reason).
+
+    CRYSTAL_ID  id of the quarantined crystal to triage.
+
+    accept -> validation_state quarantined→unverified (crystal stays, active).
+    reject -> status→deprecated (soft-delete; the row survives; P0-5 preserved).
+    Both append a quarantine_audit row. Routes through the T0-only `review` op.
+    """
+    import datetime as _dt
+
+    from crystalium.config import Config
+    from crystalium.enforcement import Enforcement
+    from crystalium.trust import Tier
+
+    config = Config.from_yaml(config_path) if (config_path and config_path.exists()) else Config.from_env()
+    relational = RelationalStore(db_path=config.sqlite_path)
+    enforcement = Enforcement(config)
+
+    crystal = relational.get_crystal(crystal_id)
+    if crystal is None:
+        raise click.ClickException(f"Crystal not found: {crystal_id!r}")
+    if crystal.get("validation_state") != "quarantined":
+        raise click.ClickException(
+            f"Crystal {crystal_id!r} is not quarantined "
+            f"(validation_state={crystal.get('validation_state')!r}); nothing to triage."
+        )
+    layer = crystal.get("layer", "episodic")
+
+    # Operator gate THROUGH the chokepoint: review op is T0-only.
+    try:
+        enforcement.assert_tier_allowed("crystalium.review", layer, Tier.T0, "review")
+    except Exception as exc:
+        raise click.ClickException(f"review denied by enforcement: {exc}") from exc
+
+    verb = "accept (clear quarantine)" if action == "accept" else "reject (deprecate)"
+    if not yes:
+        click.confirm(f"{verb} crystal {crystal_id!r} ({layer})?", abort=True)
+
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if action == "accept":
+        relational.set_validation_state(crystal_id, "unverified")
+    else:
+        relational.set_status(crystal_id, "deprecated")
+    relational.record_quarantine_review(
+        crystal_id, action, reason, actor_tier=str(Tier.T0), now=now
+    )
+    click.echo(f"Quarantine {action}ed: {crystal_id} (audited; reason={reason!r}).")
+
+
+# ---------------------------------------------------------------------------
 # Entry-point
 # ---------------------------------------------------------------------------
 
