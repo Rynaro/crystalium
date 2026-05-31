@@ -22,7 +22,7 @@ In Cursor settings (`~/.cursor/mcp.json` or workspace `.cursor/mcp.json`):
       "args": [
         "compose", "-f", "/path/to/crystalium/docker-compose.yml",
         "run", "--rm", "-i", "crystalium",
-        "python", "-m", "crystalium"
+        "python", "-m", "crystalium", "serve"
       ],
       "env": {
         "CRYSTALIUM_PROJECT": "my-project"
@@ -54,5 +54,5 @@ You are using CRYSTALIUM memory harness. Reference files:
 
 ```bash
 bash install.sh                      # stage to .eidolons/crystalium/
-docker compose run --rm -i crystalium python -m crystalium
+docker compose run --rm -i crystalium python -m crystalium serve
 ```

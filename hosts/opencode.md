@@ -23,7 +23,7 @@ project-local equivalent):
       "args": [
         "compose", "-f", "/path/to/crystalium/docker-compose.yml",
         "run", "--rm", "-i", "crystalium",
-        "python", "-m", "crystalium"
+        "python", "-m", "crystalium", "serve"
       ],
       "env": {
         "CRYSTALIUM_PROJECT": "my-project"
@@ -57,5 +57,5 @@ Skills: `./.eidolons/crystalium/skills/<skill>.md` (load on demand).
 
 ```bash
 bash install.sh
-docker compose run --rm -i crystalium python -m crystalium
+docker compose run --rm -i crystalium python -m crystalium serve
 ```

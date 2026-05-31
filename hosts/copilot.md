@@ -20,7 +20,7 @@ runs as a Docker stdio server.
       "args": [
         "compose", "-f", "/path/to/crystalium/docker-compose.yml",
         "run", "--rm", "-i", "crystalium",
-        "python", "-m", "crystalium"
+        "python", "-m", "crystalium", "serve"
       ],
       "env": {
         "CRYSTALIUM_PROJECT": "my-project"
@@ -51,5 +51,5 @@ CRYSTALIUM memory harness is available. Reference:
 
 ```bash
 bash install.sh
-docker compose run --rm -i crystalium python -m crystalium
+docker compose run --rm -i crystalium python -m crystalium serve
 ```

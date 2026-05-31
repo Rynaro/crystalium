@@ -23,7 +23,7 @@ Place this at the project root `.mcp.json` (or merge into existing file):
       "args": [
         "compose", "-f", "/path/to/crystalium/docker-compose.yml",
         "run", "--rm", "-i", "crystalium",
-        "python", "-m", "crystalium"
+        "python", "-m", "crystalium", "serve"
       ],
       "env": {
         "CRYSTALIUM_PROJECT": "${workspaceFolder:basename}"
@@ -64,5 +64,5 @@ Skills live at `./.eidolons/crystalium/skills/<skill>.md` (load on demand).
 ```bash
 bash install.sh                      # stage to .eidolons/crystalium/
 docker compose up -d crystalium      # start the MCP server
-# or: docker compose run --rm -i crystalium python -m crystalium
+# or: docker compose run --rm -i crystalium python -m crystalium serve
 ```
