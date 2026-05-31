@@ -56,3 +56,23 @@ def test_generated_manifest_validates(tmp_path: Path) -> None:
     assert manifest["version"] == "1.0.0"
     roles = {f["role"] for f in manifest["files_written"]}
     assert "schema" in roles and "other" not in roles
+
+
+def test_manifest_only_on_unstaged_target_validates(tmp_path: Path) -> None:
+    """Battle-test MED fix: --manifest-only against a target whose files are NOT
+    staged must still emit a schema-VALID manifest (the sha256 key is omitted, not
+    emitted empty — an empty string fails the 64-hex pattern)."""
+    root = _repo_root()
+    target = tmp_path / "empty-target"
+    target.mkdir()
+    subprocess.run(
+        ["bash", str(root / "install.sh"), "--target", str(target),
+         "--non-interactive", "--manifest-only"],
+        check=True, cwd=str(root), capture_output=True, text=True,
+    )
+    manifest = json.loads((target / "install.manifest.json").read_text())
+    schema = json.loads((root / "schemas" / "install.manifest.v1.json").read_text())
+    jsonschema.validate(instance=manifest, schema=schema)   # must NOT raise
+    # entries for unstaged files carry no sha256 key (rather than an empty one)
+    for f in manifest["files_written"]:
+        assert f.get("sha256", "x") != "", "empty sha256 string is schema-invalid"

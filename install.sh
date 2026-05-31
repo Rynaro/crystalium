@@ -179,7 +179,14 @@ add_fw() {
     fi
     FILES_WRITTEN_PATHS+=("${rel_path}")
     local entry
-    entry="{\"path\":\"${rel_path}\",\"role\":\"${role}\",\"sha256\":\"${file_sha256}\"}"
+    if [ -n "${file_sha256}" ]; then
+        entry="{\"path\":\"${rel_path}\",\"role\":\"${role}\",\"sha256\":\"${file_sha256}\"}"
+    else
+        # OMIT sha256 when the file isn't on disk (e.g. --manifest-only over an
+        # unstaged target) — sha256 is optional in install.manifest.v1.json and the
+        # schema's 64-hex pattern rejects an empty string (battle-test MED fix).
+        entry="{\"path\":\"${rel_path}\",\"role\":\"${role}\"}"
+    fi
     FILES_WRITTEN_JSON+=("${entry}")
 }
 
