@@ -1,6 +1,6 @@
 ---
 name: crystalium
-version: 0.8.0
+version: 1.0.0
 eiis_version: "1.4"
 ecl_version: "2.0"
 role: shared-memory-substrate
@@ -137,7 +137,7 @@ crystalium/
 ├── mcp-server/
 │   ├── pyproject.toml
 │   └── src/crystalium/
-│       ├── __init__.py             # __version__ = "0.1.0"
+│       ├── __init__.py             # __version__ = "1.0.0"
 │       ├── __main__.py             # CLI entry
 │       ├── server.py               # MCP server (mirrors atlas-aci)
 │       ├── enforcement.py          # chokepoint
@@ -295,7 +295,7 @@ v0.1.0 is standalone; roster publication is deferred. When v0.2 stabilizes:
 4. GitHub Actions Release workflow creates the archive + attestation.
 5. Update the parent nexus roster entry: `Rynaro/eidolons` PR to bump `versions.latest` and `versions.pins.stable`.
 
-Until v0.2, no versioned releases are published; the repo is a development tree.
+v1.0.0 is the first published release. The operator cuts it: `git tag v1.0.0 && git push origin v1.0.0` (fires `release.yml` → GHCR image + GitHub release), then opens the `Rynaro/eidolons` roster-entry PR (`docs/roster-pr.md`).
 
 ---
 

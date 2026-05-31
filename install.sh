@@ -40,7 +40,7 @@ set -euo pipefail
 
 EIIS_VERSION_VALUE="1.4"
 ECL_VERSION_VALUE="2.0"
-CRYSTALIUM_VERSION="0.8.0"
+CRYSTALIUM_VERSION="1.0.0"
 
 # ---------------------------------------------------------------------------
 # Defaults

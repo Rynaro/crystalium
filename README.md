@@ -4,7 +4,7 @@ Portable memory harness for the Eidolons. Stores, gates, retrieves, consolidates
 
 ## Status
 
-v0.1.0 / Pre-roster / Standalone. EIIS v1.4 conformant. Container-first (all Python toolchain runs inside Docker; host runs only `docker compose`, `git`, `make`). Will publish to the Eidolons roster post-v0.1 once the canary suite is stable and operators have battle-tested it.
+v1.0.0 — roster-ready; publication PR drafted, pending operator merge into the `Rynaro/eidolons` nexus (see `docs/roster-pr.md`). EIIS v1.4 + ECL v2.0 conformant; `pytest -m conformance` green. Container-first (all Python toolchain runs inside Docker; host runs only `docker compose`, `git`, `make`).
 
 ---
 
@@ -168,13 +168,14 @@ See `DESIGN-RATIONALE.md` for full citations and `[UNVERIFIED]` markers on claim
 
 ## Repository hierarchy
 
-This repo is a standalone Eidolon (like ATLAS, SPECTRA, APIVR-Δ). It depends on:
+This repo is a roster-ready Eidolon (like ATLAS, SPECTRA, APIVR-Δ); it also runs
+standalone. It depends on:
 
 - **Rynaro/eidolons-eiis** — install contract (EIIS v1.4 conformance).
 - **Rynaro/eidolons-ecl** — runtime communication contract (ECL v2.0 envelopes).
 - **Rynaro/atlas-aci** — reference for enforcement.py chokepoint pattern.
 - **Rynaro/Junction** — harness used to orchestrate the build.
-- **Rynaro/eidolons** — nexus (will publish roster entry post-v0.1).
+- **Rynaro/eidolons** — nexus (roster-entry PR drafted in `docs/roster-pr.md`, pending operator merge).
 
 ---
 
