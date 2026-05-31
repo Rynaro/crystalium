@@ -11,6 +11,7 @@ import json
 from crystalium.ingest_adapter import (
     layer_for_kind,
     map_envelope_to_crystal,
+    resolve_caller_tier,
     source_for_tier,
 )
 from crystalium.trust import Tier
@@ -76,6 +77,32 @@ def test_summary_never_empty_without_objective():
     _layer, payload = map_envelope_to_crystal(env, {}, Tier.T2)
     assert payload["summary"] == "scout-report"                  # falls back to kind
     assert payload["provenance"]["source"] == "unverified_agent"  # T2
+
+
+def test_resolve_tier_explicit_token_wins():
+    env = _envelope(); env["trace"]["tier"] = "T0"
+    assert resolve_caller_tier(env) == Tier.T0
+
+
+def test_resolve_tier_falls_back_to_roster_default():
+    # v1.0 envelopes carry non-tier trace.tier (e.g. "standard") -> per-eidolon default
+    env = _envelope(eidolon="atlas"); env["trace"]["tier"] = "standard"
+    assert resolve_caller_tier(env) == Tier.T1
+
+
+def test_resolve_tier_host_is_t0():
+    env = _envelope(eidolon="host"); env["trace"]["tier"] = "trance"
+    assert resolve_caller_tier(env) == Tier.T0
+
+
+def test_resolve_tier_unknown_source_is_t3():
+    env = _envelope(eidolon="some-random-tool"); env["trace"]["tier"] = "standard"
+    assert resolve_caller_tier(env) == Tier.T3
+
+
+def test_resolve_tier_absent_trace():
+    env = _envelope(eidolon="spectra"); env["trace"] = {}
+    assert resolve_caller_tier(env) == Tier.T1
 
 
 def test_output_is_valid_crystal_payload_shape():

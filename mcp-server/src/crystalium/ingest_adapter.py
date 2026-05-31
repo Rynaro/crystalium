@@ -38,6 +38,41 @@ _TIER_TO_SOURCE: dict[Tier, str] = {
 }
 
 
+# Per-eidolon default trust tier (EIDOLONS.md per-caller table) — used only when the
+# envelope's trace.tier is absent or not a T0-T3 token (v1.0 envelopes carry
+# trace.tier values like "standard"/"trance", not crystal tiers). Roster Eidolons are
+# verified agents (T1); the host LLM is T0; anything unknown / tool-origin is T3
+# (most conservative — episodic-quarantine only).
+_ROSTER_EIDOLONS: frozenset[str] = frozenset(
+    {"atlas", "spectra", "apivr", "apivr-delta", "apivr-Δ", "idg", "forge", "vigil",
+     "opus", "crystalium"}
+)
+_HOST_EIDOLONS: frozenset[str] = frozenset({"host", "host-llm", "cortex"})
+
+
+def resolve_caller_tier(envelope: dict[str, Any]) -> Tier:
+    """Resolve the inbound artifact's trust tier (W7), preserving MIN-trust.
+
+    Priority: an explicit T0-T3 token in trace.tier wins; otherwise fall back to the
+    per-eidolon default (roster Eidolon -> T1, host -> T0); an unknown source or any
+    unparseable tier -> T3 (fail-closed, lands episodic-quarantined — never laundered
+    up). The chokepoint + LAYER_CEILING still enforce the tier at commit."""
+    trace = envelope.get("trace", {}) or {}
+    raw = trace.get("tier")
+    if raw is not None:
+        try:
+            return Tier.from_str(str(raw))
+        except Exception:
+            pass  # non-tier token (e.g. "standard"/"trance") -> fall through to default
+    eidolon = (envelope.get("from", {}) or {}).get("eidolon", "")
+    key = str(eidolon).strip().lower()
+    if key in _HOST_EIDOLONS:
+        return Tier.T0
+    if key in _ROSTER_EIDOLONS:
+        return Tier.T1
+    return Tier.T3  # unknown / tool-origin: most conservative
+
+
 def layer_for_kind(kind: str) -> str:
     """Target layer for an artifact kind. Default episodic; never auto-promotes."""
     return _KIND_TO_LAYER.get(kind, _DEFAULT_LAYER)
