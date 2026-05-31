@@ -36,7 +36,7 @@ def test_version_flag_prints_and_exits():
     root = _repo_root()
     res = _run(["--version"], root)
     assert res.returncode == 0
-    assert res.stdout.strip() == "0.8.0"
+    assert res.stdout.strip() == "1.0.0"
 
 
 def test_manifest_only_does_not_change_files(tmp_path: Path):
@@ -51,7 +51,7 @@ def test_manifest_only_does_not_change_files(tmp_path: Path):
     assert r2.returncode == 0, r2.stderr
     snap2 = sorted(p.name for p in target.rglob("*") if p.is_file())
     assert snap1 == snap2                                   # no staging/sweep changes
-    assert json.loads((target / "install.manifest.json").read_text())["version"] == "0.8.0"
+    assert json.loads((target / "install.manifest.json").read_text())["version"] == "1.0.0"
     assert manifest1  # sanity
 
 

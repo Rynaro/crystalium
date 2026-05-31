@@ -53,6 +53,6 @@ def test_generated_manifest_validates(tmp_path: Path) -> None:
 
     # spot-check the W7 fixes
     assert manifest["ecl_version"] == "2.0"
-    assert manifest["version"] == "0.8.0"
+    assert manifest["version"] == "1.0.0"
     roles = {f["role"] for f in manifest["files_written"]}
     assert "schema" in roles and "other" not in roles
