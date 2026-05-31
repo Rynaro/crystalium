@@ -67,6 +67,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m not slow'); set CRYSTALIUM_SKIP_SLOW=1",
+    "conformance: mechanical-invariant conformance gate (G1-G8 + path-escape/rate-limit/never-hard-delete/working-set); 'pytest -m conformance' green == conformant (W8)",
 ]
 
 [tool.mypy]
