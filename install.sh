@@ -362,12 +362,13 @@ for entry in "${FILES_WRITTEN_JSON[@]}"; do
     FW_IDX=$((FW_IDX + 1))
 done
 
-# Add manifest itself to files_written[] (role="manifest")
-MANIFEST_SHA=""  # computed below after write
+# Add manifest itself to files_written[] (role="manifest"). The manifest cannot
+# hash itself (written last), so the optional sha256 field is OMITTED rather than
+# emitted empty — an empty string would fail the schema's 64-hex pattern (W7 fix).
 if [ -n "${FW_ARRAY}" ]; then
     FW_ARRAY="${FW_ARRAY},"
 fi
-FW_ARRAY="${FW_ARRAY}{\"path\":\"install.manifest.json\",\"role\":\"manifest\",\"sha256\":\"\"}"
+FW_ARRAY="${FW_ARRAY}{\"path\":\"install.manifest.json\",\"role\":\"manifest\"}"
 
 # Write install timestamp to <data_dir>/install.ts (G5 human-confirm window)
 DATA_DIR="${HOME}/.crystalium"
