@@ -149,13 +149,14 @@ def _build_live_handlers(config_override: Optional[dict[str, Any]] = None) -> di
         return _handle_session_end(args, scheduler)
 
     def _get_crystal(crystal_id: str) -> Optional[dict[str, Any]]:
-        return enforcement._store.get_crystal(crystal_id) if hasattr(enforcement, "_store") else None
+        # W8 fix: read the relational store directly. (Was enforcement._store, which
+        # never existed — Enforcement holds no store — so this always returned None,
+        # breaking CAN-4/CAN-7 update/get round-trips with "Crystal not found".)
+        return relational.get_crystal(crystal_id)
 
     def _row_count(layer: str) -> int:
         try:
-            from crystalium.storage.relational import RelationalStore
-            store: RelationalStore = enforcement._store  # type: ignore[attr-defined]
-            rows = store.bm25_search(query="*", layer_filter=layer, k=10000)
+            rows = relational.bm25_search(query="*", layer_filter=layer, k=10000)
             return len(rows)
         except Exception:
             return 0
