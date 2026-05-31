@@ -34,7 +34,7 @@ def _frontmatter(path: Path) -> dict:
 def test_agents_frontmatter_required_keys():
     fm = _frontmatter(_repo_root() / "AGENTS.md")
     assert fm["name"] == "crystalium"
-    assert fm["version"] == "0.8.0"                 # full semver
+    assert fm["version"] == "1.0.0"                 # full semver
     assert fm["ecl_version"] == "2.0"
     assert fm["eiis_version"] == "1.4"
 
