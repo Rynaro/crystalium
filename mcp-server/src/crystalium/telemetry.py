@@ -151,6 +151,7 @@ def record_call(
                 fields[k] = v
 
     _record_latency(tool, latency_ms)
+    _record_availability(tool, result)
     log.info("tool_call", **fields)
 
 
@@ -164,6 +165,30 @@ def record_call(
 
 _MAX_SAMPLES = 2048
 _latency_samples: dict[str, list[float]] = {}
+
+# W8 availability SLO: per-tool {attempts, successes}. A call with result 'ok' or
+# 'pending' is a successful attempt (the substrate served the request); 'error' is a
+# failed attempt; 'rejected' is a deliberate enforcement decision (the substrate
+# WORKED), so it counts as a success for availability. In-process; reset with the
+# latency samples.
+_availability: dict[str, dict[str, int]] = {}
+
+
+def _record_availability(tool: str, result: str) -> None:
+    a = _availability.setdefault(tool, {"attempts": 0, "successes": 0})
+    a["attempts"] += 1
+    if result != "error":  # ok / pending / rejected all mean the substrate responded
+        a["successes"] += 1
+
+
+def availability(tool: str = "crystalium.recall") -> float | None:
+    """Availability = successes / attempts for *tool* (W8 SLO; target >= 0.99).
+
+    None when the tool was never called (undefined, not 0.0)."""
+    a = _availability.get(tool)
+    if not a or a["attempts"] == 0:
+        return None
+    return a["successes"] / a["attempts"]
 
 
 def _record_latency(tool: str, latency_ms: float) -> None:
@@ -205,15 +230,20 @@ def latency_panel() -> dict[str, dict[str, Any]]:
 
 
 def emit_latency_panel() -> dict[str, dict[str, Any]]:
-    """Log the latency panel (recall/commit/forget/dream) + recall p95. Returns it."""
+    """Log the latency panel (recall/commit/forget/dream) + recall p95 + recall
+    availability (the W8 SLO: availability >= 99%, recall p95 < 200ms). Returns it."""
     panel = latency_panel()
-    log.info("latency_panel", panel=panel, recall_p95_ms=recall_p95())
+    log.info(
+        "latency_panel", panel=panel,
+        recall_p95_ms=recall_p95(), recall_availability=availability("crystalium.recall"),
+    )
     return panel
 
 
 def reset_latency_samples() -> None:
-    """Clear all latency samples (test isolation / panel reset)."""
+    """Clear all latency samples + availability counters (test isolation / reset)."""
     _latency_samples.clear()
+    _availability.clear()
 
 
 # ---------------------------------------------------------------------------
