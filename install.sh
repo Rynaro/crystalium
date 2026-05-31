@@ -52,6 +52,8 @@ PROFILE="local"
 TARGET=""
 FORCE=0
 NON_INTERACTIVE=0
+MANIFEST_ONLY=0
+HOSTS=""
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -77,7 +79,20 @@ while [ $# -gt 0 ]; do
             ;;
         --target)
             TARGET="${2:-}"
+            [ "${TARGET}" = "default" ] && TARGET=""   # keyword form -> default resolution
             shift 2
+            ;;
+        --hosts)
+            HOSTS="${2:-}"
+            shift 2
+            ;;
+        --manifest-only)
+            MANIFEST_ONLY=1
+            shift
+            ;;
+        --version)
+            echo "${CRYSTALIUM_VERSION}"
+            exit 0
             ;;
         --force)
             FORCE=1
@@ -194,6 +209,12 @@ copy_if_changed() {
         fi
     fi
 
+    # --manifest-only: register the file in the inventory but never copy (re-emit
+    # the manifest for an existing target without touching staged files).
+    if [ "${MANIFEST_ONLY}" -eq 1 ]; then
+        should_copy=0
+    fi
+
     if [ "${should_copy}" -eq 1 ]; then
         cp "${src}" "${dst}"
         say "wrote ${dst}"
@@ -214,10 +235,24 @@ copy_if_changed() {
 # Ensure target directory exists
 # ---------------------------------------------------------------------------
 
+# Interactive safety prompt: when reconciling a non-empty existing target, confirm
+# before proceeding — UNLESS --non-interactive / --force, or stdin is not a TTY
+# (CI, pipes, tests). This is the one place --non-interactive is honored.
+if [ "${MANIFEST_ONLY}" -eq 0 ] && [ "${NON_INTERACTIVE}" -eq 0 ] && [ "${FORCE}" -eq 0 ] \
+   && [ -t 0 ] && [ -d "${TARGET}" ] && [ -n "$(ls -A "${TARGET}" 2>/dev/null)" ]; then
+    printf '[crystalium install] Target %s exists; reconcile (sweep removes non-canonical files)? [y/N] ' "${TARGET}" >&2
+    read -r _ANS
+    case "${_ANS}" in
+        y|Y|yes|YES) ;;
+        *) die "aborted by operator (use --non-interactive or --force to skip this prompt)";;
+    esac
+fi
+
 mkdir -p "${TARGET}"
 TARGET_ABS="$(cd "${TARGET}" && pwd)"
 
 say "Installing CRYSTALIUM v${CRYSTALIUM_VERSION} → ${TARGET_ABS}"
+[ "${MANIFEST_ONLY}" -eq 1 ] && say "manifest-only mode: re-emitting install.manifest.json (no file copy/sweep)"
 say "EIIS_VERSION=${EIIS_VERSION_VALUE}  ECL_VERSION=${ECL_VERSION_VALUE}  profile=${PROFILE}"
 
 # ---------------------------------------------------------------------------
@@ -341,7 +376,10 @@ canonical_inventory_sweep() {
     return 0
 }
 
-canonical_inventory_sweep "${TARGET_ABS}"
+# --manifest-only never sweeps (it must not delete staged files).
+if [ "${MANIFEST_ONLY}" -eq 0 ]; then
+    canonical_inventory_sweep "${TARGET_ABS}"
+fi
 
 # ---------------------------------------------------------------------------
 # §3 — Generate install.manifest.json
@@ -380,6 +418,28 @@ if [ ! -f "${INSTALL_TS_PATH}" ] || [ "${FORCE}" -eq 1 ]; then
     say "wrote install.ts → ${INSTALL_TS_PATH}"
 fi
 
+# Active roster from --members (W7 partial-team/standalone). Empty -> standalone.
+ROSTER_JSON="[]"
+if [ -n "${MEMBERS}" ]; then
+    ROSTER_JSON="["
+    _RFIRST=1
+    _OLD_IFS="${IFS}"; IFS=','
+    for _m in ${MEMBERS}; do
+        _m="$(echo "${_m}" | sed 's/^ *//;s/ *$//')"
+        [ -z "${_m}" ] && continue
+        [ "${_RFIRST}" -eq 0 ] && ROSTER_JSON="${ROSTER_JSON},"
+        ROSTER_JSON="${ROSTER_JSON}\"${_m}\""
+        _RFIRST=0
+    done
+    IFS="${_OLD_IFS}"
+    ROSTER_JSON="${ROSTER_JSON}]"
+fi
+if [ -n "${SCOPE}" ]; then
+    SCOPE_JSON="\"${SCOPE}\""
+else
+    SCOPE_JSON="null"
+fi
+
 # Build the manifest JSON
 MANIFEST_JSON="{
   \"eiis_version\": \"${EIIS_VERSION_VALUE}\",
@@ -389,6 +449,8 @@ MANIFEST_JSON="{
   \"profile\": \"${PROFILE}\",
   \"canonical_inventory_strict\": true,
   \"ecl_version\": \"${ECL_VERSION_VALUE}\",
+  \"roster\": ${ROSTER_JSON},
+  \"scope\": ${SCOPE_JSON},
   \"files_written\": [${FW_ARRAY}]
 }"
 
