@@ -269,6 +269,14 @@ class TestSlotRouting:
 
 
 class TestTotalCap:
+    def test_g6_working_set_cap_is_literally_3500(self) -> None:
+        """G6 invariant pin (W8): the working-set cap is exactly 3500 tokens. The
+        1.0 conformance freeze pins the literal — changing the Config default fails
+        here, not silently."""
+        from crystalium.config import Config
+
+        assert Config(data_dir=__import__("pathlib").Path("/tmp/crys-cap-pin")).total_cap == 3500
+
     def test_total_tokens_within_total_cap(self) -> None:
         """total_tokens in ComposedSet is always ≤ config.total_cap."""
         cfg = _make_config()
