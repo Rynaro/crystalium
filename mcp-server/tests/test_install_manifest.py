@@ -33,7 +33,7 @@ def _repo_root() -> Path:
     for parent in here.parents:
         if (parent / "install.sh").exists() and (parent / "schemas").exists():
             return parent
-    raise RuntimeError("repo root with install.sh + schemas not found")
+    return Path("/__no_repo__")   # non-existent -> skipif handles it (no collection error)
 
 
 @pytest.mark.skipif(

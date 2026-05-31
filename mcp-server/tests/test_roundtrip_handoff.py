@@ -28,7 +28,7 @@ def _fixtures_dir() -> Path:
         cand = base / ".eidolons" / "apivr" / "templates" / "inbound"
         if cand.exists():
             return cand
-    raise RuntimeError("inbound fixtures not found")
+    return Path("/__no_fixtures__")   # non-existent -> skipif handles it (no collection error)
 
 
 pytestmark = pytest.mark.skipif(

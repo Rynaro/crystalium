@@ -53,5 +53,14 @@ FROM base AS dev
 # Copy tests into the image
 COPY mcp-server/tests ./tests
 
+# W7: the EIIS/install + host-wiring + frontmatter + deploy tests exercise install.sh
+# and the staged payload sources. Bake those into the dev image so those tests RUN in
+# CI (rather than skip). Dev stage only — NOT in the runtime image or the install
+# target. (The round-trip test needs the .eidolons/ roster fixtures, which stay
+# .dockerignore'd; it skips in this minimal image and runs locally via mounts — its
+# ingest logic is covered in CI by test_ingest_handler with synthesized envelopes.)
+COPY install.sh agent.md AGENTS.md SPEC.md ECL_VERSION ./
+COPY skills ./skills
+
 # For pytest runs via docker compose
 CMD ["pytest", "tests/", "-v"]

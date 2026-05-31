@@ -19,6 +19,7 @@ __pycache__/
 !SPEC.md
 !agent.md
 !README.md
+!AGENTS.md
 
 # Install target (consumer-side; not part of the image)
 .eidolons/

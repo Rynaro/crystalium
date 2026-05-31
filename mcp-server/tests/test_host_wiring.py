@@ -19,7 +19,7 @@ def _repo_root() -> Path:
     for parent in Path(__file__).resolve().parents:
         if (parent / "install.sh").exists():
             return parent
-    raise RuntimeError("install.sh not found")
+    return Path("/__no_repo__")   # non-existent -> skipif handles it (no collection error)
 
 
 pytestmark = pytest.mark.skipif(

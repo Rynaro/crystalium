@@ -23,7 +23,7 @@ def _repo_root() -> Path:
     for base in (Path("/app"), *Path(__file__).resolve().parents):
         if (base / "install.sh").exists():
             return base
-    raise RuntimeError("install.sh not found")
+    return Path("/__no_repo__")   # non-existent -> skipif handles it (no collection error)
 
 
 def _envelope(payload: str, *, eidolon: str, kind: str, thread: str, objective: str) -> dict:

@@ -16,7 +16,7 @@ def _repo_root() -> Path:
     for base in (Path("/app"), *Path(__file__).resolve().parents):
         if (base / "AGENTS.md").exists() and (base / "agent.md").exists():
             return base
-    raise RuntimeError("AGENTS.md/agent.md not found")
+    return Path("/__no_repo__")   # non-existent -> skipif handles it (no collection error)
 
 
 pytestmark = pytest.mark.skipif(
