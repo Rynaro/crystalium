@@ -249,6 +249,14 @@ def _run_arm(
 
     results = {}
     for mission_fn in MISSIONS:
+        # Isolate each mission in its own project namespace so cross-mission state
+        # bleed (other missions' crystals polluting recall rankings — amplified by
+        # write_dedup_merge / recall_active_only) cannot make results flaky. Recall's
+        # scope filter is keyed on project, so a per-mission project is full isolation
+        # within the shared store. (W8: deterministic canary.)
+        parts = mission_fn.__name__.split("_")
+        _mid = f"CAN-{parts[1]}" if len(parts) > 1 and parts[1].isdigit() else mission_fn.__name__
+        env.project = f"{project}-{_mid}"
         try:
             result = mission_fn(env)
         except Exception as exc:
@@ -332,37 +340,33 @@ def run_all(
     on_results: dict[str, dict[str, Any]] = {}
     off_results: dict[str, dict[str, Any]] = {}
 
-    if mode in ("both", "on_only"):
-        raw = _run_arm(memory_on=True, config_override=config_override)
-        on_results = {
+    # W8 fix: run each arm EXACTLY ONCE and use the SAME MissionResults for both the
+    # serialized display and the headline. (Previously each arm ran twice — once for
+    # display, once for the headline — on separate random-project stores, so the
+    # headline reflected a DIFFERENT execution than the reported per-mission results.)
+    on_raw: dict[str, MissionResult] = {}
+    off_raw: dict[str, MissionResult] = {}
+
+    def _serialize(raw: dict[str, MissionResult]) -> dict[str, dict[str, Any]]:
+        return {
             mid: {
-                "passed": r.passed,
-                "observed": r.observed,
-                "expected": r.expected,
-                "notes": r.notes,
-                "error": r.error,
+                "passed": r.passed, "observed": r.observed, "expected": r.expected,
+                "notes": r.notes, "error": r.error,
             }
             for mid, r in raw.items()
         }
 
+    if mode in ("both", "on_only"):
+        on_raw = _run_arm(memory_on=True, config_override=config_override)
+        on_results = _serialize(on_raw)
+
     if mode in ("both", "off_only"):
-        raw = _run_arm(memory_on=False, config_override=config_override)
-        off_results = {
-            mid: {
-                "passed": r.passed,
-                "observed": r.observed,
-                "expected": r.expected,
-                "notes": r.notes,
-                "error": r.error,
-            }
-            for mid, r in raw.items()
-        }
+        off_raw = _run_arm(memory_on=False, config_override=config_override)
+        off_results = _serialize(off_raw)
 
     # For headline metric we need both arms; degrade gracefully for single-arm runs
     if mode == "both":
-        on_mr = _run_arm(memory_on=True, config_override=config_override)
-        off_mr = _run_arm(memory_on=False, config_override=config_override)
-        headline = _compute_headline(on_mr, off_mr)
+        headline = _compute_headline(on_raw, off_raw)
     else:
         headline = {
             "note": f"single-arm mode={mode!r}; headline requires both arms",
