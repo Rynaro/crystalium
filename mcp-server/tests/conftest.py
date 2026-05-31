@@ -19,6 +19,36 @@ from crystalium.storage.relational import RelationalStore
 
 
 # ---------------------------------------------------------------------------
+# W8 conformance registry — the test files whose green == "mechanically
+# conformant" (G1-G8 + path-escape/rate-limit/output-cap/never-hard-delete +
+# RTBF exception/working-set cap). `pytest -m conformance` runs exactly these.
+# Adding/removing a gate file here is the single source of truth; test_conformance.py
+# cross-checks that every G-gate id is represented.
+# ---------------------------------------------------------------------------
+
+CONFORMANCE_FILES = frozenset({
+    "test_enforcement.py",       # G1, G2 + path-escape, rate-limit, output-cap, tier-ceiling, review-op
+    "test_skill_invoke.py",      # G3 sandbox
+    "test_trust_propagation.py", # G4 MIN-tier propagation
+    "test_promotion_gate.py",    # G5 promotion / k-corroboration / human-confirm
+    "test_composer.py",          # G6 working-set cap
+    "test_ecl_envelope.py",      # G7 ECL 11-field + SHA-256 integrity
+    "test_dream_scheduler.py",   # G8 dream dedup
+    "test_bitemporal.py",        # never-hard-delete (P0-5)
+    "test_rtbf.py",              # the ONE sanctioned hard-delete (RTBF exception)
+})
+
+
+def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+    """Auto-apply the `conformance` marker to every test in a gate file, so the
+    mechanical-invariant suite is a single runnable target without per-test churn."""
+    mark = pytest.mark.conformance
+    for item in items:
+        if Path(str(item.fspath)).name in CONFORMANCE_FILES:
+            item.add_marker(mark)
+
+
+# ---------------------------------------------------------------------------
 # Storage fixtures
 # ---------------------------------------------------------------------------
 
