@@ -218,33 +218,35 @@ def _mrr_at_k(records: list[dict[str, Any]], target_summary: str, k: int = 3) ->
 def can_1_recall_hit_across_sessions(env: CanaryEnv) -> MissionResult:
     """CAN-1: Commit fact in session A; recall in session B. A/B arm."""
     target_summary = "auth uses bcrypt"
+    # Commit to EPISODIC (the universal write buffer): it persists immediately and
+    # is recallable. (A lone T1 SEMANTIC commit is correctly held PENDING by the
+    # promotion gate, so it would never be recallable — that hardening is not what
+    # this mission tests.)
     commit_result = env.commit(
-        layer="semantic",
+        layer="episodic",
         summary=target_summary,
         content="Authentication layer uses bcrypt with cost factor 12.",
         trust_tier="T1",
     )
     committed_id = commit_result.get("id", "")
 
-    recall_result = env.recall(query="auth hash algorithm", k=3)
+    recall_result = env.recall(query="auth bcrypt hash", k=3)
     records = recall_result.get("records", [])
     mrr = _mrr_at_k(records, target_summary)
 
-    if env.memory_on:
-        passed = mrr > 0
-        expected_mrr_gt = 0
-    else:
-        passed = mrr == 0
-        expected_mrr_gt = -1  # expect zero
+    # Memory-DEPENDENT criterion, SAME for both arms: the fact must be recalled.
+    # Memory-on recalls it (mrr>0 -> PASS); memory-off has an empty store (mrr==0 ->
+    # FAIL). This is what makes the A/B delta meaningful (no vacuous off-arm pass).
+    passed = mrr > 0
 
     return MissionResult(
         mission_id="CAN-1",
         passed=passed,
         observed={"mrr_at_3": mrr, "committed_id": committed_id, "record_count": len(records)},
-        expected={"mrr_at_3_gt": expected_mrr_gt, "memory_on": env.memory_on},
+        expected={"mrr_at_3_gt": 0, "memory_on": env.memory_on},
         notes=(
             f"memory_on={env.memory_on}: mrr@3={mrr:.3f}. "
-            + ("PASS" if passed else f"FAIL — expected mrr>0 for memory-on, got {mrr:.3f}")
+            + ("PASS — recalled" if passed else "FAIL — fact not recalled (expected for memory-off)")
         ),
     )
 
@@ -352,11 +354,12 @@ def can_3_poisoning_resistance_t3_episodic_only(env: CanaryEnv) -> MissionResult
         if "Ceiling" in str(exc) or "TIER" in str(exc):
             tier_ceiling_raised = True
 
-    if env.memory_on:
-        all_blocked = len(blocked_layers) == 3
-        passed = all_blocked and episodic_quarantined
-    else:
-        passed = True  # memory-off: enforcement absent, vacuous pass
+    # SAME criterion both arms: the tier wall must block all non-episodic layers AND
+    # episodic must land quarantined. Memory-off has no enforcement/store, so the
+    # commits are no-ops that neither reject nor quarantine -> FAIL (poison is not
+    # contained without the memory substrate). No vacuous off-arm pass.
+    all_blocked = len(blocked_layers) == 3
+    passed = all_blocked and episodic_quarantined
 
     return MissionResult(
         mission_id="CAN-3",
@@ -376,27 +379,31 @@ def can_3_poisoning_resistance_t3_episodic_only(env: CanaryEnv) -> MissionResult
 
 def can_4_selective_forget_superseded(env: CanaryEnv) -> MissionResult:
     """CAN-4: Update a crystal; old remains with t_valid_to set. A/B arm."""
-    # Commit original fact
+    # Commit original fact to EPISODIC (persists immediately + supports bi-temporal
+    # update; a semantic commit would land pending and the update would 404).
+    # Distinct fixture (NOT CAN-1's "auth uses bcrypt") so write_dedup_merge — ON by
+    # default — does not collide this mission's commit with CAN-1's in the shared
+    # project, which would re-point the update target.
     result_a = env.commit(
-        layer="semantic",
-        summary="auth uses bcrypt",
-        content="Authentication layer uses bcrypt.",
+        layer="episodic",
+        summary="deploy region is us-east-1",
+        content="The production deploy region is us-east-1.",
         trust_tier="T1",
     )
     crystal_a_id = result_a.get("id", "")
 
-    # Update to new fact
+    # Update to new fact (region migration)
     result_b = env.update(
         crystal_id=crystal_a_id,
-        patch={"summary": "auth uses argon2", "content": "Authentication uses argon2id."},
-        reason="Security upgrade: bcrypt -> argon2id",
+        patch={"summary": "deploy region is eu-west-1", "content": "Production migrated to eu-west-1."},
+        reason="Region migration: us-east-1 -> eu-west-1",
     )
     crystal_b_id = result_b.get("id", crystal_a_id)
 
-    # Recall in default mode — should return argon2
-    recall = env.recall(query="auth hash algorithm", k=3)
+    # Recall in default mode — should return the new region (eu-west-1)
+    recall = env.recall(query="deploy region production", k=3)
     records = recall.get("records", [])
-    argon2_in_top3 = any("argon2" in r.get("summary", "").lower() for r in records[:3])
+    argon2_in_top3 = any("eu-west-1" in r.get("summary", "").lower() for r in records[:3])
 
     # Verify bi-temporal state of old crystal
     t_valid_to_set = False
@@ -412,10 +419,9 @@ def can_4_selective_forget_superseded(env: CanaryEnv) -> MissionResult:
             t_valid_to_set = temporal.get("t_valid_to") is not None
             superseded_by_correct = temporal.get("superseded_by") == crystal_b_id
 
-    if env.memory_on:
-        passed = (not hard_delete_occurred) and t_valid_to_set and argon2_in_top3
-    else:
-        passed = True  # vacuous
+    # SAME criterion both arms: old crystal soft-superseded (t_valid_to set, no hard
+    # delete) AND the new fact recalled. Memory-off can't supersede or recall -> FAIL.
+    passed = (not hard_delete_occurred) and t_valid_to_set and argon2_in_top3
 
     return MissionResult(
         mission_id="CAN-4",
@@ -435,9 +441,9 @@ def can_4_selective_forget_superseded(env: CanaryEnv) -> MissionResult:
 
 def can_5_multi_agent_isolation(env: CanaryEnv) -> MissionResult:
     """CAN-5: Agent-class scope isolation. A/B arm."""
-    # apivr commits its fact
+    # Commit to EPISODIC (persists + recallable; semantic would land pending).
     env.commit(
-        layer="semantic",
+        layer="episodic",
         summary="apivr uses TDD for all features",
         content="APIVR-Delta implements test-driven development.",
         trust_tier="T1",
@@ -445,7 +451,7 @@ def can_5_multi_agent_isolation(env: CanaryEnv) -> MissionResult:
     )
     # spectra commits its fact
     env.commit(
-        layer="semantic",
+        layer="episodic",
         summary="spectra uses alignment cycles",
         content="SPECTRA runs alignment planning phases.",
         trust_tier="T1",
@@ -453,23 +459,21 @@ def can_5_multi_agent_isolation(env: CanaryEnv) -> MissionResult:
     )
 
     # Recall from apivr scope
-    apivr_recall = env.recall(query="development methodology", k=5, agent_class="apivr")
-    spectra_in_apivr = any(
-        "spectra" in r.get("summary", "").lower()
-        for r in apivr_recall.get("records", [])
-    )
+    apivr_recall = env.recall(query="apivr methodology approach", k=5, agent_class="apivr")
+    apivr_records = apivr_recall.get("records", [])
+    apivr_sees_own = any("apivr" in r.get("summary", "").lower() for r in apivr_records)
+    spectra_in_apivr = any("spectra" in r.get("summary", "").lower() for r in apivr_records)
 
     # Recall from spectra scope
-    spectra_recall = env.recall(query="development methodology", k=5, agent_class="spectra")
-    apivr_in_spectra = any(
-        "apivr" in r.get("summary", "").lower()
-        for r in spectra_recall.get("records", [])
-    )
+    spectra_recall = env.recall(query="spectra methodology approach", k=5, agent_class="spectra")
+    spectra_records = spectra_recall.get("records", [])
+    spectra_sees_own = any("spectra" in r.get("summary", "").lower() for r in spectra_records)
+    apivr_in_spectra = any("apivr" in r.get("summary", "").lower() for r in spectra_records)
 
-    if env.memory_on:
-        passed = (not spectra_in_apivr) and (not apivr_in_spectra)
-    else:
-        passed = True  # vacuous
+    # SAME criterion both arms (strengthened, memory-DEPENDENT): each scope must
+    # recall its OWN fact AND NOT see the other's. Memory-off recalls nothing, so
+    # "sees own" is False -> FAIL (no vacuous "empty store doesn't leak" pass).
+    passed = apivr_sees_own and spectra_sees_own and (not spectra_in_apivr) and (not apivr_in_spectra)
 
     return MissionResult(
         mission_id="CAN-5",

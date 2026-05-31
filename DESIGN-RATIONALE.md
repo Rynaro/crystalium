@@ -122,7 +122,7 @@ This document traces every non-obvious decision in CRYSTALIUM v0.1.0 to its sour
 
 **Stance — ablation-as-arbiter:** every augment ships OFF and flips on only if `python -m evals dream-gate` shows it strictly beating chronological/baseline on its named metric (gain↑ & drift not-worse; STC: context-retention↑ without precision regression). **W3 gate result: INCONCLUSIVE — all flags stay OFF** (see `evals/BENCH-NOTES.md`): the coarse single-cluster `_gather` can't yet exercise per-fact dynamics; a later wave refines clustering and re-gates.
 
-**[PROXY]** compression_ratio uses summary length (worker has no blob_store dep). **[PROXY]** "interleaving prevents forgetting" measured via retention/gain, not synaptic interference. **[DISPUTED]** mapping "synaptic tag" → "lowered promotion threshold" is a *functional* analogy, not literal protein-synthesis capture.
+**[PROXY]** compression_ratio uses summary length (worker has no blob_store dep). **[PROXY]** "interleaving prevents forgetting" measured via retention/gain, not synaptic interference. **[CONTESTED]** mapping "synaptic tag" → "lowered promotion threshold" is a *functional* analogy, not literal protein-synthesis capture.
 
 **Reversibility:** all behaviour is flag-gated; flags default OFF reproduce W2 byte-identically.
 
@@ -199,6 +199,45 @@ This document traces every non-obvious decision in CRYSTALIUM v0.1.0 to its sour
 **Reversibility:** every defense flag-gated; the `recall_active_only` flip is a one-line revert. OFF reproduces W5.
 
 **Source:** `roadmap-v1/W6-security-hardening.md`; OWASP ASI06; PoisonedRAG (USENIX Security 2025); MINJA; A-MemGuard [UNVERIFIED]; LTM Security Survey [UNVERIFIED]; `evals/BENCH-NOTES.md` (W6 gates); extends D7 / P0-5 / P0-6.
+
+---
+
+### D6.6. Eidolons Integration — CRYSTALIUM as Shared Substrate — W7 (v0.8.0)
+
+**Decision:** Make CRYSTALIUM the substrate the roster writes handoff artifacts into and recalls from. An 8th MCP tool `crystalium.ingest` accepts a roster ECL envelope (version-tolerant: v1.x **and** v2.x — vendored fixtures are v1.0, the harness emits 2.0) and maps it generically to a `crystal.v1` payload: `from.eidolon`→`provenance.author_agent`, `trace.tier` (or the per-eidolon EIDOLONS default)→trust tier, `artifact.sha256`→`content_ref`, the native artifact preserved **verbatim** in the open-shaped `encoding_context`. Quirks live in the adapter (`ingest_adapter.py`), never in the store. Ingestion commits **through** the existing `layer.commit` chokepoint, so MIN-trust is preserved end-to-end and a T3/tool-origin artifact lands episodic-quarantined, never laundered to a higher tier. EIIS v1.4 finalized (manifest validates; `--version`/`--manifest-only`/`--hosts`; AGENTS.md frontmatter with `handoffs.upstream/downstream`); host `serve` wiring; standalone + 2-member deployments verified.
+
+**Rationale:**
+- **The Extended Mind** — Clark & Chalmers 1998 **[UNVERIFIED]** (philosophy, not an empirical claim): a store that is reliably available + automatically endorsed (trust tiers) is *constitutive* of the team's cognition, not a mere external tool. This is the generative hypothesis behind the availability bar (D-level SLO) and the trust-preserving ingest — it motivates, it does not justify; the **round-trip pipeline gate is the arbiter**.
+- **No ablation (integration wave).** Unlike W2–W6, W7 ships no flag-gated augment with an A/B. Its arbiter is the DoD **round-trip gate**: a simulated ATLAS→SPECTRA→APIVR-Δ→IDG pipeline ingesting the real vendored fixtures, asserting every handoff recalls downstream with provenance + **MIN trust tier intact** and the native artifact byte-identical. The gate is green.
+
+**Generic-over-per-schema (trade):** one schema-agnostic mapping rather than per-artifact validators. **[PROXY]** the crystal.v1 *output* is validated but the artifact's *inner* native schema is not (preserved verbatim for later re-validation). **[GAP]** roadmap-named schemas absent locally (OPUS trio, `spec-bundle`, `verdict`, `document-bundle`) ride the generic path, deferred. **[PROXY]** tier→`provenance.source` is a documented mapping table, not a canonical one.
+
+**Reversibility:** ingest is additive (8th tool); the 7 existing tools + the ECL emit path are byte-identical. No flags flipped.
+
+**Source:** `roadmap-v1/W7-eidolons-integration.md`; Clark & Chalmers 1998 [UNVERIFIED]; `Rynaro/eidolons-ecl` (ECL v2.0), `Rynaro/eidolons-eiis` (EIIS v1.4); vendored roster fixtures `.eidolons/apivr/templates/inbound/*`.
+
+---
+
+### D6.7. Ablation Summary — all augments W2–W7 (v1.0.0 freeze)
+
+**Marker legend** (the four spec markers + two declared extensions): **[verified]** primary source checked · **[MEDIUM]** plausible, partial evidence · **[CONTESTED]** the human-science literature disputes it (engineering stands regardless) · **[UNVERIFIED]** the claim could not be verified (philosophy, unread source, or external artifact) · **[PROXY]** the bench measures a stand-in, not the construct itself (synthetic harness) · **[GAP]** a known, documented hole deferred past 1.0. (`[DISPUTED]` elsewhere is normalized to `[CONTESTED]`.)
+
+**Stance — neuroscience-as-hypothesis, ablation-as-arbiter (restated for 1.0):** every augment is motivated by a neuroscience/philosophy anchor and shipped **behind a default-off flag**; it flips ON **only** if the bench shows it beating the prior version. The citation generates the design; the **A/B is the arbiter**; nulls are reported honestly (ablation-or-revert). Net over six algorithmic waves: **2 of the augments earned their flip; the other six stayed off as honest nulls.**
+
+| # | Wave | Flag | Anchor | Verdict | Default |
+|---|---|---|---|---|---|
+| 1 | W2 | `evb_enabled` | Mattar & Daw 2018 (EVB) [verified] | INCONCLUSIVE (ties on DoD) | **OFF** |
+| 2 | W3 | `dream_replay_evb` / `dream_interleave` / `dream_stc` | CLS, prioritized replay [verified]; STC [CONTESTED] | INCONCLUSIVE (no arm beats baseline) | **OFF** |
+| 3 | W4 | `forgetting_fsrs` | FSRS-DSR [verified]; reconsolidation [CONTESTED] | INCONCLUSIVE (neither arm plateaus) | **OFF** |
+| 4 | W5 | `recall_completion` + `recall_context_match` | CA3 attractor [PROXY]; Tulving & Thomson 1973 [verified] | INCONCLUSIVE (corpus too small for a gap) | **OFF** |
+| 5 | W5 | `write_dedup_merge` | Yassa & Stark 2011 (pattern separation, inverse) [verified] | **PASS** (write amp 1.0→0.667, precision held; confound-free) | **ON** |
+| 6 | W5 | `recall_prefetch` | Friston 2009 / Husserl protention [PROXY] | PASS-BUT-CONFOUNDED (harness feeds the exact future query) | **OFF** |
+| 7 | W6 | `recall_active_only` | poisoning defense (PoisonedRAG/MINJA) | **PASS** (ASR 1.00→0.00, tier wall 8/8; also a correctness fix) | **ON** |
+| 8 | W6 | `drift_detect` | A-MemGuard [UNVERIFIED] | OFF (bench-proven but contradiction reads cosine 0.696 < 0.80 band) | **OFF** |
+| 9 | W6 | `write_conflict_detect` | (write-conflict LWW) | OFF (gate doesn't isolate it; LWW trust-inversion risk) | **OFF** |
+| — | W7 | (ingest, no flag) | Extended Mind, Clark & Chalmers 1998 [UNVERIFIED] | integration — round-trip gate green (no A/B) | n/a |
+
+**Canary headline (v1.0, honest):** after repairing the harness/metric (de-vacuumed off-arm, fixed bit-rot + the double-run, episodic+isolated missions), memory-on beats memory-off **+0.75** (0.75 vs 0.00) — a full reversal of the prior −0.75 — landing below the 0.80 bar by one mission (the CAN-4 recall-after-update [GAP]). Reported as-is, not massaged. **Availability SLO:** recall availability 100% (≥99% ✓); recall p95 ~205 ms (embedder-bound, marginally over the 200 ms target). Both **[PROXY]** (synthetic harness). See `evals/BENCH-NOTES.md`.
 
 ---
 

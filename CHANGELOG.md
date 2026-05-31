@@ -6,6 +6,103 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-05-31
+
+### Added
+
+- Conformance suite: a `conformance` pytest marker over all 8 G-gates + mechanical
+  invariants (`pytest -m conformance` == "green is conformant") + a blocking CI job +
+  a gate-registry self-check; working-set cap pinned to the literal 3500.
+- Availability SLO: recall availability (success/attempts) metric + the W1 latency
+  panel now reports it (target ≥99% availability, recall p95 <200 ms).
+- `MIGRATION.md` (per-wave config-key delta, schema-v1-stable, the one behavior change)
+  and `docs/roster-pr.md` (drafted nexus roster entry, operator-opened).
+- DESIGN-RATIONALE D6.6 (W7 Extended Mind) + D6.7 consolidated 8-result ablation table
+  + marker legend.
+
+### Changed
+
+- **Default ON (recorded A/B wins):** `write_dedup_merge` (W5) and `recall_active_only`
+  (W6). All other augment flags stay OFF (honest nulls).
+- Canary honestly repaired (de-vacuumed off-arm, episodic + isolated missions,
+  single-run headline, restated gate): memory-on beats memory-off **+0.75** (was −0.75).
+- Version 0.8.0 → 1.0.0.
+
+### Fixed
+
+- `Config.from_env()` defaulted `write_dedup_merge` / `recall_active_only` to False,
+  contradicting the dataclass True — env-built configs silently reverted the flips.
+  Reconciled (both default True; guarded by a default-parity test).
+- Canary harness bit-rot (`_get_crystal`/`_row_count` read a non-existent
+  `enforcement._store`) and the `run_all` double-run (headline computed from a
+  different execution than the displayed results).
+- install manifest now validates against `install.manifest.v1.json` (`ecl_version`,
+  role `schema`, schema extended for `profile`/`roster`/`scope`).
+
+### Known limitations
+
+- Canary below the 0.80 bar by one mission (recall-after-bi-temporal-update re-index
+  `[GAP]`); recall p95 ~205 ms marginally over the 200 ms embedder-bound target. Both
+  `[PROXY]` (synthetic harness). See `evals/BENCH-NOTES.md`.
+
+## [0.8.0] — 2026-05-31 — Wave 7: Eidolons Integration
+
+### Added
+
+- `crystalium.ingest` (8th MCP tool): ingest a roster ECL handoff envelope (v1.x/v2.x)
+  → `crystal.v1` via a generic adapter, preserving the native artifact verbatim in
+  `encoding_context` and committing through the chokepoint (MIN trust tier preserved;
+  T3 → episodic-quarantined, never laundered).
+- EIIS v1.4 finalization: install `--version`/`--manifest-only`/`--hosts`/`--members`;
+  AGENTS.md YAML frontmatter (`version`, `handoffs.upstream/downstream`, ECL/EIIS pins);
+  host `serve` wiring + repo `.mcp.json` self-wire; standalone + 2-member verified.
+
+## [0.7.0] — 2026-05-30 — Wave 6: Security & Integrity Hardening
+
+### Added
+
+- Belief-drift detection (`drift_detect`, OFF), quarantine triage CLI (T0, audited,
+  reject = soft-deprecate), write-conflict detection (`write_conflict_detect`, OFF),
+  and `recall_active_only` (**ON** — excludes deprecated/superseded from recall;
+  poisoning ASR 1.00→0.00). Three append-only audit ledgers.
+
+## [0.6.0] — 2026-05-29 — Wave 5: Retrieval Intelligence (Aetheryte II)
+
+### Added
+
+- Pattern completion (`recall_completion`, OFF), encoding-specificity re-rank
+  (`recall_context_match`, OFF), pattern-separation dedup-merge (`write_dedup_merge`,
+  **ON** — write amp 1.0→0.667), predictive prefetch (`recall_prefetch`, OFF).
+
+## [0.5.0] — 2026-05-29 — Wave 4: Forgetting as a Faculty
+
+### Added
+
+- FSRS/DSR forgetting (`forgetting_fsrs`, OFF), value-aware eviction, spaced
+  re-surfacing, Ricoeur-protected class, and the right-to-be-forgotten operator op
+  (`crystalium forget`, T0, audited — the one sanctioned hard-delete).
+
+## [0.4.0] — 2026-05-28 — Wave 3: The Dream Becomes Intelligent
+
+### Added
+
+- Prioritized replay (`dream_replay_evb`, OFF), CLS interleaving (`dream_interleave`,
+  OFF), synaptic-tagging consolidation (`dream_stc`, OFF).
+
+## [0.3.0] — 2026-05-28 — Wave 2: Importance as Expected Value of Backup
+
+### Added
+
+- EVB importance scorer (`evb_enabled`, OFF; Gain×Need, Mattar & Daw 2018) + the
+  `memory_dynamics` persistence column.
+
+## [0.2.0] — 2026-05-28 — Wave 1: Foundations & Eval Spine
+
+### Added
+
+- Container-first PreToolUse hook, the `/prepush` command, the evals/canary spine, and
+  the `memory_dynamics` schema field.
+
 ## [0.1.0] — 2026-05-28
 
 ### Added

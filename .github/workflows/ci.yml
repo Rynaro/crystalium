@@ -43,6 +43,32 @@ jobs:
             crystalium:dev \
             pytest tests/ -v --tb=short -p no:cacheprovider
 
+  conformance:
+    name: conformance suite (G1-G8 + invariants)
+    runs-on: ubuntu-latest
+    env:
+      CRYSTALIUM_SKIP_SLOW: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        run: docker compose build crystalium
+
+      # W8: "green == conformant". BLOCKING (no continue-on-error) — a regression in
+      # any mechanical invariant (tier×layer×op, path-escape, rate-limit, ECL
+      # integrity, MIN-tier propagation, never-hard-delete + RTBF, working-set cap)
+      # fails the PR check, not just the undifferentiated full-suite run.
+      - name: Run conformance suite
+        run: |
+          docker run --rm \
+            -e CRYSTALIUM_SKIP_SLOW=1 \
+            crystalium:dev \
+            pytest -m conformance -v --tb=short -p no:cacheprovider
+
   schema-validate:
     name: JSON schema validation
     runs-on: ubuntu-latest

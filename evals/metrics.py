@@ -277,6 +277,15 @@ def attack_success_rate(outcomes: Sequence[bool]) -> float | None:
     return sum(1 for o in outcomes if o) / total
 
 
+def availability(successes: int, attempts: int) -> float | None:
+    """W8 SLO: successes / attempts (recall availability; target >= 0.99). None when
+    there were no attempts (undefined). A rejected enforcement decision counts as a
+    success — the substrate responded; only an error is a failed attempt."""
+    if attempts <= 0:
+        return None
+    return successes / attempts
+
+
 def cache_hit_rate(hits: int, misses: int) -> float | None:
     """hits / (hits + misses). None when the cache was never queried (undefined).
 

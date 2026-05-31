@@ -76,3 +76,41 @@ def test_tool_span_is_noop_safe():
     # Must not raise whether or not an OTel backend is configured.
     with telemetry.tool_span("crystalium.recall", tier="T1") as span:
         _ = span  # may be None (no-op fallback) — that's fine
+
+
+# ---------------------------------------------------------------------------
+# W8 availability SLO
+# ---------------------------------------------------------------------------
+
+
+def test_availability_none_with_no_attempts():
+    assert telemetry.availability("crystalium.recall") is None
+
+
+def test_availability_counts_ok_and_rejected_as_success():
+    # ok + pending + rejected all mean the substrate responded; only error fails.
+    telemetry.record_call(tool="crystalium.recall", latency_ms=1.0, result="ok")
+    telemetry.record_call(tool="crystalium.recall", latency_ms=1.0, result="rejected")
+    telemetry.record_call(tool="crystalium.recall", latency_ms=1.0, result="error")
+    telemetry.record_call(tool="crystalium.recall", latency_ms=1.0, result="ok")
+    assert telemetry.availability("crystalium.recall") == 0.75   # 3 of 4
+
+
+def test_availability_all_ok_is_one():
+    for _ in range(10):
+        telemetry.record_call(tool="crystalium.recall", latency_ms=1.0, result="ok")
+    assert telemetry.availability("crystalium.recall") == 1.0
+
+
+def test_panel_includes_recall_availability():
+    telemetry.record_call(tool="crystalium.recall", latency_ms=1.0, result="ok")
+    # emit_latency_panel logs availability; the function itself returns the latency
+    # panel — assert availability is computable post-call.
+    telemetry.emit_latency_panel()
+    assert telemetry.availability("crystalium.recall") == 1.0
+
+
+def test_pure_availability_metric():
+    from evals.metrics import availability as avail_metric
+    assert avail_metric(99, 100) == 0.99
+    assert avail_metric(0, 0) is None
