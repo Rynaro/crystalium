@@ -320,3 +320,55 @@ resolution policy. Ships gated.
 **Net W6 flip:** `recall_active_only` → ON (gate PASS + correctness, canary-clean);
 `drift_detect` + `write_conflict_detect` → stay OFF (honest nulls; faculties ship
 gated).
+
+## W8 1.0 freeze — honest canary repair + availability SLO
+
+### Canary A/B (`evals/ab_memory_onoff.py`) — REPAIRED, honest result: memory helps, below 0.80
+
+The v0.1→v0.7 canary reported `delta = -0.75` and was UNMEETABLE: (A) the off-arm
+missions passed *vacuously* (`passed=True` / `mrr==0`) so `pass_rate_off` was pinned
+to 1.0 and `delta = on - off` could never reach 0.80; (B) harness bit-rot
+(`_get_crystal` read a non-existent `enforcement._store`); (C) `run_all` ran each arm
+*twice* on separate random-project stores, so the headline reflected a different
+execution than the displayed per-mission results; (D) the AB missions committed lone
+T1 *semantic* facts that the promotion gate correctly held PENDING (never recallable).
+
+W8 repaired all four HONESTLY (no metric massaging): off-arm now uses the SAME
+memory-dependent criterion as on-arm; commits go to EPISODIC (recallable); each
+mission is isolated in its own project (deterministic); the headline is computed from
+the single run; the gate is restated to the faithful "memory-on ≥0.80 AND beats off".
+
+| metric | before (v0.1–0.7) | after (W8) |
+|---|---|---|
+| pass_rate_off (vacuous?) | 1.00 (vacuous) | **0.00** (genuine — memory-off fails) |
+| pass_rate_on | 0.25 (+ harness bugs) | **0.75** (CAN-1/3/5 pass) |
+| delta | −0.75 | **+0.75** |
+| beats_off | no | **yes** |
+| headline_pass (≥0.80) | false | **false** |
+
+**Honest verdict: memory now demonstrably helps — a full reversal (−0.75 → +0.75),
+memory-on beats memory-off on 3 of 4 memory-dependent missions while memory-off
+fails all 4. It lands BELOW the 0.80 bar by exactly one mission (CAN-4).** This is
+reported as-is, NOT massaged to clear the gate.
+
+**[GAP] CAN-4 — recall-after-bi-temporal-update.** CAN-4 commits a fact, `update`s it
+(supersede works: `t_valid_to` set, no hard-delete ✓), then recalls — but the NEW
+crystal is not resurfaced. Root cause: the bi-temporal update path (`_handle_update`)
+inserts the new revision via the relational store directly and does NOT re-embed it
+into the vector index, so the updated crystal is missing from dense recall (and the
+superseded original is correctly excluded by `recall_active_only`). A real update→
+recall re-index gap; fix deferred (post-1.0) — not forced green here.
+
+### Availability SLO (Extended-Mind parity) — availability PASS, p95 marginally over [PROXY]
+
+Measured on a 50-commit / 200-recall synthetic workload (real bge-m3, warm):
+
+| SLO axis | target | observed | verdict |
+|---|---|---|---|
+| recall availability (success/attempts) | ≥ 99% | **100%** | PASS |
+| recall p95 latency | < 200 ms | **~205 ms** | marginally OVER |
+
+Availability meets the target. recall p95 (~205 ms) is **embedder-bound** — the warm
+p95 is essentially one bge-m3 query-embedding forward pass on CPU; it marginally
+exceeds the 200 ms target. Recorded honestly (the target is not moved to pass).
+**[PROXY]** both values are from a synthetic harness, not production traffic.
