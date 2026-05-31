@@ -319,21 +319,22 @@ def test_default_caller_constant_matches_expected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_tool_manifest_returns_7_tools() -> None:
-    """build_tool_manifest() must return exactly 7 tool definitions."""
+def test_build_tool_manifest_returns_8_tools() -> None:
+    """build_tool_manifest() must return exactly 8 tool definitions (W7: +ingest)."""
     from crystalium.server import build_tool_manifest
     tools = build_tool_manifest()
-    assert len(tools) == 7
+    assert len(tools) == 8
 
 
 def test_build_tool_manifest_has_required_tool_names() -> None:
-    """All 7 tool names from spec.yaml §tool_surface are present."""
+    """All 8 tool names are present (the 7 original + W7 crystalium.ingest)."""
     from crystalium.server import build_tool_manifest
     tools = build_tool_manifest()
     names = {t["name"] for t in tools}
     expected = {
         "crystalium.recall",
         "crystalium.commit",
+        "crystalium.ingest",
         "crystalium.update",
         "crystalium.skill_invoke",
         "crystalium.plan_checkpoint",

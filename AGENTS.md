@@ -1,3 +1,16 @@
+---
+name: crystalium
+version: 0.8.0
+eiis_version: "1.4"
+ecl_version: "2.0"
+role: shared-memory-substrate
+handoffs:
+  # CRYSTALIUM is the bidirectional shared substrate: every roster Eidolon both
+  # writes handoff artifacts into it (upstream) and recalls them from it (downstream).
+  upstream: [atlas, spectra, apivr-delta, forge, idg, vigil]
+  downstream: [atlas, spectra, apivr-delta, forge, idg, vigil]
+---
+
 # AGENTS.md — Development Standard
 
 This file defines the development standard for CRYSTALIUM. All work on this repo follows the open-standard pattern: build commands, test commands, lint, project structure, code style, and commit conventions are uniform across all Eidolons.

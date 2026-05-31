@@ -40,7 +40,7 @@ set -euo pipefail
 
 EIIS_VERSION_VALUE="1.4"
 ECL_VERSION_VALUE="2.0"
-CRYSTALIUM_VERSION="0.1.0"
+CRYSTALIUM_VERSION="0.8.0"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -52,6 +52,9 @@ PROFILE="local"
 TARGET=""
 FORCE=0
 NON_INTERACTIVE=0
+MANIFEST_ONLY=0
+HOSTS=""
+HOSTS_DIR=""
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -77,7 +80,24 @@ while [ $# -gt 0 ]; do
             ;;
         --target)
             TARGET="${2:-}"
+            [ "${TARGET}" = "default" ] && TARGET=""   # keyword form -> default resolution
             shift 2
+            ;;
+        --hosts)
+            HOSTS="${2:-}"
+            shift 2
+            ;;
+        --hosts-dir)
+            HOSTS_DIR="${2:-}"
+            shift 2
+            ;;
+        --manifest-only)
+            MANIFEST_ONLY=1
+            shift
+            ;;
+        --version)
+            echo "${CRYSTALIUM_VERSION}"
+            exit 0
             ;;
         --force)
             FORCE=1
@@ -194,6 +214,12 @@ copy_if_changed() {
         fi
     fi
 
+    # --manifest-only: register the file in the inventory but never copy (re-emit
+    # the manifest for an existing target without touching staged files).
+    if [ "${MANIFEST_ONLY}" -eq 1 ]; then
+        should_copy=0
+    fi
+
     if [ "${should_copy}" -eq 1 ]; then
         cp "${src}" "${dst}"
         say "wrote ${dst}"
@@ -214,10 +240,24 @@ copy_if_changed() {
 # Ensure target directory exists
 # ---------------------------------------------------------------------------
 
+# Interactive safety prompt: when reconciling a non-empty existing target, confirm
+# before proceeding — UNLESS --non-interactive / --force, or stdin is not a TTY
+# (CI, pipes, tests). This is the one place --non-interactive is honored.
+if [ "${MANIFEST_ONLY}" -eq 0 ] && [ "${NON_INTERACTIVE}" -eq 0 ] && [ "${FORCE}" -eq 0 ] \
+   && [ -t 0 ] && [ -d "${TARGET}" ] && [ -n "$(ls -A "${TARGET}" 2>/dev/null)" ]; then
+    printf '[crystalium install] Target %s exists; reconcile (sweep removes non-canonical files)? [y/N] ' "${TARGET}" >&2
+    read -r _ANS
+    case "${_ANS}" in
+        y|Y|yes|YES) ;;
+        *) die "aborted by operator (use --non-interactive or --force to skip this prompt)";;
+    esac
+fi
+
 mkdir -p "${TARGET}"
 TARGET_ABS="$(cd "${TARGET}" && pwd)"
 
 say "Installing CRYSTALIUM v${CRYSTALIUM_VERSION} → ${TARGET_ABS}"
+[ "${MANIFEST_ONLY}" -eq 1 ] && say "manifest-only mode: re-emitting install.manifest.json (no file copy/sweep)"
 say "EIIS_VERSION=${EIIS_VERSION_VALUE}  ECL_VERSION=${ECL_VERSION_VALUE}  profile=${PROFILE}"
 
 # ---------------------------------------------------------------------------
@@ -287,8 +327,9 @@ if [ -d "${SCHEMAS_SRC_DIR}" ]; then
     for schema_src in "${SCHEMAS_SRC_DIR}"/*.json; do
         [ -f "${schema_src}" ] || continue
         schema_name="$(basename "${schema_src}")"
-        # install.manifest.v1.json gets role="other" (vendored schema per §1.5)
-        schema_role="other"
+        # Staged JSON schemas carry role="schema" (the install.manifest.v1.json
+        # files_written role enum; W7 fix — was the out-of-enum "other").
+        schema_role="schema"
         schema_dst="${TARGET}/schemas/${schema_name}"
         copy_if_changed "${schema_src}" "${schema_dst}" "${schema_role}"
     done
@@ -340,7 +381,10 @@ canonical_inventory_sweep() {
     return 0
 }
 
-canonical_inventory_sweep "${TARGET_ABS}"
+# --manifest-only never sweeps (it must not delete staged files).
+if [ "${MANIFEST_ONLY}" -eq 0 ]; then
+    canonical_inventory_sweep "${TARGET_ABS}"
+fi
 
 # ---------------------------------------------------------------------------
 # §3 — Generate install.manifest.json
@@ -361,12 +405,13 @@ for entry in "${FILES_WRITTEN_JSON[@]}"; do
     FW_IDX=$((FW_IDX + 1))
 done
 
-# Add manifest itself to files_written[] (role="manifest")
-MANIFEST_SHA=""  # computed below after write
+# Add manifest itself to files_written[] (role="manifest"). The manifest cannot
+# hash itself (written last), so the optional sha256 field is OMITTED rather than
+# emitted empty — an empty string would fail the schema's 64-hex pattern (W7 fix).
 if [ -n "${FW_ARRAY}" ]; then
     FW_ARRAY="${FW_ARRAY},"
 fi
-FW_ARRAY="${FW_ARRAY}{\"path\":\"install.manifest.json\",\"role\":\"manifest\",\"sha256\":\"\"}"
+FW_ARRAY="${FW_ARRAY}{\"path\":\"install.manifest.json\",\"role\":\"manifest\"}"
 
 # Write install timestamp to <data_dir>/install.ts (G5 human-confirm window)
 DATA_DIR="${HOME}/.crystalium"
@@ -378,6 +423,77 @@ if [ ! -f "${INSTALL_TS_PATH}" ] || [ "${FORCE}" -eq 1 ]; then
     say "wrote install.ts → ${INSTALL_TS_PATH}"
 fi
 
+# Active roster from --members (W7 partial-team/standalone). Empty -> standalone.
+ROSTER_JSON="[]"
+if [ -n "${MEMBERS}" ]; then
+    ROSTER_JSON="["
+    _RFIRST=1
+    _OLD_IFS="${IFS}"; IFS=','
+    for _m in ${MEMBERS}; do
+        _m="$(echo "${_m}" | sed 's/^ *//;s/ *$//')"
+        [ -z "${_m}" ] && continue
+        [ "${_RFIRST}" -eq 0 ] && ROSTER_JSON="${ROSTER_JSON},"
+        ROSTER_JSON="${ROSTER_JSON}\"${_m}\""
+        _RFIRST=0
+    done
+    IFS="${_OLD_IFS}"
+    ROSTER_JSON="${ROSTER_JSON}]"
+fi
+if [ -n "${SCOPE}" ]; then
+    SCOPE_JSON="\"${SCOPE}\""
+else
+    SCOPE_JSON="null"
+fi
+
+# ---------------------------------------------------------------------------
+# Host MCP wiring (W7) — idempotent upsert of a `crystalium` server entry into a
+# host's MCP config. JSON merge runs via python3 (already a dependency of this
+# script's sha fallback) so a second run is byte-identical (sorted keys). Host
+# configs live OUTSIDE the install target — not swept, not in files_written.
+# ---------------------------------------------------------------------------
+
+wire_host() {
+    # wire_host <host> <base_dir_or_empty>
+    local host="$1"
+    local base="$2"
+    local cfg key
+    case "${host}" in
+        claude-code) cfg="${base:-.}/.mcp.json"; key="mcpServers" ;;
+        cursor)      cfg="${base:-${HOME}}/.cursor/mcp.json"; key="mcpServers" ;;
+        copilot)     cfg="${base:-.}/.vscode/mcp.json"; key="servers" ;;
+        opencode)    cfg="${base:-${HOME}}/.config/opencode/config.json"; key="mcp" ;;
+        *) warn "unknown host '${host}' — skipping"; return 0 ;;
+    esac
+    mkdir -p "$(dirname "${cfg}")"
+    CRYS_REPO="${SCRIPT_DIR}" python3 - "${cfg}" "${key}" <<'PY'
+import json, os, sys
+cfg, key = sys.argv[1], sys.argv[2]
+repo = os.environ["CRYS_REPO"]
+try:
+    with open(cfg) as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        data = {}
+except (FileNotFoundError, ValueError):
+    data = {}
+entry = {
+    "command": "docker",
+    "args": ["compose", "-f", os.path.join(repo, "docker-compose.yml"),
+             "run", "--rm", "-i", "crystalium", "python", "-m", "crystalium", "serve"],
+    "type": "stdio",
+}
+servers = data.get(key)
+if not isinstance(servers, dict):
+    servers = {}
+servers["crystalium"] = entry          # upsert (idempotent)
+data[key] = servers
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2, sort_keys=True)
+    f.write("\n")
+PY
+    say "wired host ${host} -> ${cfg}"
+}
+
 # Build the manifest JSON
 MANIFEST_JSON="{
   \"eiis_version\": \"${EIIS_VERSION_VALUE}\",
@@ -386,7 +502,9 @@ MANIFEST_JSON="{
   \"install_ts\": \"${INSTALL_TS}\",
   \"profile\": \"${PROFILE}\",
   \"canonical_inventory_strict\": true,
-  \"ecl_version_emitted\": \"${ECL_VERSION_VALUE}\",
+  \"ecl_version\": \"${ECL_VERSION_VALUE}\",
+  \"roster\": ${ROSTER_JSON},
+  \"scope\": ${SCOPE_JSON},
   \"files_written\": [${FW_ARRAY}]
 }"
 
@@ -406,6 +524,19 @@ fi
 if [ "${MANIFEST_CHANGED}" -eq 1 ]; then
     printf '%s\n' "${MANIFEST_JSON}" > "${MANIFEST_PATH}"
     say "wrote install.manifest.json"
+fi
+
+# Host wiring (opt-in via --hosts). "auto" wires all four supported hosts.
+if [ -n "${HOSTS}" ] && [ "${MANIFEST_ONLY}" -eq 0 ]; then
+    HOSTS_LIST="${HOSTS}"
+    [ "${HOSTS}" = "auto" ] && HOSTS_LIST="claude-code,cursor,copilot,opencode"
+    _OLD_IFS="${IFS}"; IFS=','
+    for _h in ${HOSTS_LIST}; do
+        _h="$(echo "${_h}" | sed 's/^ *//;s/ *$//')"
+        [ -z "${_h}" ] && continue
+        wire_host "${_h}" "${HOSTS_DIR}"
+    done
+    IFS="${_OLD_IFS}"
 fi
 
 ok "Installation complete."

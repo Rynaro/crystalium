@@ -162,6 +162,34 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "crystalium.ingest",
+            "description": (
+                "Ingest a roster ECL handoff envelope (v1.x or v2.x) as a crystal. "
+                "Maps any artifact to crystal.v1 (native payload preserved verbatim in "
+                "encoding_context); commits THROUGH the chokepoint so MIN-trust is "
+                "preserved. T3/tool-origin artifacts land Episodic-quarantined; never "
+                "laundered to a higher tier."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["envelope", "payload"],
+                "properties": {
+                    "envelope": {
+                        "type": "object",
+                        "description": "Inbound ECL envelope (11 fields; envelope_version 1.x/2.x).",
+                    },
+                    "payload": {
+                        "description": "The artifact payload the envelope wraps (object or string).",
+                    },
+                    "payload_encoding": {
+                        "type": "string",
+                        "enum": ["utf8", "base64", "json"],
+                        "description": "How to decode a string payload (default utf8).",
+                    },
+                },
+            },
+        },
+        {
             "name": "crystalium.update",
             "description": (
                 "Bi-temporal update: invalidate old crystal (t_valid_to=now, superseded_by=new_id), "
@@ -548,6 +576,16 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "commit-result"
 
+                elif name == "crystalium.ingest":
+                    result = _handle_ingest(
+                        arguments, episodic, semantic, procedural, execution,
+                        recall_cache=execution.recall_cache,
+                    )
+                    layer_hint = result.get("layer")
+                    scheduler.record_activity()
+                    result_bytes = json.dumps(result, default=str).encode()
+                    artifact_kind = "ingest-receipt"
+
                 elif name == "crystalium.update":
                     layer_hint = arguments.get("layer")
                     result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, relational, caller_tier)
@@ -789,6 +827,96 @@ def _handle_commit(
             f"Unknown layer {layer!r}. Must be one of: episodic, semantic, procedural, execution.",
             reason_code="UNKNOWN_LAYER",
         )
+
+
+def _handle_ingest(
+    args: dict[str, Any],
+    episodic: EpisodicLayer,
+    semantic: SemanticLayer,
+    procedural: ProceduralLayer,
+    execution: ExecutionLayer,
+    recall_cache: Any = None,
+) -> dict[str, Any]:
+    """Ingest a roster ECL handoff envelope as a crystal (W7).
+
+    Validates the inbound envelope (version-tolerant), maps it to a crystal.v1
+    payload via the generic adapter (native artifact preserved verbatim), then
+    commits THROUGH the existing layer.commit — so the chokepoint (rate-limit +
+    tier + ceiling) fires and MIN-trust is preserved. A T3 artifact lands episodic-
+    quarantined and is never laundered to a higher tier.
+    """
+    import datetime as _dt
+
+    from crystalium.ecl import UnsupportedEnvelopeVersion, validate_inbound_envelope
+    from crystalium.enforcement import CrystaliumEnforcementError
+    from crystalium.ingest_adapter import map_envelope_to_crystal, resolve_caller_tier
+
+    envelope = args.get("envelope")
+    if not isinstance(envelope, dict):
+        raise CrystaliumEnforcementError(
+            "ingest requires an 'envelope' object.", reason_code="INGEST_BAD_ENVELOPE"
+        )
+    payload = args.get("payload")
+    payload_encoding = args.get("payload_encoding", "utf8")
+
+    try:
+        validate_inbound_envelope(envelope)
+    except UnsupportedEnvelopeVersion as exc:
+        raise CrystaliumEnforcementError(
+            str(exc), reason_code="UNSUPPORTED_ENVELOPE_VERSION"
+        ) from exc
+    except ValueError as exc:
+        raise CrystaliumEnforcementError(
+            f"malformed inbound envelope: {exc}", reason_code="INGEST_BAD_ENVELOPE"
+        ) from exc
+
+    caller_tier = resolve_caller_tier(envelope)
+    layer, crystal_payload = map_envelope_to_crystal(
+        envelope, payload, caller_tier, payload_encoding
+    )
+
+    prov = crystal_payload.get("provenance", {}) or {}
+    created_raw = prov.get("created_at")
+    if isinstance(created_raw, str):
+        try:
+            created_at = _dt.datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+        except ValueError:
+            created_at = _dt.datetime.now(_dt.timezone.utc)
+    else:
+        created_at = _dt.datetime.now(_dt.timezone.utc)
+    provenance = Provenance(
+        source=prov.get("source", "unverified_agent"),
+        author_agent=prov.get("author_agent"),
+        task_id=prov.get("task_id"),
+        created_at=created_at,
+    )
+
+    # W5 staleness guard: a write into a project invalidates its cached recalls.
+    if recall_cache is not None:
+        project = (crystal_payload.get("scope") or {}).get("project")
+        if project:
+            recall_cache.invalidate_project(project)
+
+    if layer == "semantic":
+        commit_result = semantic.commit(payload=crystal_payload, provenance=provenance, caller_tier=caller_tier)
+    elif layer == "procedural":
+        commit_result = procedural.commit(payload=crystal_payload, provenance=provenance, caller_tier=caller_tier)
+    elif layer == "execution":
+        commit_result = execution.checkpoint(state=crystal_payload, caller_tier=caller_tier)
+    else:  # episodic (default; only layer accepting T3 -> quarantined)
+        commit_result = episodic.commit(payload=crystal_payload, provenance=provenance, caller_tier=caller_tier)
+
+    return {
+        "status": "ingested",
+        "id": commit_result.get("id"),
+        "layer": layer,
+        "trust_tier": str(caller_tier),
+        "validation_state": commit_result.get("validation_state"),
+        "source_eidolon": provenance.author_agent,
+        "artifact_kind": (envelope.get("artifact", {}) or {}).get("kind"),
+        "envelope_version": str(envelope.get("envelope_version", "")),
+        "commit_status": commit_result.get("status"),
+    }
 
 
 def _handle_update(
