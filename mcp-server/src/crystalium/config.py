@@ -278,7 +278,7 @@ class Config:
             completion_max_hops=_env_int("CRYSTALIUM_COMPLETION_MAX_HOPS", 2),
             completion_decay=_env_float("CRYSTALIUM_COMPLETION_DECAY", 0.5),
             recall_context_match=_env_bool("CRYSTALIUM_RECALL_CONTEXT_MATCH", False),
-            write_dedup_merge=_env_bool("CRYSTALIUM_WRITE_DEDUP_MERGE", False),
+            write_dedup_merge=_env_bool("CRYSTALIUM_WRITE_DEDUP_MERGE", True),
             sep_threshold=_env_float("CRYSTALIUM_SEP_THRESHOLD", 0.92),
             recall_prefetch=_env_bool("CRYSTALIUM_RECALL_PREFETCH", False),
             drift_detect=_env_bool("CRYSTALIUM_DRIFT_DETECT", False),
@@ -286,7 +286,7 @@ class Config:
             drift_tau_hi=_env_float("CRYSTALIUM_DRIFT_TAU_HI", 0.97),
             write_conflict_detect=_env_bool("CRYSTALIUM_WRITE_CONFLICT_DETECT", False),
             conflict_tau_lo=_env_float("CRYSTALIUM_CONFLICT_TAU_LO", 0.80),
-            recall_active_only=_env_bool("CRYSTALIUM_RECALL_ACTIVE_ONLY", False),
+            recall_active_only=_env_bool("CRYSTALIUM_RECALL_ACTIVE_ONLY", True),
         )
 
     @classmethod
