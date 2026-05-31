@@ -54,6 +54,7 @@ FORCE=0
 NON_INTERACTIVE=0
 MANIFEST_ONLY=0
 HOSTS=""
+HOSTS_DIR=""
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -84,6 +85,10 @@ while [ $# -gt 0 ]; do
             ;;
         --hosts)
             HOSTS="${2:-}"
+            shift 2
+            ;;
+        --hosts-dir)
+            HOSTS_DIR="${2:-}"
             shift 2
             ;;
         --manifest-only)
@@ -440,6 +445,55 @@ else
     SCOPE_JSON="null"
 fi
 
+# ---------------------------------------------------------------------------
+# Host MCP wiring (W7) — idempotent upsert of a `crystalium` server entry into a
+# host's MCP config. JSON merge runs via python3 (already a dependency of this
+# script's sha fallback) so a second run is byte-identical (sorted keys). Host
+# configs live OUTSIDE the install target — not swept, not in files_written.
+# ---------------------------------------------------------------------------
+
+wire_host() {
+    # wire_host <host> <base_dir_or_empty>
+    local host="$1"
+    local base="$2"
+    local cfg key
+    case "${host}" in
+        claude-code) cfg="${base:-.}/.mcp.json"; key="mcpServers" ;;
+        cursor)      cfg="${base:-${HOME}}/.cursor/mcp.json"; key="mcpServers" ;;
+        copilot)     cfg="${base:-.}/.vscode/mcp.json"; key="servers" ;;
+        opencode)    cfg="${base:-${HOME}}/.config/opencode/config.json"; key="mcp" ;;
+        *) warn "unknown host '${host}' — skipping"; return 0 ;;
+    esac
+    mkdir -p "$(dirname "${cfg}")"
+    CRYS_REPO="${SCRIPT_DIR}" python3 - "${cfg}" "${key}" <<'PY'
+import json, os, sys
+cfg, key = sys.argv[1], sys.argv[2]
+repo = os.environ["CRYS_REPO"]
+try:
+    with open(cfg) as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        data = {}
+except (FileNotFoundError, ValueError):
+    data = {}
+entry = {
+    "command": "docker",
+    "args": ["compose", "-f", os.path.join(repo, "docker-compose.yml"),
+             "run", "--rm", "-i", "crystalium", "python", "-m", "crystalium", "serve"],
+    "type": "stdio",
+}
+servers = data.get(key)
+if not isinstance(servers, dict):
+    servers = {}
+servers["crystalium"] = entry          # upsert (idempotent)
+data[key] = servers
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2, sort_keys=True)
+    f.write("\n")
+PY
+    say "wired host ${host} -> ${cfg}"
+}
+
 # Build the manifest JSON
 MANIFEST_JSON="{
   \"eiis_version\": \"${EIIS_VERSION_VALUE}\",
@@ -470,6 +524,19 @@ fi
 if [ "${MANIFEST_CHANGED}" -eq 1 ]; then
     printf '%s\n' "${MANIFEST_JSON}" > "${MANIFEST_PATH}"
     say "wrote install.manifest.json"
+fi
+
+# Host wiring (opt-in via --hosts). "auto" wires all four supported hosts.
+if [ -n "${HOSTS}" ] && [ "${MANIFEST_ONLY}" -eq 0 ]; then
+    HOSTS_LIST="${HOSTS}"
+    [ "${HOSTS}" = "auto" ] && HOSTS_LIST="claude-code,cursor,copilot,opencode"
+    _OLD_IFS="${IFS}"; IFS=','
+    for _h in ${HOSTS_LIST}; do
+        _h="$(echo "${_h}" | sed 's/^ *//;s/ *$//')"
+        [ -z "${_h}" ] && continue
+        wire_host "${_h}" "${HOSTS_DIR}"
+    done
+    IFS="${_OLD_IFS}"
 fi
 
 ok "Installation complete."
