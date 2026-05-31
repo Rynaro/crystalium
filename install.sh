@@ -464,6 +464,13 @@ wire_host() {
         opencode)    cfg="${base:-${HOME}}/.config/opencode/config.json"; key="mcp" ;;
         *) warn "unknown host '${host}' — skipping"; return 0 ;;
     esac
+    # The JSON merge needs python3. Guard it: on a python3-less host, skip the
+    # automatic merge with a clear pointer rather than failing silently (battle-test
+    # G1). The rest of the install does not require python3.
+    if ! command -v python3 >/dev/null 2>&1; then
+        warn "host wiring for '${host}' skipped: python3 not found (needed to merge ${cfg}). See hosts/${host}.md to wire manually."
+        return 0
+    fi
     mkdir -p "$(dirname "${cfg}")"
     CRYS_REPO="${SCRIPT_DIR}" python3 - "${cfg}" "${key}" <<'PY'
 import json, os, sys

@@ -442,7 +442,10 @@ class SemanticLayer:
             # 3. Fetch existing
             existing = self.relational.get_crystal(record_id)
             if existing is None:
-                raise KeyError(f"Crystal not found: {record_id!r}")
+                from crystalium.enforcement import CrystaliumEnforcementError
+                raise CrystaliumEnforcementError(
+                    f"Crystal not found: {record_id!r}", reason_code="CRYSTAL_NOT_FOUND"
+                )
 
             now = datetime.now(timezone.utc)
             new_id = str(uuid.uuid4())
