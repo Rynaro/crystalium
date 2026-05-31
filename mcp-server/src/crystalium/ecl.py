@@ -346,3 +346,34 @@ def validate_envelope(envelope: dict[str, Any]) -> None:
         raise ValueError(
             "ECL envelope integrity.value does not match artifact.sha256 (G7 violation)."
         )
+
+
+# Inbound roster envelopes are version-tolerant (W7): the vendored roster fixtures
+# are ECL v1.0 while CRYSTALIUM emits v2.0. Ingest accepts either major line; a
+# missing or other version is rejected so an unparseable artifact cannot be stored.
+_SUPPORTED_INBOUND_MAJORS: frozenset[str] = frozenset({"1", "2"})
+
+
+class UnsupportedEnvelopeVersion(ValueError):
+    """Inbound ECL envelope declares a version CRYSTALIUM cannot ingest (W7)."""
+
+
+def validate_inbound_envelope(envelope: dict[str, Any]) -> None:
+    """Validate an INBOUND roster ECL envelope for ingestion (W7).
+
+    Version-tolerant: accepts envelope_version on the 1.x or 2.x line (vendored
+    roster fixtures are v1.0; CRYSTALIUM emits v2.0). Every other structural check
+    is identical to validate_envelope (11 fields + artifact sub-fields + from/to +
+    G7 integrity == artifact.sha256).
+
+    Raises:
+        UnsupportedEnvelopeVersion: version absent or not on the 1.x/2.x line.
+        ValueError: any other structural problem (delegated to validate_envelope).
+    """
+    version = str(envelope.get("envelope_version", "")).strip()
+    major = version.split(".")[0] if version else ""
+    if major not in _SUPPORTED_INBOUND_MAJORS:
+        raise UnsupportedEnvelopeVersion(
+            f"Unsupported ECL envelope_version {version!r}; ingest accepts 1.x or 2.x."
+        )
+    validate_envelope(envelope)
