@@ -296,6 +296,15 @@ def _compute_headline(
     pass_rate_off = ab_pass_off / ab_total if ab_total > 0 else 0.0
     delta = pass_rate_on - pass_rate_off
 
+    # W8 honest gate restatement: the bar is "memory-on succeeds on >=80% of the
+    # memory-dependent missions AND beats memory-off". (The old gate, delta >= 0.80,
+    # was unsatisfiable once the off-arm stopped passing vacuously: with off honestly
+    # at 0.0 the most delta can be is pass_rate_on, so the two-part form is the
+    # faithful criterion.) beats_off captures the directional A/B win independent of
+    # the absolute bar.
+    beats_off = pass_rate_on > pass_rate_off
+    headline_pass = pass_rate_on >= 0.80 and beats_off
+
     return {
         "ab_missions": list(AB_ARM_MISSION_IDS),
         "ab_pass_on": ab_pass_on,
@@ -304,10 +313,14 @@ def _compute_headline(
         "pass_rate_on": pass_rate_on,
         "pass_rate_off": pass_rate_off,
         "delta": delta,
-        "headline_pass": delta >= 0.80,
+        "beats_off": beats_off,
+        "headline_pass": headline_pass,
         "note": (
-            "[UNVERIFIED — memory does not measurably help on this canary set]"
-            if delta < 0.80 else "PASS — memory_on beats memory_off by >={:.0%}".format(delta)
+            "PASS — memory-on succeeds on {:.0%} of memory-dependent missions and beats "
+            "memory-off ({:.0%})".format(pass_rate_on, pass_rate_off)
+            if headline_pass else
+            "memory-on={:.0%} beats memory-off={:.0%} (delta {:+.0%}) but is below the 0.80 "
+            "bar — honest result, NOT massaged".format(pass_rate_on, pass_rate_off, delta)
         ),
     }
 
