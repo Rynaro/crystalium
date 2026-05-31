@@ -351,8 +351,14 @@ _MATRIX: dict[tuple[str, str], dict[Tier, str]] = {
     ("execution", "review"): {Tier.T0: "allow", Tier.T1: "deny", Tier.T2: "deny", Tier.T3: "deny"},
 }
 
-# Make the matrix immutable at the module level
-# (can't frozendict without a dep; we freeze by convention + test coverage)
+# Make the matrix immutable at BOTH levels (battle-test hardening). "One chokepoint"
+# is undermined if in-process code (a compromised dep / skill) can mutate the matrix
+# to open laundering, e.g. _MATRIX[("semantic","commit")][Tier.T3] = "allow". A
+# top-level MappingProxyType alone leaves the inner per-tier dicts writable, so wrap
+# each inner dict too. Tier rule values are plain strings (already immutable).
+from types import MappingProxyType as _MappingProxyType  # noqa: E402
+
+_MATRIX = _MappingProxyType({_k: _MappingProxyType(_v) for _k, _v in _MATRIX.items()})
 
 
 # ---------------------------------------------------------------------------

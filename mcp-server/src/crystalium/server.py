@@ -768,7 +768,12 @@ def _handle_recall(
         sensitivity_tag=raw_scope.get("sensitivity_tag"),
     )
     query = args.get("query", "")
-    k = int(args.get("k", 10))
+    # Battle-test fix: clamp k to a non-negative int (a negative k slices the
+    # candidate list from the tail — silent mis-ranking); default 10 on garbage.
+    try:
+        k = max(0, int(args.get("k", 10)))
+    except (TypeError, ValueError):
+        k = 10
     layers = args.get("layers")
 
     result = aetheryte.recall(
@@ -1017,6 +1022,21 @@ def _handle_update(
         # Write new revision first, then invalidate old (bi-temporal, P0-5)
         relational.insert_crystal(new_record)
         relational.mark_superseded(crystal_id, new_id, now)
+
+        # Battle-test fix (recall-after-update gap): re-embed the new revision into the
+        # shared vector store. Without this the new revision lives only in the
+        # relational/FTS index and is MISSING from dense recall — while
+        # recall_active_only excludes the superseded original — so an updated fact
+        # silently vanished from recall. Best-effort; null/SKIP_SLOW embedder -> no-op.
+        _vstore = getattr(episodic, "vector_store", None)
+        if _vstore is not None:
+            try:
+                _text = new_record.get("summary") or ""
+                _vec = _vstore.embed(_text)
+                if _vec:
+                    _vstore.upsert(crystal_id=new_id, vector=_vec, metadata={"layer": layer})
+            except Exception as _exc:  # noqa: BLE001
+                log.warning("update_vector_reindex_skipped", crystal_id=new_id, error=str(_exc))
 
         return {
             "status": "updated",

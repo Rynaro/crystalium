@@ -179,7 +179,14 @@ add_fw() {
     fi
     FILES_WRITTEN_PATHS+=("${rel_path}")
     local entry
-    entry="{\"path\":\"${rel_path}\",\"role\":\"${role}\",\"sha256\":\"${file_sha256}\"}"
+    if [ -n "${file_sha256}" ]; then
+        entry="{\"path\":\"${rel_path}\",\"role\":\"${role}\",\"sha256\":\"${file_sha256}\"}"
+    else
+        # OMIT sha256 when the file isn't on disk (e.g. --manifest-only over an
+        # unstaged target) — sha256 is optional in install.manifest.v1.json and the
+        # schema's 64-hex pattern rejects an empty string (battle-test MED fix).
+        entry="{\"path\":\"${rel_path}\",\"role\":\"${role}\"}"
+    fi
     FILES_WRITTEN_JSON+=("${entry}")
 }
 
@@ -464,6 +471,13 @@ wire_host() {
         opencode)    cfg="${base:-${HOME}}/.config/opencode/config.json"; key="mcp" ;;
         *) warn "unknown host '${host}' — skipping"; return 0 ;;
     esac
+    # The JSON merge needs python3. Guard it: on a python3-less host, skip the
+    # automatic merge with a clear pointer rather than failing silently (battle-test
+    # G1). The rest of the install does not require python3.
+    if ! command -v python3 >/dev/null 2>&1; then
+        warn "host wiring for '${host}' skipped: python3 not found (needed to merge ${cfg}). See hosts/${host}.md to wire manually."
+        return 0
+    fi
     mkdir -p "$(dirname "${cfg}")"
     CRYS_REPO="${SCRIPT_DIR}" python3 - "${cfg}" "${key}" <<'PY'
 import json, os, sys

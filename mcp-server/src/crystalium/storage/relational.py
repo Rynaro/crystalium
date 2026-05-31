@@ -21,6 +21,7 @@ Design notes:
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -166,6 +167,24 @@ CREATE TABLE IF NOT EXISTS conflicts (
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_FTS5_TOKEN = re.compile(r"\w+", re.UNICODE)
+
+
+def _fts5_query(raw: str) -> str | None:
+    """Make an FTS5-safe MATCH query from free text.
+
+    FTS5 treats ':' '-' '*' '"' '^' '(' and the bareword operators AND/OR/NOT/NEAR
+    as syntax, so passing a raw user query (e.g. "us-east-1", "auth: bcrypt", a file
+    path) straight to MATCH raises sqlite3.OperationalError and crashes recall. We
+    extract word tokens and quote each as a literal term (implicit-AND across terms,
+    preserving the prior multi-word semantics). Returns None when there is no
+    searchable token (caller returns [] rather than issuing an empty MATCH)."""
+    toks = _FTS5_TOKEN.findall(raw or "")
+    if not toks:
+        return None
+    return " ".join(f'"{t}"' for t in toks)
 
 
 def _to_json(obj: Any) -> str:
@@ -442,6 +461,12 @@ class RelationalStore:
         Returns:
             List of crystal dicts ordered by BM25 rank (best first).
         """
+        # Sanitize for FTS5 — a raw query with ':' '-' '*' quotes etc. crashes MATCH
+        # (sqlite3.OperationalError) and takes down recall. No searchable token ->
+        # no results (never issue an empty MATCH).
+        match_q = _fts5_query(query)
+        if match_q is None:
+            return []
         with self._connect() as conn:
             if layer_filter:
                 rows = conn.execute(
@@ -454,7 +479,7 @@ class RelationalStore:
                     ORDER BY bm25(crystals_fts)
                     LIMIT ?
                     """,
-                    (query, layer_filter, k),
+                    (match_q, layer_filter, k),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -466,7 +491,7 @@ class RelationalStore:
                     ORDER BY bm25(crystals_fts)
                     LIMIT ?
                     """,
-                    (query, k),
+                    (match_q, k),
                 ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
