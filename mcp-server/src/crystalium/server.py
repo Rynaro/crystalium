@@ -162,6 +162,34 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "crystalium.ingest",
+            "description": (
+                "Ingest a roster ECL handoff envelope (v1.x or v2.x) as a crystal. "
+                "Maps any artifact to crystal.v1 (native payload preserved verbatim in "
+                "encoding_context); commits THROUGH the chokepoint so MIN-trust is "
+                "preserved. T3/tool-origin artifacts land Episodic-quarantined; never "
+                "laundered to a higher tier."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["envelope", "payload"],
+                "properties": {
+                    "envelope": {
+                        "type": "object",
+                        "description": "Inbound ECL envelope (11 fields; envelope_version 1.x/2.x).",
+                    },
+                    "payload": {
+                        "description": "The artifact payload the envelope wraps (object or string).",
+                    },
+                    "payload_encoding": {
+                        "type": "string",
+                        "enum": ["utf8", "base64", "json"],
+                        "description": "How to decode a string payload (default utf8).",
+                    },
+                },
+            },
+        },
+        {
             "name": "crystalium.update",
             "description": (
                 "Bi-temporal update: invalidate old crystal (t_valid_to=now, superseded_by=new_id), "
