@@ -398,3 +398,37 @@ class TestSecurityFlags:
         assert cfg.drift_detect is True
         assert cfg.recall_active_only is True
         assert cfg.conflict_tau_lo == 0.85
+
+
+class TestDefaultParity:
+    """W8: the dataclass default and the from_env default must agree for EVERY
+    augment flag — otherwise an env-built config silently reverts an ablation flip
+    (the W8 C1 bug). Regression guard against future drift."""
+
+    _FLAGS = (
+        "evb_enabled", "dream_replay_evb", "dream_interleave", "dream_stc",
+        "forgetting_fsrs", "recall_completion", "recall_context_match",
+        "write_dedup_merge", "recall_prefetch", "drift_detect",
+        "write_conflict_detect", "recall_active_only",
+    )
+
+    def test_dataclass_default_equals_from_env_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Clear every CRYSTALIUM_* env var so from_env sees pure defaults.
+        for key in list(os.environ):
+            if key.startswith("CRYSTALIUM_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "p"))
+        dataclass_cfg = Config(data_dir=tmp_path / "d")
+        env_cfg = Config.from_env()
+        for flag in self._FLAGS:
+            assert getattr(dataclass_cfg, flag) == getattr(env_cfg, flag), (
+                f"default drift on {flag!r}: dataclass={getattr(dataclass_cfg, flag)} "
+                f"!= from_env={getattr(env_cfg, flag)}"
+            )
+
+    def test_winning_flips_default_on(self, tmp_path: Path) -> None:
+        # The two ablation winners must be ON by default in BOTH constructors.
+        assert Config(data_dir=tmp_path / "a").write_dedup_merge is True
+        assert Config(data_dir=tmp_path / "b").recall_active_only is True
