@@ -287,8 +287,9 @@ if [ -d "${SCHEMAS_SRC_DIR}" ]; then
     for schema_src in "${SCHEMAS_SRC_DIR}"/*.json; do
         [ -f "${schema_src}" ] || continue
         schema_name="$(basename "${schema_src}")"
-        # install.manifest.v1.json gets role="other" (vendored schema per §1.5)
-        schema_role="other"
+        # Staged JSON schemas carry role="schema" (the install.manifest.v1.json
+        # files_written role enum; W7 fix — was the out-of-enum "other").
+        schema_role="schema"
         schema_dst="${TARGET}/schemas/${schema_name}"
         copy_if_changed "${schema_src}" "${schema_dst}" "${schema_role}"
     done
@@ -386,7 +387,7 @@ MANIFEST_JSON="{
   \"install_ts\": \"${INSTALL_TS}\",
   \"profile\": \"${PROFILE}\",
   \"canonical_inventory_strict\": true,
-  \"ecl_version_emitted\": \"${ECL_VERSION_VALUE}\",
+  \"ecl_version\": \"${ECL_VERSION_VALUE}\",
   \"files_written\": [${FW_ARRAY}]
 }"
 
