@@ -65,6 +65,11 @@ jobs:
           context: .
           file: ./Dockerfile
           target: base
+          # CPU-only runtime image. GPU is buildable-only (make build VARIANT=gpu),
+          # not published: crystalium's single-text embedding workload sees ~zero
+          # GPU benefit and the CUDA wheel is amd64-only + ~6 GB to store/pull.
+          build-args: |
+            TORCH_VARIANT=cpu
           push: true
           tags: |
             ${{ steps.imgname.outputs.image }}:${{ steps.ref.outputs.version }}

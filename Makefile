@@ -8,15 +8,19 @@ COMPOSE = docker compose
 SERVICE = crystalium
 RUN     = $(COMPOSE) run --rm $(SERVICE)
 
+# Torch build variant: cpu (default, ~2 GB image) or gpu (~6 GB, amd64-only).
+# Usage: make build VARIANT=gpu
+VARIANT ?= cpu
+
 # ---------------------------------------------------------------------------
 # Primary targets
 # ---------------------------------------------------------------------------
 
 .PHONY: build test test-fast test-schemas test-storage test-w1 bench bench-axes lint typecheck clean shell help
 
-## build: Build the crystalium container image
+## build: Build the crystalium container image (VARIANT=cpu|gpu, default cpu)
 build:
-	$(COMPOSE) build $(SERVICE)
+	TORCH_VARIANT=$(VARIANT) $(COMPOSE) build $(SERVICE)
 
 ## test: Run the full test suite inside the container
 test:

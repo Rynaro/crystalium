@@ -6,6 +6,32 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-06-01
+
+### Added
+
+- **CPU/GPU build variants.** `ARG TORCH_VARIANT` (`make build VARIANT=gpu`) selects the
+  torch wheel. CPU is the default and the only published image; GPU (CUDA cu121, amd64-only)
+  is buildable-only, for hosts that do bulk re-embedding.
+
+### Changed
+
+- **Container image slimmed ~4.5×: 8.9 GB → 1.97 GB** (published runtime) / 2.13 GB (dev).
+  `torch` is now a direct dependency pinned to PyTorch's CPU index, dropping the ~4.4 GB
+  NVIDIA CUDA stack (`nvidia/*` + `triton`) that the single-text `sentence-transformers`
+  embedding workload never used. The published `ghcr.io/rynaro/crystalium:latest` is
+  CPU-only and runtime-only — the dev toolchain (pytest/mypy/ruff/jsonschema) is split into
+  the `dev` image stage and no longer shipped to consumers.
+- Runtime entrypoint is `uv run --no-sync`: the container runs the venv baked at build time
+  instead of re-resolving (and re-pulling the CUDA torch wheel) on every start. Dependency
+  changes now require an explicit `uv sync`.
+
+### Fixed
+
+- `docker compose run` / `make test` work without manual flags: the compose file declares an
+  anonymous `/app/.venv` volume (un-shadows the baked venv under the source bind-mount) and
+  sets `PYTHONPATH=/app/mcp-server/src:/app` (so the `evals`-importing tests collect).
+
 ## [1.0.0] — 2026-05-31
 
 ### Added
