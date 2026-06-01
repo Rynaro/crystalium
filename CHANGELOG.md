@@ -6,6 +6,23 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-06-01
+
+### Added
+
+- **Env-var caller identity (`CRYSTALIUM_CALLER_EIDOLON` / `CRYSTALIUM_CALLER_TIER`).** All six
+  Eidolons share one MCP server process; identity is correctly a process-level env var. Setting
+  `CRYSTALIUM_CALLER_EIDOLON=atlas` (or any roster member) resolves to tier T1, enabling writes
+  to the semantic/execution layers and `plan_checkpoint`/`plan_replan` that were previously
+  blocked under the T2 default. `CRYSTALIUM_CALLER_TIER` allows an explicit tier override.
+  Both follow the MIN-trust rule: `final = max(declared_tier, identity_tier)` so a low-trust
+  identity cannot be self-elevated via an explicit override.
+  The two env vars are documented in `config.py` alongside the other `CRYSTALIUM_*` vars.
+  The ingest path (`crystalium.ingest`) is unaffected — it calls `resolve_caller_tier(envelope)`
+  independently from `ingest_adapter` and never consults the process env, so a T3-origin
+  envelope cannot be laundered upward by the process identity.
+  Falls back to T2 when neither env var is set (D4 backward-compatible default preserved).
+
 ## [1.1.0] — 2026-06-01
 
 ### Added
