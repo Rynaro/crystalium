@@ -197,6 +197,14 @@ class TestPasswordPattern:
         result = redactor.redact("PASSWORD: Top$ecret", "secrets")
         assert "Top$ecret" not in result
 
+    def test_password_multiword_passphrase_fully_masked(self, redactor: Redactor) -> None:
+        # Battle-test fix (low): a space-containing passphrase previously leaked
+        # everything after the first word ("\\S+" stopped at the first space).
+        result = redactor.redact("password: correct horse battery staple", "secrets")
+        assert "correct" not in result
+        assert "horse battery staple" not in result
+        assert "«REDACTED:PASSWORD»" in result
+
 
 # ---------------------------------------------------------------------------
 # Sensitivity tag behavior

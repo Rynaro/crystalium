@@ -172,6 +172,31 @@ class TestConsolidate:
         gate.propose_semantic.assert_not_called()
         assert result is None
 
+    def test_consolidate_routes_ceiling_check_through_named_g4_guard(
+        self, tmp_relational: Any, tmp_enforcement: Enforcement
+    ) -> None:
+        """The G4 ceiling check in _consolidate must go through the named, tested
+        enforcement guard (not an inline `>` reimplementation), so the one path that
+        can actually launder trust into Semantic exercises the load-bearing mechanism.
+        """
+        from unittest.mock import MagicMock as _MM
+
+        from crystalium.trust import Tier as _T
+
+        gate = MagicMock()
+        worker = _make_worker(tmp_relational, tmp_enforcement, gate=gate)
+
+        # Spy on the named guard while delegating to the real implementation.
+        orig = worker.enforcement.assert_tier_within_layer_ceiling
+        spy = _MM(side_effect=orig)
+        worker.enforcement.assert_tier_within_layer_ceiling = spy  # type: ignore[method-assign]
+
+        worker._consolidate([_crystal(trust_tier="T3"), _crystal(trust_tier="T1")], datetime.now(_UTC))
+
+        # Called with the consolidated min-trust tier (T3) for the semantic layer.
+        spy.assert_called_once_with(_T.T3, "semantic")
+        gate.propose_semantic.assert_not_called()      # raised → skipped
+
     def test_consolidate_empty_cluster_returns_none(
         self, tmp_relational: Any, tmp_enforcement: Enforcement
     ) -> None:

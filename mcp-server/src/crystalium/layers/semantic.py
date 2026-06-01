@@ -202,9 +202,12 @@ class SemanticLayer:
                 "crystalium.commit", "semantic", caller_tier, "commit"
             )
 
-            # 3. D7 ceiling check: consolidated_tier must be <= T1 for Semantic
-            # The caller supplies the consolidated tier as caller_tier
-            # (the server or summarizer is responsible for computing min(inputs))
+            # 3. D7/G4 ceiling guard — defense-in-depth. On a DIRECT commit the tier
+            # matrix above (step 2) already denies T2/T3 for Semantic, so caller_tier
+            # is necessarily <= the T1 ceiling here and this never raises. It is kept
+            # as a cheap belt-and-suspenders re-check; the load-bearing G4 enforcement
+            # for MULTI-SOURCE consolidation (where a min-trust tier can exceed the
+            # ceiling) lives in DreamWorker._consolidate, which calls the same guard.
             self.enforcement.assert_tier_within_layer_ceiling(caller_tier, "semantic")
 
             prov_dict = (

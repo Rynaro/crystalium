@@ -73,6 +73,21 @@ def test_eviction_never_on_age_alone(tmp_path: Path) -> None:
     assert store.get_crystal("b")["status"] == "deprecated"
 
 
+def test_eviction_fail_safe_when_evb_unavailable(tmp_path: Path) -> None:
+    """Battle-test (HIGH): the PRODUCTION path the old test never exercised — when
+    evb_enabled is off, evb is never persisted, so every crystal has evb=None. The
+    value gate must then keep everything (fail-safe), NOT degrade to age-only
+    eviction. An old, very-low-R crystal with NO evb must survive."""
+    store = RelationalStore(db_path=tmp_path / "noevb.sqlite")
+    old = _NOW - timedelta(days=90)                          # R well below r_floor
+    _crystal(store, "old_no_evb", last_access=old, stability=1.0, evb=None)
+    # persist_dynamics defaults OFF -> mirrors evb_enabled=False production wiring.
+    w = _worker(store, forgetting_fsrs=True, r_floor=0.7, evb_percentile=0.5)
+    assert w.persist_dynamics is False                       # the incoherent-config regime
+    w._prune(_NOW)
+    assert store.get_crystal("old_no_evb")["status"] == "active"  # never evicted on age alone
+
+
 def test_resurface_boosts_aging_high_value(tmp_path: Path) -> None:
     store = RelationalStore(db_path=tmp_path / "rs.sqlite")
     # stability=10, ~21 days -> R~0.8 (between r_floor 0.7 and resurface_floor 0.85)

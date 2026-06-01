@@ -105,8 +105,15 @@ class DreamWorker:
         drift_detect: bool = False,
         drift_tau_lo: float = 0.80,
         drift_tau_hi: float = 0.97,
+        on_run_complete: Callable[[str], None] | None = None,
     ) -> None:
         self.relational = relational
+        # Battle-test fix (CRITICAL): completion callback used to release the
+        # scheduler's in-memory pending slot after each run. Without it, in server
+        # mode the slot is never freed and the G8 coalescing gate silently swallows
+        # every trigger after the first. Wired in server._build_components to
+        # DreamScheduler.record_dream_completed. None in the one-shot CLI / unit tests.
+        self.on_run_complete = on_run_complete
         self.vector_store = vector_store
         self.graph_store = graph_store
         self.enforcement = enforcement
@@ -141,6 +148,21 @@ class DreamWorker:
         self.drift_detect = drift_detect
         self.drift_tau_lo = drift_tau_lo
         self.drift_tau_hi = drift_tau_hi
+
+        # Battle-test fix (HIGH): value-aware forgetting needs the EVB signal. With
+        # forgetting_fsrs ON but persist_dynamics OFF (evb_enabled=False), evb is
+        # never written, so the value gate can never fire and the prune phase evicts
+        # nothing. Surface this incoherent config loudly instead of degrading silently.
+        if self.forgetting_fsrs and not self.persist_dynamics:
+            log.warning(
+                "forgetting_value_signal_unavailable",
+                advice=(
+                    "forgetting_fsrs is enabled but evb_enabled is off, so EVB is "
+                    "never persisted. Value-aware eviction will keep all crystals "
+                    "(fail-safe: never evicts on age alone). Enable evb_enabled to "
+                    "activate value-aware forgetting."
+                ),
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -268,6 +290,16 @@ class DreamWorker:
             )
             self._mark_run_finished(run_id, datetime.now(timezone.utc), summary=f"ERROR: {exc}")
 
+        finally:
+            # Release the scheduler's in-memory pending slot regardless of outcome,
+            # so the next trigger can enqueue. Best-effort: a callback failure must
+            # not mask the run result.
+            if self.on_run_complete is not None:
+                try:
+                    self.on_run_complete(run_id)
+                except Exception as cb_exc:  # noqa: BLE001
+                    log.warning("dream_on_run_complete_error", run_id=run_id, error=str(cb_exc))
+
     # ------------------------------------------------------------------
     # Phase: orient
     # ------------------------------------------------------------------
@@ -279,11 +311,14 @@ class DreamWorker:
         """
         try:
             with self.relational._connect() as conn:
-                # Recent episodic commits (last 24 h)
-                cutoff = datetime.now(timezone.utc)
+                # Recent episodic commits (last 24 h). Battle-test fix: the prior
+                # `cutoff.replace(hour=cutoff.hour - min(cutoff.hour,24))` always
+                # collapsed to 00:00 today (hour-hour=0); use timedelta so it is a
+                # true rolling 24h window that also crosses the date boundary.
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                 rows = conn.execute(
                     "SELECT count(*) FROM crystals WHERE layer='episodic' AND updated_at > ?",
-                    (cutoff.replace(hour=cutoff.hour - min(cutoff.hour, 24)).isoformat(),),
+                    (cutoff.isoformat(),),
                 ).fetchone()
                 recent_episodic = rows[0] if rows else 0
 
@@ -640,13 +675,20 @@ class DreamWorker:
 
         consolidated_tier = min_tier(input_tiers)
 
-        # If consolidated tier exceeds Semantic ceiling (T1), skip this cluster
-        semantic_ceiling = LAYER_CEILING.get("semantic", TierEnum.T1)
-        if consolidated_tier > semantic_ceiling:
+        # G4 anti-laundering: a cluster whose min-trust consolidated tier exceeds the
+        # Semantic ceiling (T1) must NOT become a Semantic fact. Route through the
+        # named, tested enforcement guard (single source of truth) rather than an
+        # inline `>` reimplementation. Dream's policy on violation is to SKIP the
+        # cluster (not crash the run), so the raise is converted to a skip here.
+        from crystalium.enforcement import TierCeilingViolation
+
+        try:
+            self.enforcement.assert_tier_within_layer_ceiling(consolidated_tier, "semantic")
+        except TierCeilingViolation:
             log.debug(
                 "consolidate_skip_tier",
                 consolidated_tier=str(consolidated_tier),
-                ceiling=str(semantic_ceiling),
+                ceiling=str(LAYER_CEILING.get("semantic", TierEnum.T1)),
             )
             return None
 
@@ -806,9 +848,16 @@ class DreamWorker:
                         elapsed = _fsrs.elapsed_days(rec_stub.last_access, now)
                         r = _fsrs.retrievability(eff_s, elapsed)
                         evb = md.get("evb")
-                        # null EVB or no cutoff -> treat as below value (dead weight),
-                        # but R<r_floor is still required (null EVB alone never evicts).
-                        value_below = evb is None or evb_cutoff is None or evb < evb_cutoff
+                        # Battle-test fix (HIGH): the value gate requires a real value
+                        # signal. When evb is unavailable (None) or no percentile cutoff
+                        # exists — which is exactly the state when evb_enabled=False, so
+                        # evb is never persisted — the old code treated that as
+                        # "below value", silently collapsing eviction to R<r_floor ALONE
+                        # (age-only), violating this phase's "never on age alone"
+                        # guarantee. Fail safe: without a value signal we do NOT evict.
+                        value_below = (
+                            evb is not None and evb_cutoff is not None and evb < evb_cutoff
+                        )
                         if r < self.r_floor and value_below:
                             to_deprecate.append(cid)
                     elif score < threshold:

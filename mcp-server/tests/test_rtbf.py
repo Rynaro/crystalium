@@ -91,3 +91,31 @@ def test_cli_forget_erases_through_chokepoint(tmp_path: Path, monkeypatch: pytes
     assert result.exit_code == 0, result.output
     assert RelationalStore(db_path=cfg.sqlite_path).get_crystal("victim") is None
     assert RelationalStore(db_path=cfg.sqlite_path).list_forget_audit()[0]["reason"] == "operator request"
+
+
+# --- Battle-test fix (HIGH): RTBF must erase the dense embedding + graph node too ---
+
+def test_vector_delete_removes_embedding(tmp_path: Path) -> None:
+    from crystalium.storage.vector import VectorStore
+
+    vs = VectorStore(lance_dir=tmp_path / "vectors.lance")
+    vs.upsert("keep", [0.1, 0.2, 0.3], metadata={"layer": "semantic"})
+    vs.upsert("victim", [0.1, 0.2, 0.31], metadata={"layer": "semantic"})
+    vs.delete("victim")
+    ids = {r["id"] for r in vs.dense_search([0.1, 0.2, 0.3], k=10)}
+    assert "victim" not in ids                              # embedding physically gone
+    assert "keep" in ids
+    vs.delete("victim")                                     # idempotent no-op
+
+
+def test_graph_delete_node_removes_node(tmp_path: Path) -> None:
+    from crystalium.storage.graph import GraphStore
+
+    gs = GraphStore(kuzu_dir=tmp_path / "graph.kuzu")
+    gs.add_node("victim", "semantic")
+    gs.add_node("keep", "semantic")
+    assert gs.node_count() == 2
+    gs.delete_node("victim")
+    assert gs.node_count() == 1                             # node physically gone
+    gs.delete_node("victim")                                # idempotent no-op
+    assert gs.node_count() == 1

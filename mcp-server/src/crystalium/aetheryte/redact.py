@@ -66,7 +66,11 @@ _RAW_PATTERNS: list[tuple[str, str]] = [
     ),
     (
         "PASSWORD",
-        r"(?i)\b(?:password|passwd|pass)\s*[:=]\s*\S+",
+        # Battle-test fix (low): capture the WHOLE value to end-of-line, not just the
+        # first \S+ token. A space-containing passphrase ("password: correct horse
+        # battery staple") otherwise leaked everything after the first word. Over-
+        # redacting a credential line is the safe direction.
+        r"(?i)\b(?:password|passwd|pass)\s*[:=]\s*\S[^\n]*",
     ),
 ]
 

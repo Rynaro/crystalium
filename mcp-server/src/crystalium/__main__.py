@@ -243,6 +243,20 @@ def forget(crystal_id: str, reason: str, config_path: Optional[Path], yes: bool)
             blob_store.tombstone(content_ref)
         except Exception as exc:  # blob already gone / shared — audit row already written
             click.echo(f"  (blob tombstone note: {exc})", err=True)
+
+    # Battle-test fix (HIGH — RTBF completeness): the relational row + blob are not
+    # the only physical copies. The dense embedding (LanceDB) and the graph node
+    # (KuzuDB) must also be erased, or the forgotten content survives as a vector +
+    # node on disk. Best-effort: heavy deps may be absent in light deployments.
+    try:
+        from crystalium.storage.graph import GraphStore
+        from crystalium.storage.vector import VectorStore
+
+        VectorStore(lance_dir=config.lance_path).delete(crystal_id)
+        GraphStore(kuzu_dir=config.kuzu_path).delete_node(crystal_id)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"  (vector/graph erase note: {exc})", err=True)
+
     click.echo(f"Forgotten: {crystal_id} (audited; reason={reason!r}).")
 
 

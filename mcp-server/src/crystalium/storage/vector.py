@@ -157,6 +157,20 @@ class VectorStore:
                 pass
             table.add([row])
 
+    def delete(self, crystal_id: str) -> None:
+        """Physically remove the embedding for *crystal_id* (RTBF hard-delete).
+
+        The right-to-be-forgotten erasure must leave no dense representation of the
+        content on disk. No-op if the table or the row does not exist.
+        """
+        table = self._get_table()
+        if table is None:
+            return
+        try:
+            table.delete(f"id = '{crystal_id}'")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("vector_delete_error", crystal_id=crystal_id, error=str(exc))
+
     def dense_search(
         self,
         query_vec: list[float],

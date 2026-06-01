@@ -224,9 +224,9 @@ class PromotionGate:
         D5 rule:
           - Without a passing SkillResult (verifier exit_code==0 + no overflow):
             record stays 'candidate'.
-          - With a passing SkillResult AND caller_tier >= T1: admit to 'shared' state.
-          - With a passing SkillResult AND caller_tier == T0: admit to 'shared'.
-          - T2 with passing verifier: admit to 'shared' per D1 matrix.
+          - T0/T1 with a passing SkillResult: admit to 'shared' state.
+          - T2 ALWAYS stays 'candidate' (G2): a passing verifier never admits a T2
+            proposal to shared/validated.
           - T3 is denied at the enforcement layer before reaching here.
 
         Also routes through human-confirm window when active (G5).
@@ -240,6 +240,18 @@ class PromotionGate:
             PromotionResult with decision in {"admit", "pending"}.
         """
         crystal_id = crystal["id"] if isinstance(crystal, dict) else crystal.id
+
+        # Battle-test fix (G2 defense-in-depth): the only live caller (ProceduralLayer
+        # .commit) routes T2 to candidate before reaching the gate, but this chokepoint
+        # method must enforce G2 itself — a future caller trusting the (now-corrected)
+        # contract must never be able to admit a T2 proposal to shared, regardless of a
+        # passing verifier.
+        if caller_tier > Tier.T1:
+            return PromotionResult(
+                decision="pending",
+                reason="T2 candidate-only per G2",
+                promotion_id=None,
+            )
 
         # No verifier result → candidate stays candidate
         if skill_invoke_result is None or not skill_invoke_result.passed:

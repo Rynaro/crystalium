@@ -155,7 +155,15 @@ class TestG8DreamDedup:
         )
 
     def test_g8_session_end_and_idle_tick_share_path(self) -> None:
-        """Idle-tick and session_end both call enqueue(); dedup catches the second."""
+        """Idle-tick and session_end mint DISTINCT run_ids; G8 coalesces the second.
+
+        Regression for fix/dream-enqueue-race: the real trigger paths each call
+        _make_run_id() independently, so the two concurrent IDs never collide.
+        The G8 invariant ("at most one pending Dream run") therefore must hold on
+        *any pending run*, not on run_id identity — otherwise both distinct IDs
+        enqueue and two Dreams run. Until the slot is released by
+        record_dream_completed(), the second trigger must coalesce away.
+        """
         cfg = _make_config(idle_threshold_s=1, min_dream_gap_s=1)
         worker = MagicMock()
         call_count = [0]
@@ -172,14 +180,20 @@ class TestG8DreamDedup:
         old_time = datetime(2000, 1, 1, tzinfo=_UTC)
         scheduler._inject_timestamps(last_activity=old_time, last_dream=old_time)
 
-        # Fire two different run_ids (normal concurrent scenario)
+        # Fire two different run_ids (the production concurrent scenario)
         r1 = scheduler.enqueue("run-id-001")
         r2 = scheduler.enqueue("run-id-002")
 
-        # Both are new run_ids → both enqueued
+        # First wins; second coalesces — exactly one pending Dream (G8)
         assert r1 == "run-id-001"
-        assert r2 == "run-id-002"
-        assert call_count[0] == 2  # two unique IDs = two calls
+        assert r2 is None
+        assert call_count[0] == 1  # only one run reaches the worker
+
+        # Slot releases on completion → next trigger may enqueue again
+        scheduler.record_dream_completed("run-id-001")
+        r3 = scheduler.enqueue("run-id-003")
+        assert r3 == "run-id-003"
+        assert call_count[0] == 2
 
     def test_same_run_id_deduplicated_in_memory(self) -> None:
         """Same run_id submitted twice → only first enqueue reaches worker."""

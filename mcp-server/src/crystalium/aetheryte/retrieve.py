@@ -158,6 +158,18 @@ class Aetheryte:
     # Public recall API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _cache_ctx(scope: Any, k: int, layers: Any, caller_tier: Any) -> dict[str, Any]:
+        """Recall-shaping dimensions that MUST participate in the cache key, so a
+        result computed under one visibility/filter is never served to another."""
+        return {
+            "k": k,
+            "layers": layers,
+            "visibility": getattr(scope, "agent_class_visibility", None),
+            "sensitivity": getattr(scope, "sensitivity_tag", None),
+            "tier": str(caller_tier) if caller_tier is not None else None,
+        }
+
     def recall(
         self,
         scope: Scope,
@@ -211,7 +223,9 @@ class Aetheryte:
             # 2b. W5 prefetch: serve a pre-warmed result from the recall cache.
             # The chokepoint above still ran. Off (recall_cache None) -> no cache.
             if self.recall_cache is not None:
-                cached = self.recall_cache.get(getattr(scope, "project", None), query)
+                cached = self.recall_cache.get(
+                    getattr(scope, "project", None), query, **self._cache_ctx(scope, k, layers, caller_tier)
+                )
                 if cached is not None:
                     return cached
 
@@ -533,7 +547,10 @@ class Aetheryte:
 
             # W5 prefetch: cache this (cold) result so a pre-warmed read hits later.
             if self.recall_cache is not None:
-                self.recall_cache.put(getattr(scope, "project", None), query, result)
+                self.recall_cache.put(
+                    getattr(scope, "project", None), query, result,
+                    **self._cache_ctx(scope, k, layers, caller_tier),
+                )
 
             return result
 

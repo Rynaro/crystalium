@@ -278,25 +278,40 @@ class TestTotalCap:
         assert Config(data_dir=__import__("pathlib").Path("/tmp/crys-cap-pin")).total_cap == 3500
 
     def test_total_tokens_within_total_cap(self) -> None:
-        """total_tokens in ComposedSet is always ≤ config.total_cap."""
+        """G6 over-subscription: slot caps sum to 3800 > total_cap 3500, so when
+        every slot fills the GLOBAL cap pass must trim the working set to ≤3500.
+
+        Regression for the battle-test HIGH: the old version only generated ~2400
+        tokens (no slot ever hit its cap), so total never approached 3500 and the
+        bug — per-slot eviction can't satisfy total_cap, the composer asserted and
+        crashed recall — was invisible. This version floods ALL SIX slots well past
+        their caps, so without the global pass total_tokens would be 3800."""
         cfg = _make_config()
+        assert sum(cfg.slots.values()) > cfg.total_cap          # the over-subscription
         composer = Composer(config=cfg, tokenizer=_word_tokenizer)
 
-        # Flood each slot with many records
+        twenty_words = " ".join(f"word{j}" for j in range(20))  # 20 tokens each
         records = []
-        for i in range(30):
-            for layer in ("episodic", "semantic", "procedural", "execution"):
-                records.append(
-                    _Rec(
-                        f"{layer}-{i}", layer,
-                        " ".join([f"word{j}" for j in range(20)]),  # 20 words each
-                        importance=i / 30,
-                        last_access=_ts(i),
-                    )
-                )
+        # Drive every slot far past its cap: 4 native layers + executive override + buffer.
+        slot_specs = [
+            ("episodic", None), ("semantic", None), ("procedural", None),
+            ("execution", None), ("episodic", "executive"), ("misc", None),  # misc -> buffer
+        ]
+        for layer, override in slot_specs:
+            tag = override or layer
+            for i in range(80):                                  # 80*20 = 1600 tokens / slot
+                records.append(_Rec(
+                    f"{tag}-{i}", layer, twenty_words,
+                    importance=i / 80, last_access=_ts(i), slot_override=override,
+                ))
 
         result = composer.compose(records)
-        assert result.total_tokens <= cfg.total_cap
+        assert result.total_tokens <= cfg.total_cap              # the real G6 invariant
+        assert result.total_tokens == sum(result.slot_tokens.values())
+        assert result.evicted_count > 0                          # eviction actually ran
+        # Packed near the ceiling — proves the global pass trimmed to the boundary,
+        # not that the test stayed vacuously below it.
+        assert result.total_tokens >= cfg.total_cap - 20
 
     def test_empty_records(self) -> None:
         """Empty input returns zero tokens and zero evictions."""

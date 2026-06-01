@@ -443,6 +443,11 @@ def _build_components(
         drift_tau_hi=config.drift_tau_hi,
     )
     scheduler = DreamScheduler(config=config, worker=worker, store=relational)
+    # Battle-test fix (CRITICAL): close the trigger→execute→release loop. The
+    # scheduler's background tick drains worker.run_pending(); each run then calls
+    # back into record_dream_completed to free the in-memory pending slot. Wired
+    # here (post-construction) because worker is built before the scheduler exists.
+    worker.on_run_complete = scheduler.record_dream_completed
 
     return enforcement, aetheryte, episodic, semantic, procedural, execution, gate, scheduler, relational
 
@@ -852,7 +857,7 @@ def _handle_ingest(
     """
     import datetime as _dt
 
-    from crystalium.ecl import UnsupportedEnvelopeVersion, validate_inbound_envelope
+    from crystalium.ecl import UnsupportedEnvelopeVersion, compute_sha256, validate_inbound_envelope
     from crystalium.enforcement import CrystaliumEnforcementError
     from crystalium.ingest_adapter import map_envelope_to_crystal, resolve_caller_tier
 
@@ -874,6 +879,24 @@ def _handle_ingest(
         raise CrystaliumEnforcementError(
             f"malformed inbound envelope: {exc}", reason_code="INGEST_BAD_ENVELOPE"
         ) from exc
+
+    # Battle-test fix (G7 integrity binding): validate_inbound_envelope only checks
+    # the envelope's internal self-consistency (integrity.value == artifact.sha256).
+    # The trust boundary also requires the *actual payload bytes* to hash to the
+    # declared artifact.sha256 — otherwise a sender can deliver content that does not
+    # match its attested hash. Hash the RAW transport bytes (what the sender hashed:
+    # payload.encode()), NOT the decoded form, so legitimate base64/json encodings are
+    # not falsely rejected. Skipped only for structured (dict/list) payloads, whose
+    # canonical byte form is not defined here.
+    declared_sha = (envelope.get("artifact") or {}).get("sha256")
+    if declared_sha and isinstance(payload, (str, bytes)):
+        raw_bytes = payload.encode("utf-8") if isinstance(payload, str) else payload
+        actual_sha = compute_sha256(raw_bytes)
+        if actual_sha != declared_sha:
+            raise CrystaliumEnforcementError(
+                "inbound payload bytes do not hash to artifact.sha256 (G7 binding).",
+                reason_code="INGEST_PAYLOAD_HASH_MISMATCH",
+            )
 
     caller_tier = resolve_caller_tier(envelope)
     layer, crystal_payload = map_envelope_to_crystal(
@@ -922,6 +945,14 @@ def _handle_ingest(
         "envelope_version": str(envelope.get("envelope_version", "")),
         "commit_status": commit_result.get("status"),
     }
+
+
+# Identity- and trust-bearing fields that an update patch must never overwrite
+# (else a low-trust caller could launder a crystal's tier/visibility). The new
+# revision inherits these from the existing record. See _handle_update.
+_UPDATE_PROTECTED_FIELDS = frozenset(
+    {"id", "layer", "trust_tier", "validation_state", "provenance", "protected", "status"}
+)
 
 
 def _handle_update(
@@ -977,7 +1008,24 @@ def _handle_update(
     if "outcome_success_score" in patch and set(patch.keys()) <= {"outcome_success_score"}:
         import datetime as _dt
 
-        score = float(patch["outcome_success_score"])
+        from crystalium.enforcement import CrystaliumEnforcementError
+
+        # Battle-test fix (HIGH): outcome_success_score feeds EVB's Gain term, which
+        # assumes the value lives in [0, 1]. Validate the bound (and that it is
+        # numeric) here — an out-of-range or non-numeric score silently corrupts the
+        # promotion-precision signal otherwise.
+        try:
+            score = float(patch["outcome_success_score"])
+        except (TypeError, ValueError) as exc:
+            raise CrystaliumEnforcementError(
+                "outcome_success_score must be a number in [0, 1].",
+                reason_code="INVALID_OUTCOME_SCORE",
+            ) from exc
+        if not (0.0 <= score <= 1.0):
+            raise CrystaliumEnforcementError(
+                f"outcome_success_score must be in [0, 1]; got {score}.",
+                reason_code="INVALID_OUTCOME_SCORE",
+            )
         relational.record_outcome(crystal_id, score, now=_dt.datetime.now(_dt.timezone.utc))
         return {
             "status": "outcome_recorded",
@@ -1001,12 +1049,28 @@ def _handle_update(
         # for non-Semantic are deferred to v0.2.
         import datetime as _dt
         import uuid as _uuid
+
+        # Battle-test fix (CRITICAL — trust-laundering / G1·G2·D7): this fallback
+        # previously wrote straight to the relational store with NO tier check, so a
+        # T2/T3 caller — who can never *commit* to procedural (G2) or execution (G1) —
+        # could freely mutate any existing crystal there. The semantic branch gates via
+        # semantic.update(); this branch must apply the same rule. Mirror commit's tier
+        # matrix for the target layer.
+        enforcement.assert_tier_allowed("crystalium.update", layer, caller_tier, "commit")
+
         now = _dt.datetime.now(_dt.timezone.utc)
         new_id = str(_uuid.uuid4())
 
+        # Battle-test fix (CRITICAL — field laundering): a free-form patch could set
+        # trust_tier / layer / validation_state / protected and launder a low-trust
+        # crystal to T0/validated/protected. Strip identity- and trust-bearing fields
+        # from the patch so they retain their existing values; only content/metadata
+        # fields are mutable via update (matching the layer.commit adapters).
+        safe_patch = {k: v for k, v in patch.items() if k not in _UPDATE_PROTECTED_FIELDS}
+
         # Apply patch to existing record
         new_record = dict(existing)
-        new_record.update(patch)
+        new_record.update(safe_patch)
         new_record["id"] = new_id
         new_record["status"] = "active"
 
@@ -1043,7 +1107,7 @@ def _handle_update(
             "id": new_id,
             "supersedes": crystal_id,
             "layer": layer,
-            "patch_keys": list(patch.keys()),
+            "patch_keys": list(safe_patch.keys()),
             "reason": reason,
         }
 
