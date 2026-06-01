@@ -14,16 +14,29 @@ services:
       context: .
       dockerfile: Dockerfile
       target: dev
+      args:
+        # cpu (default) or gpu. Override: TORCH_VARIANT=gpu docker compose build
+        # or `make build VARIANT=gpu`.
+        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
     image: crystalium:dev
     volumes:
       # Source tree (read-write for live dev edits; tests read files directly)
       - .:/app
+      # Anonymous volume: preserve the image's baked /app/.venv instead of letting
+      # the host bind-mount shadow it with an empty/host venv. Required because the
+      # entrypoint runs `uv run --no-sync` (uses the baked venv as-is, never
+      # re-resolves). Without this, the venv would be hidden and `uv run` would
+      # fail to find the interpreter.
+      - /app/.venv
       # Named volume for runtime artefacts (SQLite, LanceDB, blob tier, KuzuDB)
       # Mounted at the default data_dir path inside the container
       - crystalium_data:/root/.crystalium
     environment:
       - CRYSTALIUM_DATA_DIR=/root/.crystalium/default
-      - PYTHONPATH=/app/mcp-server/src
+      # Mounted-layout PYTHONPATH: src for `crystalium`, /app for the `evals`
+      # package (mirrors the image's baked /app/src:/app). Without /app, the
+      # evals-importing tests (test_dream_metrics, test_dream_gate) fail to collect.
+      - PYTHONPATH=/app/mcp-server/src:/app
       # Set CRYSTALIUM_SKIP_SLOW=1 to skip sentence-transformers model downloads in fast CI
       # - CRYSTALIUM_SKIP_SLOW=1
     working_dir: /app

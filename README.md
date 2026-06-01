@@ -81,6 +81,19 @@ The server listens on stdin/stdout. Wire it to Claude Code, Cursor, Copilot, or 
 
 **No host `pip`, `uv`, `python`, or `pytest` invocations.** All dev commands run inside the container via `docker compose run --rm crystalium <cmd>` or `make` targets. Per-host setup guides live in `hosts/{claude-code,cursor,copilot,opencode}.md`.
 
+### Build variant: CPU (default) vs GPU
+
+The default image is **CPU-only (~2 GB)**. `torch` is pinned to PyTorch's CPU wheel index, so the image carries no NVIDIA CUDA runtime — crystalium's embedding workload (single-text `sentence-transformers` encode) sees no GPU benefit, and the published `ghcr.io/rynaro/crystalium:latest` is CPU-only.
+
+A GPU build is available for bulk re-embedding on amd64 + NVIDIA hosts (~6 GB, pulls the CUDA cu121 stack). It is **buildable-only**, not published:
+
+```bash
+make build              # cpu (default)
+make build VARIANT=gpu  # gpu (CUDA cu121, amd64-only)
+# or, plain docker:
+docker build --build-arg TORCH_VARIANT=gpu -t crystalium:gpu .
+```
+
 ---
 
 ## What it gives the Eidolons

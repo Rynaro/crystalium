@@ -6,6 +6,14 @@
 
 FROM python:3.12-slim AS base
 
+# Torch variant selector. cpu (default) installs the CPU-only torch wheel
+# (no nvidia/* , no triton — venv ~1 GB). gpu installs the CUDA cu121 wheel
+# (amd64-only — venv ~5 GB). Override at build time:
+#   docker compose build                         # cpu (default)
+#   make build VARIANT=gpu                        # gpu
+#   docker build --build-arg TORCH_VARIANT=gpu .  # gpu, plain docker
+ARG TORCH_VARIANT=cpu
+
 # Install curl for uv installer (and as a useful tool for the doctor command)
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -27,9 +35,16 @@ WORKDIR /app
 COPY mcp-server/pyproject.toml mcp-server/.python-version ./
 COPY README.md ./
 
-# Install all dependencies including dev group (needed for pytest)
+# Install RUNTIME dependencies only (no dev toolchain — that lands in the `dev`
+# stage below). torch resolves CPU-only by default (see pyproject [tool.uv.sources]);
+# this is the layer the published GHCR image ships, so it must stay slim.
+# The gpu branch replaces the CPU wheel with the CUDA cu121 build (amd64-only);
+# it is a no-op for the default cpu variant, so the CPU image never pulls CUDA.
 # uv sync runs INSIDE the container — never on the host (P0-13)
-RUN uv sync --extra dev --no-cache
+RUN uv sync --no-cache \
+    && if [ "$TORCH_VARIANT" = "gpu" ]; then \
+         uv pip install --reinstall torch --index-url https://download.pytorch.org/whl/cu121; \
+       fi
 
 # Copy source tree
 COPY mcp-server/src ./src
@@ -41,14 +56,31 @@ COPY evals ./evals
 # importable without install.
 ENV PYTHONPATH="/app/src:/app"
 
-# Default entry point — override in docker-compose for specific commands
-ENTRYPOINT ["uv", "run"]
+# Default entry point — override in docker-compose for specific commands.
+# --no-sync: run against the venv baked at build time WITHOUT re-resolving.
+# Without it, `uv run` re-syncs on every container start and re-pulls torch from
+# PyPI (the full CUDA stack), defeating the slim CPU image. The baked venv is
+# already the source of truth; dependency changes require an explicit `uv sync`.
+ENTRYPOINT ["uv", "run", "--no-sync"]
 CMD ["python", "-m", "crystalium"]
 
 # ---------------------------------------------------------------------------
 # Dev image — used by docker-compose.dev.yml
 # ---------------------------------------------------------------------------
 FROM base AS dev
+
+# ARG does not cross FROM boundaries — re-declare so the dev sync preserves the
+# variant resolved in `base`.
+ARG TORCH_VARIANT=cpu
+
+# Layer the dev toolchain (pytest, ruff, mypy, jsonschema) on top of the runtime
+# venv. Only the dev image carries this — the published runtime image does not.
+# Re-apply the gpu override after sync (uv sync would otherwise restore the
+# CPU-default torch); no-op for the cpu variant.
+RUN uv sync --extra dev --no-cache \
+    && if [ "$TORCH_VARIANT" = "gpu" ]; then \
+         uv pip install --reinstall torch --index-url https://download.pytorch.org/whl/cu121; \
+       fi
 
 # Copy tests into the image
 COPY mcp-server/tests ./tests

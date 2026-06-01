@@ -5,7 +5,7 @@
 
 [project]
 name = "crystalium"
-version = "1.0.0"
+version = "1.1.0"
 description = "Portable memory harness for the Eidolons — MCP-compatible, self-hosted, vendor-agnostic"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,6 +20,11 @@ dependencies = [
     "lancedb>=0.6",
     "kuzu>=0.4",
     "sentence-transformers>=2.7",
+    # torch is otherwise a *transitive* dep of sentence-transformers, and
+    # [tool.uv.sources] only rewrites the index for DIRECT dependencies — so
+    # declaring it here is what makes the CPU-index pin below actually apply.
+    # Without this line torch resolves from PyPI (the full ~4.4 GB CUDA wheel).
+    "torch>=2.2",
     "apscheduler>=3.10",
     "structlog>=24.1",
     "click>=8.1",
@@ -39,6 +44,26 @@ dev = [
     "mypy>=1.10",
     "jsonschema>=4.21",
 ]
+# torch is pulled transitively by sentence-transformers. PyPI's default torch
+# wheel bundles the full ~4.4 GB NVIDIA CUDA runtime (nvidia/* + triton), which
+# crystalium's single-text embedding workload never uses. Pin torch to the
+# CPU-only index as the *unconditional* project default so every resolution path
+# — `uv sync`, the `uv run` runtime entrypoint, host, and CI — stays slim and
+# self-consistent (the runtime entrypoint must resolve the same wheel that was
+# baked, or it would re-sync and re-pull CUDA on container start).
+#
+# GPU is an opt-in build-time override, NOT a published variant: the Dockerfile's
+# `ARG TORCH_VARIANT=gpu` reinstalls the CUDA wheel on top (amd64-only). See
+# Dockerfile + Makefile (`make build VARIANT=gpu`).
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+# explicit = true → only packages that name this index in [tool.uv.sources]
+# (i.e. torch) resolve against it; everything else stays on PyPI.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [project.scripts]
 crystalium = "crystalium.__main__:cli"
