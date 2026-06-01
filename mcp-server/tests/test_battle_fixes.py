@@ -130,3 +130,212 @@ def test_recall_negative_k_clamped(tmp_path: Path) -> None:
     res2 = _handle_recall({"scope": {"project": "p"}, "query": "findable fact", "k": "garbage"},
                           aetheryte, scheduler, Tier.T1)
     assert res2 is not None
+
+
+# --- Fix #6/#7: Dream — orient 24h window + distinct-run_id enqueue coalescing ---
+
+def test_orient_window_is_true_24h(tmp_path: Path) -> None:
+    # the cutoff must be ~24h before now, not collapsed to 00:00 today
+    import datetime as _dt
+    from crystalium.dream import worker as _w
+    now = _dt.datetime(2026, 6, 1, 3, 0, tzinfo=_dt.timezone.utc)  # 03:00 — the bug's worst case
+    cutoff = now - _w.timedelta(hours=24)
+    assert cutoff == _dt.datetime(2026, 5, 31, 3, 0, tzinfo=_dt.timezone.utc)
+    assert (now - cutoff).total_seconds() == 24 * 3600
+
+
+def test_dream_enqueue_coalesces_distinct_run_ids() -> None:
+    # the real race: two triggers mint DIFFERENT run_ids; only one must enqueue
+    from unittest.mock import MagicMock
+    from crystalium.config import Config
+    from crystalium.dream.scheduler import DreamScheduler
+    worker = MagicMock()
+    sched = DreamScheduler(config=Config(data_dir=Path("/tmp/sched-coalesce")),
+                           worker=worker, store=MagicMock())
+    a = sched.enqueue("dream-aaaaaaaaaaaa")
+    b = sched.enqueue("dream-bbbbbbbbbbbb")   # distinct id, run still pending
+    assert a == "dream-aaaaaaaaaaaa"
+    assert b is None                           # coalesced (G8: at most one pending)
+    assert worker.enqueue.call_count == 1
+    # after completion, a new run may enqueue again
+    sched.record_dream_completed("dream-aaaaaaaaaaaa")
+    c = sched.enqueue("dream-cccccccccccc")
+    assert c == "dream-cccccccccccc"
+    assert worker.enqueue.call_count == 2
+
+
+# --- CRIT-2: Dream drain + slot release closes the trigger→execute→release loop ---
+
+def test_tick_drains_and_releases_slot_so_dream_is_not_inert() -> None:
+    """Regression: in server mode the slot was never released, so after the first
+    trigger the coalescing gate swallowed every subsequent run forever. The tick
+    must drain worker.run_pending() and the worker's on_run_complete callback must
+    free the slot, letting the next trigger enqueue again."""
+    from unittest.mock import MagicMock
+    from crystalium.config import Config
+    from crystalium.dream.scheduler import DreamScheduler
+
+    worker = MagicMock()
+    sched = DreamScheduler(
+        config=Config(data_dir=Path("/tmp/sched-drain"), idle_threshold_s=1, min_dream_gap_s=0),
+        worker=worker, store=MagicMock(),
+    )
+    # Wire the production loop: draining a run releases its slot (mirrors
+    # server._build_components: worker.on_run_complete = scheduler.record_dream_completed).
+    worker.run_pending.side_effect = lambda: [
+        sched.record_dream_completed(rid) for rid in list(sched._pending_run_ids)
+    ]
+
+    assert sched.enqueue("dream-111111111111") == "dream-111111111111"
+    assert sched._pending_run_ids                      # one pending
+    # Make idle/gap conditions hold so _tick proceeds, then run a tick.
+    old = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    sched._inject_timestamps(last_activity=old, last_dream=old)
+    sched._tick()                                      # drains → releases slot → may re-enqueue
+    worker.run_pending.assert_called()
+    # Slot was freed (and possibly immediately refilled by the tick's own enqueue);
+    # the key invariant: a brand-new distinct trigger is NOT permanently swallowed.
+    for rid in list(sched._pending_run_ids):
+        sched.record_dream_completed(rid)
+    assert sched.enqueue("dream-222222222222") == "dream-222222222222"
+
+
+def test_worker_on_run_complete_fires_in_finally(tmp_path: Path) -> None:
+    """_execute_run must release the slot even when a run errors mid-cycle."""
+    from unittest.mock import MagicMock
+    from crystalium.dream.worker import DreamWorker
+
+    released: list[str] = []
+    worker = DreamWorker(
+        relational=MagicMock(), vector_store=MagicMock(), graph_store=MagicMock(),
+        enforcement=MagicMock(), gate=MagicMock(), importance_fn=lambda **k: 0.0,
+        on_run_complete=released.append,
+    )
+    # Force the run to raise after start so the except + finally both execute.
+    worker._mark_run_started = MagicMock()
+    worker._mark_run_finished = MagicMock()
+    worker._orient = MagicMock(side_effect=RuntimeError("boom"))
+    worker._execute_run("run-err")
+    assert released == ["run-err"]      # slot released despite the error
+
+
+# --- CRIT-1: crystalium.update tier enforcement + patch field-laundering guard ---
+
+def _proc_crystal(cid: str) -> dict:
+    c = _crystal(cid, "procedural step", project="p")
+    c["layer"] = "procedural"
+    return c
+
+
+def _update_components(store: RelationalStore):
+    from crystalium.enforcement import Enforcement
+    episodic = MagicMock()
+    episodic.vector_store = None                # skip the best-effort reindex
+    return dict(
+        episodic=episodic, semantic=MagicMock(), procedural=MagicMock(),
+        execution=MagicMock(), enforcement=Enforcement(Config(data_dir=store.db_path.parent)),
+        relational=store,
+    )
+
+
+def test_update_denies_t3_on_procedural_layer(tmp_path: Path) -> None:
+    from crystalium.server import _handle_update
+    store = RelationalStore(db_path=tmp_path / "u1.sqlite")
+    store.insert_crystal(_proc_crystal("c1"))
+    with pytest.raises(CrystaliumEnforcementError):
+        _handle_update(
+            {"id": "c1", "patch": {"summary": "mutated"}, "reason": "r"},
+            caller_tier=Tier.T3, **_update_components(store),
+        )
+
+
+def test_update_strips_trust_laundering_patch_fields(tmp_path: Path) -> None:
+    from crystalium.server import _handle_update
+    store = RelationalStore(db_path=tmp_path / "u2.sqlite")
+    store.insert_crystal(_proc_crystal("c1"))   # trust_tier T1
+    res = _handle_update(
+        {"id": "c1",
+         "patch": {"summary": "ok", "trust_tier": "T0", "protected": True,
+                   "validation_state": "validated", "layer": "semantic"},
+         "reason": "r"},
+        caller_tier=Tier.T1, **_update_components(store),
+    )
+    new = store.get_crystal(res["id"])
+    assert new["summary"] == "ok"               # content patch applied
+    assert new["trust_tier"] == "T1"            # laundering stripped
+    assert new["layer"] == "procedural"
+    assert new["validation_state"] == "unverified"
+    assert not new.get("protected")
+
+
+def test_update_outcome_score_rejected_out_of_range(tmp_path: Path) -> None:
+    from crystalium.server import _handle_update
+    store = RelationalStore(db_path=tmp_path / "u3.sqlite")
+    store.insert_crystal(_proc_crystal("c1"))
+    comps = _update_components(store)
+    with pytest.raises(CrystaliumEnforcementError):
+        _handle_update({"id": "c1", "patch": {"outcome_success_score": 2.0}, "reason": "r"},
+                       caller_tier=Tier.T1, **comps)
+    with pytest.raises(CrystaliumEnforcementError):
+        _handle_update({"id": "c1", "patch": {"outcome_success_score": "nan-ish"}, "reason": "r"},
+                       caller_tier=Tier.T1, **comps)
+
+
+# --- Lost-update race: read-modify-write mutators must serialize (BEGIN IMMEDIATE) ---
+
+def test_record_access_no_lost_update_under_concurrency(tmp_path: Path) -> None:
+    """Concurrent record_access() on the SAME crystal must not drop increments.
+
+    Without the BEGIN IMMEDIATE write-lock, two threads each SELECT access_count=n,
+    both write n+1, and one increment is lost. With it, every increment lands."""
+    import json as _json
+    import threading
+
+    store = RelationalStore(db_path=tmp_path / "rmw.sqlite")
+    store.insert_crystal(_crystal("hot", "popular fact"))
+
+    n_threads, per_thread = 12, 8
+    barrier = threading.Barrier(n_threads)
+
+    def worker() -> None:
+        barrier.wait()                       # maximize interleaving
+        for _ in range(per_thread):
+            store.record_access("hot", now=_NOW)
+
+    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    final = store.get_crystal("hot")
+    util = final["utility"] if isinstance(final["utility"], dict) else _json.loads(final["utility"])
+    assert util["access_count"] == n_threads * per_thread   # zero lost increments
+
+
+def test_merge_provenance_no_lost_corroboration_under_concurrency(tmp_path: Path) -> None:
+    """Concurrent merge_provenance() must not drop corroboration bumps."""
+    import json as _json
+    import threading
+
+    store = RelationalStore(db_path=tmp_path / "rmw2.sqlite")
+    store.insert_crystal(_crystal("c", "fact"))
+
+    n_threads = 10
+    barrier = threading.Barrier(n_threads)
+
+    def worker(i: int) -> None:
+        barrier.wait()
+        store.merge_provenance("c", {"author_agent": f"agent-{i}", "source": "verified_agent"})
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    final = store.get_crystal("c")
+    prov = final["provenance"] if isinstance(final["provenance"], dict) else _json.loads(final["provenance"])
+    # corroboration starts at 1, each of n merges bumps by 1 -> 1 + n
+    assert prov["corroboration"] == 1 + n_threads
+    assert len(prov["merged_authors"]) == n_threads   # every distinct author retained

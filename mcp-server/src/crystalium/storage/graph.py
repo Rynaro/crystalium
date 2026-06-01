@@ -131,6 +131,19 @@ class GraphStore:
                 ),
             )
 
+    def delete_node(self, crystal_id: str) -> None:
+        """Physically remove a Crystal node and all its edges (RTBF hard-delete).
+
+        DETACH DELETE drops the node together with any attached relationships, so
+        the right-to-be-forgotten erasure leaves no graph trace of the content.
+        No-op if the node does not exist.
+        """
+        conn = self._get_conn()
+        try:
+            conn.execute("MATCH (c:Crystal {id: $id}) DETACH DELETE c", {"id": crystal_id})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("graph_delete_node_error", crystal_id=crystal_id, error=str(exc))
+
     def add_edge(self, src: str, dst: str, rel: str) -> None:
         """Add a typed edge between two Crystal nodes.
 

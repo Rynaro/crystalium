@@ -100,7 +100,10 @@ def test_checkpoint_warms_cache_and_records_prediction_error(tmp_path: Path) -> 
 
 def test_checkpoint_warm_prediction_has_zero_error(tmp_path: Path) -> None:
     cache = RecallCache()
-    cache.put("proj", "next step", "ALREADY")        # already anticipated
+    # Pre-warm with the SAME key the checkpoint's warmth check uses (k=10, layers=None,
+    # scope visibility/sensitivity None, tier=T1) — see ExecutionLayer.checkpoint.
+    cache.put("proj", "next step", "ALREADY",
+              k=10, layers=None, visibility=None, sensitivity=None, tier="T1")
     aeth = MagicMock()
     layer, store = _exec_layer(tmp_path, prefetch=True, cache=cache, aetheryte=aeth)
 
@@ -125,3 +128,31 @@ def test_checkpoint_off_does_not_touch_cache(tmp_path: Path) -> None:
     assert cache.peek("proj", "next step") is False
     dyn = store.get_crystal(res["id"]).get("memory_dynamics")
     assert not dyn or "prediction_error" not in dyn
+
+
+# --- Battle-test fix (MEDIUM): cache must key on all recall-shaping dimensions ---
+
+def test_recall_cache_isolates_security_relevant_dimensions() -> None:
+    """A result cached under one visibility / layer-subset / k must NOT be served to
+    a different one — keying on (project, query) alone was a correctness + leak bug."""
+    c = RecallCache()
+    c.put("p", "q", "R_admin", k=10, layers=None, visibility="admin", sensitivity=None, tier="T0")
+
+    # Same project+query but different visibility / k / layers -> MISS (no cross-serve).
+    assert c.get("p", "q", k=10, layers=None, visibility="public", sensitivity=None, tier="T0") is None
+    assert c.get("p", "q", k=5, layers=None, visibility="admin", sensitivity=None, tier="T0") is None
+    assert c.get("p", "q", k=10, layers=["semantic"], visibility="admin", sensitivity=None, tier="T0") is None
+    # Exact same context -> HIT.
+    assert c.get("p", "q", k=10, layers=None, visibility="admin", sensitivity=None, tier="T0") == "R_admin"
+    # layers order-insensitive (normalized to a sorted tuple).
+    c.put("p", "q2", "R", k=3, layers=["b", "a"], visibility=None, sensitivity=None, tier="T1")
+    assert c.get("p", "q2", k=3, layers=["a", "b"], visibility=None, sensitivity=None, tier="T1") == "R"
+
+
+def test_recall_cache_invalidate_project_still_works_with_rich_key() -> None:
+    c = RecallCache()
+    c.put("p1", "q", "A", k=10, visibility="v")
+    c.put("p2", "q", "B", k=10, visibility="v")
+    c.invalidate_project("p1")
+    assert c.get("p1", "q", k=10, visibility="v") is None
+    assert c.get("p2", "q", k=10, visibility="v") == "B"

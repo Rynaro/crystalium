@@ -23,6 +23,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -223,6 +225,40 @@ class RelationalStore:
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
+    @contextmanager
+    def _immediate_txn(self) -> Iterator[sqlite3.Connection]:
+        """A connection wrapped in a single BEGIN IMMEDIATE write transaction.
+
+        Battle-test fix (lost-update race): read-modify-write mutators that SELECT a
+        JSON column (or counter), merge in Python, then UPDATE must hold the database
+        write lock across the WHOLE read→write, or two concurrent writers each read
+        the same old value and the second clobbers the first — a lost update (e.g. a
+        dropped access_count increment, a lost corroboration bump, or one of two
+        interleaved memory_dynamics merges silently discarded). The default deferred
+        transaction only takes the write lock at the UPDATE, leaving the SELECT→UPDATE
+        window open. BEGIN IMMEDIATE acquires the RESERVED lock up front so writers
+        serialize; under WAL, readers stay non-blocking. The 10s busy timeout lets a
+        contending writer wait rather than fail.
+
+        isolation_level=None puts the connection in manual-transaction mode so the
+        BEGIN/COMMIT/ROLLBACK below are the authoritative transaction boundaries.
+        """
+        conn = sqlite3.connect(str(self.db_path), timeout=10, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.execute("COMMIT")
+        except BaseException:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                pass  # no active transaction (e.g. BEGIN IMMEDIATE timed out)
+            raise
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
         # executescript handles multi-statement DDL including CREATE TRIGGER ... BEGIN...END
         # blocks which contain internal semicolons that would break a naive split(";") approach.
@@ -337,7 +373,7 @@ class RelationalStore:
         Returns False if the crystal does not exist. Existing keys are overwritten;
         other dynamics keys (W4 FSRS fields) are preserved.
         """
-        with self._connect() as conn:
+        with self._immediate_txn() as conn:
             row = conn.execute(
                 "SELECT memory_dynamics FROM crystals WHERE id = ?", (crystal_id,)
             ).fetchone()
@@ -349,7 +385,6 @@ class RelationalStore:
                 "UPDATE crystals SET memory_dynamics = ?, updated_at = ? WHERE id = ?",
                 (_to_json(current), _now_iso(), crystal_id),
             )
-            conn.commit()
         return True
 
     def record_access(self, crystal_id: str, *, now: datetime) -> bool:
@@ -359,7 +394,7 @@ class RelationalStore:
         Importance/evb recompute is the caller's responsibility (kept out of the
         store so storage stays free of scoring logic).
         """
-        with self._connect() as conn:
+        with self._immediate_txn() as conn:
             row = conn.execute(
                 "SELECT utility FROM crystals WHERE id = ?", (crystal_id,)
             ).fetchone()
@@ -372,7 +407,6 @@ class RelationalStore:
                 "UPDATE crystals SET utility = ?, updated_at = ? WHERE id = ?",
                 (_to_json(util), _now_iso(), crystal_id),
             )
-            conn.commit()
         return True
 
     def record_outcome(self, crystal_id: str, score: float, *, now: datetime) -> bool:
@@ -383,7 +417,7 @@ class RelationalStore:
         EVB is refreshed on the next recall/Dream recompute. Returns False if
         the crystal does not exist.
         """
-        with self._connect() as conn:
+        with self._immediate_txn() as conn:
             row = conn.execute(
                 "SELECT utility FROM crystals WHERE id = ?", (crystal_id,)
             ).fetchone()
@@ -396,7 +430,6 @@ class RelationalStore:
                 "UPDATE crystals SET utility = ?, updated_at = ? WHERE id = ?",
                 (_to_json(util), _now_iso(), crystal_id),
             )
-            conn.commit()
         return True
 
     # ------------------------------------------------------------------
@@ -514,7 +547,7 @@ class RelationalStore:
             new_id:      Crystal that replaces it.
             t_valid_to:  Effective invalidation time (usually now).
         """
-        with self._connect() as conn:
+        with self._immediate_txn() as conn:
             row = conn.execute(
                 "SELECT temporal FROM crystals WHERE id = ?", (old_id,)
             ).fetchone()
@@ -529,7 +562,6 @@ class RelationalStore:
                 "UPDATE crystals SET temporal = ?, updated_at = ? WHERE id = ?",
                 (_to_json(temporal), _now_iso(), old_id),
             )
-            conn.commit()
 
     # ------------------------------------------------------------------
     # W4 right-to-be-forgotten — the ONE sanctioned hard-delete
@@ -544,7 +576,7 @@ class RelationalStore:
         `DELETE FROM crystals` in the codebase; it is reached only via the
         operator-gated `forget` enforcement op (see __main__ `forget` CLI).
         """
-        with self._connect() as conn:
+        with self._immediate_txn() as conn:
             row = conn.execute(
                 "SELECT layer FROM crystals WHERE id = ?", (crystal_id,)
             ).fetchone()
@@ -556,7 +588,6 @@ class RelationalStore:
                 (crystal_id, actor_tier, reason, row["layer"], now.isoformat()),
             )
             conn.execute("DELETE FROM crystals WHERE id = ?", (crystal_id,))
-            conn.commit()
         return True
 
     def merge_provenance(self, existing_id: str, provenance: dict[str, Any]) -> bool:
@@ -568,7 +599,7 @@ class RelationalStore:
         provenance.merged_authors / merged_sources and increments
         provenance.corroboration. Returns False if the crystal does not exist.
         """
-        with self._connect() as conn:
+        with self._immediate_txn() as conn:
             row = conn.execute(
                 "SELECT provenance FROM crystals WHERE id = ?", (existing_id,)
             ).fetchone()
@@ -592,7 +623,6 @@ class RelationalStore:
                 "UPDATE crystals SET provenance = ?, updated_at = ? WHERE id = ?",
                 (_to_json(prov), _now_iso(), existing_id),
             )
-            conn.commit()
         return True
 
     def recent_crystal_ids(self, project: str, *, exclude_id: str, limit: int = 5) -> list[str]:

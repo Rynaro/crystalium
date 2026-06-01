@@ -138,53 +138,52 @@ class TestBiTemporalSupersession:
         tmp_blob: BlobStore,
         enforcement: Enforcement,
     ) -> None:
-        """SemanticLayer.update: old crystal gets t_valid_to; new crystal gets t_valid_from."""
-        from crystalium.gate import PromotionGate
+        """SemanticLayer.update: old crystal gets t_valid_to + superseded_by; new
+        crystal gets t_valid_from, status=active, and trust_tier re-pinned to the
+        caller (battle-test: this test was previously abandoned with zero assertions)."""
+        from datetime import datetime, timezone
+
         from crystalium.aetheryte.redact import Redactor
-        from crystalium.layers.semantic import SemanticLayer
+        from crystalium.gate import PromotionGate
         from crystalium.importance import importance_score
-        import os
+        from crystalium.layers.semantic import SemanticLayer
 
-        os.environ["CRYSTALIUM_AUTO_CONFIRM"] = "1"
-        try:
-            config = Config(rate_limit_per_minute=200)
-            gate = PromotionGate(
-                config=config,
-                relational=tmp_relational,
-                enforcement=enforcement,
-            )
-            redactor = Redactor(config)
-            layer = SemanticLayer(
-                blob_store=tmp_blob,
-                relational=tmp_relational,
-                vector_store=None,
-                graph_store=None,
-                enforcement=enforcement,
-                gate=gate,
-                redactor=redactor,
-                importance_fn=importance_score,
-            )
+        config = Config(rate_limit_per_minute=200)
+        gate = PromotionGate(config=config, relational=tmp_relational, enforcement=enforcement)
+        layer = SemanticLayer(
+            blob_store=tmp_blob, relational=tmp_relational, vector_store=None,
+            graph_store=None, enforcement=enforcement, gate=gate,
+            redactor=Redactor(config), importance_fn=importance_score,
+        )
 
-            # First commit
-            result1 = layer.commit(
-                payload={
-                    "summary": "original fact",
-                    "scope": {"project": "test", "agent_class_visibility": None, "sensitivity_tag": "none"},
-                },
-                provenance={
-                    "source": "verified_agent",
-                    "author_agent": "agent-A",
-                    "task_id": None,
-                    "created_at": "2026-05-28T12:00:00+00:00",
-                },
-                caller_tier=Tier.T1,
-                witnesses=[],  # no witnesses → pending... but CRYSTALIUM_AUTO_CONFIRM=1 is off here
-            )
+        # Seed an existing active semantic crystal directly (bypass the promotion dance —
+        # this test is about the UPDATE bi-temporal mechanics, not admission).
+        now_iso = datetime(2026, 5, 28, 12, 0, tzinfo=timezone.utc).isoformat()
+        tmp_relational.insert_crystal({
+            "id": "sem-1", "layer": "semantic", "trust_tier": "T1",
+            "validation_state": "validated", "status": "active", "summary": "original fact",
+            "scope": {"project": "test"},
+            "provenance": {"source": "verified_agent", "created_at": now_iso},
+            "utility": {"importance": 0.0}, "temporal": {"t_valid_from": now_iso},
+        })
 
-            # Wait: CRYSTALIUM_AUTO_CONFIRM=1 is set, but k=3 still required
-            # Use force_promote via T0 to bypass
-        finally:
-            os.environ.pop("CRYSTALIUM_AUTO_CONFIRM", None)
+        res = layer.update(record_id="sem-1", patch={"summary": "revised fact"},
+                           reason="correction", caller_tier=Tier.T1)
+        new_id = res["id"]
+        assert new_id != "sem-1"
+
+        old = tmp_relational.get_crystal("sem-1")
+        new = tmp_relational.get_crystal(new_id)
+        old_temporal = old["temporal"] if isinstance(old["temporal"], dict) else __import__("json").loads(old["temporal"])
+        new_temporal = new["temporal"] if isinstance(new["temporal"], dict) else __import__("json").loads(new["temporal"])
+
+        assert old_temporal.get("t_valid_to") is not None          # old closed
+        assert old_temporal.get("superseded_by") == new_id
+        assert new_temporal.get("t_valid_from") is not None        # new opened
+        assert new_temporal.get("t_valid_to") is None
+        assert new["status"] == "active"
+        assert new["summary"] == "revised fact"
+        assert new["trust_tier"] == "T1"                           # re-pinned to caller
 
     def test_update_via_relational_directly(
         self,

@@ -84,7 +84,15 @@ class ExecutionLayer:
             project = scope.get("project") if isinstance(scope, dict) else None
             if not project:
                 return
-            warm = self.recall_cache.peek(project, query)
+            # Mirror the pre-warm recall's keying (k=10, layers=None, scope + tier),
+            # so the warmth check reads the same cache entry the warm-up writes.
+            _ctx = {
+                "k": 10, "layers": None,
+                "visibility": scope.get("agent_class_visibility") if isinstance(scope, dict) else None,
+                "sensitivity": scope.get("sensitivity_tag") if isinstance(scope, dict) else None,
+                "tier": str(caller_tier) if caller_tier is not None else None,
+            }
+            warm = self.recall_cache.peek(project, query, **_ctx)
             prediction_error = 0.0 if warm else 1.0
             if not warm:
                 # Warm the cache so the actual recall lands as a hit.

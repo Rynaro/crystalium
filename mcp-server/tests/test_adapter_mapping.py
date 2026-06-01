@@ -79,9 +79,23 @@ def test_summary_never_empty_without_objective():
     assert payload["provenance"]["source"] == "unverified_agent"  # T2
 
 
-def test_resolve_tier_explicit_token_wins():
+def test_resolve_tier_explicit_token_cannot_self_elevate():
+    # MIN-trust: a roster eidolon (atlas -> identity T1) declaring trace.tier="T0"
+    # is CLAMPED to T1; it cannot launder itself up to human provenance.
     env = _envelope(); env["trace"]["tier"] = "T0"
-    assert resolve_caller_tier(env) == Tier.T0
+    assert resolve_caller_tier(env) == Tier.T1
+
+
+def test_resolve_tier_unknown_source_cannot_self_elevate():
+    # The laundering attack: an unknown/tool source declaring T0 stays T3 (fail-closed).
+    env = _envelope(eidolon="some-random-tool"); env["trace"]["tier"] = "T0"
+    assert resolve_caller_tier(env) == Tier.T3
+
+
+def test_resolve_tier_explicit_token_honors_self_downgrade():
+    # A self-DOWNGRADE (toward less trust) is honored: atlas (T1) -> T2.
+    env = _envelope(eidolon="atlas"); env["trace"]["tier"] = "T2"
+    assert resolve_caller_tier(env) == Tier.T2
 
 
 def test_resolve_tier_falls_back_to_roster_default():

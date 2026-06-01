@@ -50,20 +50,11 @@ _ROSTER_EIDOLONS: frozenset[str] = frozenset(
 _HOST_EIDOLONS: frozenset[str] = frozenset({"host", "host-llm", "cortex"})
 
 
-def resolve_caller_tier(envelope: dict[str, Any]) -> Tier:
-    """Resolve the inbound artifact's trust tier (W7), preserving MIN-trust.
+def _identity_tier(envelope: dict[str, Any]) -> Tier:
+    """The trust tier implied by the envelope's *source identity* (from.eidolon).
 
-    Priority: an explicit T0-T3 token in trace.tier wins; otherwise fall back to the
-    per-eidolon default (roster Eidolon -> T1, host -> T0); an unknown source or any
-    unparseable tier -> T3 (fail-closed, lands episodic-quarantined — never laundered
-    up). The chokepoint + LAYER_CEILING still enforce the tier at commit."""
-    trace = envelope.get("trace", {}) or {}
-    raw = trace.get("tier")
-    if raw is not None:
-        try:
-            return Tier.from_str(str(raw))
-        except Exception:
-            pass  # non-tier token (e.g. "standard"/"trance") -> fall through to default
+    Host -> T0, roster Eidolon -> T1, unknown / tool-origin -> T3 (most conservative).
+    """
     eidolon = (envelope.get("from", {}) or {}).get("eidolon", "")
     key = str(eidolon).strip().lower()
     if key in _HOST_EIDOLONS:
@@ -71,6 +62,35 @@ def resolve_caller_tier(envelope: dict[str, Any]) -> Tier:
     if key in _ROSTER_EIDOLONS:
         return Tier.T1
     return Tier.T3  # unknown / tool-origin: most conservative
+
+
+def resolve_caller_tier(envelope: dict[str, Any]) -> Tier:
+    """Resolve the inbound artifact's trust tier (W7), preserving MIN-trust.
+
+    The source identity (from.eidolon) sets the *ceiling* on trust. A T0-T3 token in
+    trace.tier may only ever move the result toward LESS trust (a self-downgrade); it
+    can never elevate an artifact above what its source identity earns.
+
+    Battle-test fix (HIGH — trust laundering): the previous implementation returned an
+    explicit trace.tier token UNCONDITIONALLY, so an envelope from an unknown / tool
+    source carrying trace.tier="T0" was laundered to human provenance + permanent
+    protection — the exact opposite of the docstring's "never laundered up" promise.
+    We now clamp to MIN-trust = max(declared, identity) over the Tier IntEnum (T0=0
+    most-trusted .. T3=3 least-trusted), so the more conservative tier always wins.
+
+    A non-tier token (e.g. v1.0 "standard"/"trance") or absent trace falls back to the
+    identity tier. The chokepoint + LAYER_CEILING still enforce the tier at commit."""
+    identity = _identity_tier(envelope)
+    trace = envelope.get("trace", {}) or {}
+    raw = trace.get("tier")
+    if raw is not None:
+        try:
+            declared = Tier.from_str(str(raw))
+        except Exception:
+            return identity  # non-tier token (e.g. "standard"/"trance") -> identity
+        # MIN-trust: honor a self-downgrade, refuse any self-elevation above identity.
+        return max(declared, identity)
+    return identity
 
 
 def layer_for_kind(kind: str) -> str:

@@ -186,86 +186,59 @@ def test_http_caller_identity_no_escalation() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_record_activity_called_on_commit(config, blob_store, relational_store) -> None:
-    """record_activity() is called on scheduler after a successful commit (Episodic)."""
-    from crystalium.enforcement import Enforcement
-    from crystalium.gate import PromotionGate
-    from crystalium.layers.episodic import EpisodicLayer
-    from crystalium.layers.semantic import SemanticLayer
-    from crystalium.layers.procedural import ProceduralLayer
-    from crystalium.layers.execution import ExecutionLayer
-    from crystalium.aetheryte.redact import Redactor
-    from crystalium.importance import importance_score
+def _drive_call_tool(server, name: str, arguments: dict):
+    """Invoke the REAL registered @server.call_tool dispatch handler (not a mock).
 
-    enforcement = Enforcement(config)
-    gate = PromotionGate(config, relational_store, enforcement)
-    redactor = Redactor(config)
+    Battle-test fix (MEDIUM): the old record_activity tests called the scheduler mock
+    themselves and asserted it — exercising zero dispatch code. These now go through
+    the actual CallToolRequest handler so the assertion proves the dispatcher wires
+    scheduler.record_activity()."""
+    import asyncio
 
-    episodic = EpisodicLayer(
-        blob_store=blob_store,
-        relational=relational_store,
-        vector_store=None,
-        graph_store=None,
-        enforcement=enforcement,
-        redactor=redactor,
-        importance_fn=importance_score,
+    import mcp.types as mt
+
+    handler = server.request_handlers[mt.CallToolRequest]
+    req = mt.CallToolRequest(
+        method="tools/call",
+        params=mt.CallToolRequestParams(name=name, arguments=arguments),
     )
+    return asyncio.run(handler(req))
 
-    # Mock scheduler
-    mock_scheduler = MagicMock()
 
-    # Simulate what _call_tool does for commit:
-    # 1. call _handle_commit
-    # 2. call scheduler.record_activity()
-    args = {
+def test_record_activity_called_on_commit(tmp_path: Path, monkeypatch) -> None:
+    """The dispatcher calls scheduler.record_activity() after a real commit."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")          # null embedder -> fast
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, scheduler = _build_server(Config(data_dir=tmp_path / "ra-commit"))
+    calls: list[int] = []
+    orig = scheduler.record_activity
+    monkeypatch.setattr(scheduler, "record_activity", lambda: (calls.append(1), orig()) and None)
+
+    _drive_call_tool(server, "crystalium.commit", {
         "layer": "episodic",
-        "payload": {
-            "summary": "test record",
-            "scope": {"project": "test", "agent_class_visibility": "all"},
-        },
+        "payload": {"summary": "dispatch test",
+                    "scope": {"project": "t", "agent_class_visibility": "all"}},
         "provenance": {"source": "verified_agent"},
-    }
-    semantic = SemanticLayer(
-        blob_store=blob_store,
-        relational=relational_store,
-        vector_store=None,
-        graph_store=None,
-        enforcement=enforcement,
-        gate=gate,
-        redactor=redactor,
-        importance_fn=importance_score,
+    })
+    assert calls, "dispatch must call scheduler.record_activity() after commit"
+
+
+def test_record_activity_called_on_recall(tmp_path: Path, monkeypatch) -> None:
+    """The dispatcher calls scheduler.record_activity() after a real recall."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, scheduler = _build_server(Config(data_dir=tmp_path / "ra-recall"))
+    before = scheduler._last_activity
+
+    _drive_call_tool(server, "crystalium.recall",
+                     {"scope": {"project": "t"}, "query": "anything", "k": 3})
+    assert scheduler._last_activity > before, (
+        "dispatch must advance scheduler._last_activity via record_activity() on recall"
     )
-    procedural = ProceduralLayer(
-        blob_store=blob_store,
-        relational=relational_store,
-        enforcement=enforcement,
-        gate=gate,
-        redactor=redactor,
-        importance_fn=importance_score,
-    )
-    execution = ExecutionLayer(
-        blob_store=blob_store,
-        relational=relational_store,
-        enforcement=enforcement,
-        importance_fn=importance_score,
-    )
-
-    result = _handle_commit(args, episodic, semantic, procedural, execution, Tier.T1)
-    # Simulate the scheduler.record_activity() call that _call_tool does
-    mock_scheduler.record_activity()
-
-    assert result["status"] == "committed"
-    mock_scheduler.record_activity.assert_called_once()
-
-
-def test_record_activity_called_on_recall(config, blob_store, relational_store) -> None:
-    """record_activity() is called after recall (tested via mock scheduler)."""
-    # This mirrors what _call_tool does: call aetheryte.recall then scheduler.record_activity()
-    mock_scheduler = MagicMock()
-
-    # The scheduler mock records activity
-    mock_scheduler.record_activity()
-    mock_scheduler.record_activity.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

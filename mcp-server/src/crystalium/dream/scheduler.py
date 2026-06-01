@@ -10,12 +10,16 @@ Design (spec.yaml §G8, §config_defaults):
       AND now - last_dream  >= min_dream_gap_s (default 1 800 s)
   - session_end() fast-path: called by crystalium.session_end MCP tool (W4).
   - Both paths call enqueue(dream_run_id) — no direct worker.run_pending() call.
-  - Dedup: _pending_run_ids set (in-memory) + dream_runs table UNIQUE(run_id).
-    Duplicate enqueue silently no-ops.
+  - Coalesce: at most ONE pending run at a time. enqueue() no-ops while any run
+    is pending (the two paths mint distinct run_ids, so a run_id-keyed guard
+    would not catch the real race); the dream_runs table UNIQUE(run_id) is a
+    second layer for identical IDs across restarts. The pending slot releases on
+    record_dream_completed(run_id).
 
 G8 test anchor:
-  test_g8_dream_dedup_single_enqueue — simultaneous idle-tick + session_end
-  yield exactly one enqueued run.
+  test_g8_dream_dedup_single_enqueue + test_g8_session_end_and_idle_tick_share_path
+  — simultaneous idle-tick + session_end (same OR distinct run_ids) yield exactly
+  one enqueued run.
 
 FINDING-004 (spec source_of_truth_attribution):
   Scheduler MUST run outside MCP request context. BackgroundScheduler runs in a
@@ -182,23 +186,40 @@ class DreamScheduler:
     def enqueue(self, dream_run_id: str) -> str | None:
         """Enqueue a Dream run by *dream_run_id* (shared dedup path).
 
-        Dedup logic (G8):
-          1. Check _pending_run_ids in-memory set under lock.
-          2. If already present: no-op, return None.
-          3. If new: add to set, call worker.enqueue(dream_run_id), return run_id.
+        Coalescing logic (G8 — *at most one pending Dream run at a time*):
+          1. Under lock, check whether ANY run is already pending.
+          2. If one is: no-op, return None (coalesced).
+          3. If none: add this run_id to the pending set, call
+             worker.enqueue(dream_run_id), return run_id.
 
-        The DB-level UNIQUE constraint on dream_runs.run_id provides a second
-        dedup layer for concurrent processes / post-restart scenarios.
+        Why coalesce on "any pending" rather than on run_id identity: the two
+        trigger paths (`_tick` and `on_session_end`) each mint an *independent*
+        UUID via `_make_run_id()`, so a run_id-keyed guard never fires for the
+        real concurrent race — both distinct IDs would enqueue and two Dreams
+        would run, violating G8. Gating on "is a run already pending" makes the
+        invariant hold for the production paths, not just the artificial
+        same-id collision. (Battle-test: fix/dream-enqueue-race, FINDING-004.)
+
+        The slot is released by record_dream_completed(run_id) when the worker
+        finishes, after which the next trigger may enqueue again.
+
+        The DB-level UNIQUE constraint on dream_runs.run_id remains a second
+        dedup layer for identical IDs across process restarts; the single-daemon
+        scheduler (FINDING-004) makes the in-memory gate authoritative in-process.
 
         Args:
             dream_run_id: Unique identifier for this Dream run.
 
         Returns:
-            dream_run_id if newly enqueued; None if deduplicated away.
+            dream_run_id if newly enqueued; None if coalesced away.
         """
         with self._lock:
-            if dream_run_id in self._pending_run_ids:
-                log.debug("dream_enqueue_dedup", run_id=dream_run_id)
+            if self._pending_run_ids:
+                log.debug(
+                    "dream_enqueue_coalesced",
+                    run_id=dream_run_id,
+                    pending=sorted(self._pending_run_ids),
+                )
                 return None
             self._pending_run_ids.add(dream_run_id)
 
@@ -224,7 +245,19 @@ class DreamScheduler:
 
         Called every dream_tick_s seconds by the background scheduler.
         Both conditions must hold simultaneously (G8 GIVEN clause).
+
+        Each tick first DRAINS any pending Dream runs (executing them off the MCP
+        hot path on this daemon thread) before evaluating whether to enqueue a new
+        one. Draining is what releases the in-memory pending slot via the worker's
+        on_run_complete callback — without it the slot would never free and the
+        coalescing gate would block every subsequent trigger (battle-test CRITICAL:
+        Dream was inert after the first trigger in server mode).
         """
+        try:
+            self.worker.run_pending()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("dream_drain_error", error=str(exc))
+
         now = datetime.now(timezone.utc)
         with self._lock:
             last_activity = self._last_activity

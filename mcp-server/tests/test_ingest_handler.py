@@ -49,6 +49,20 @@ def _ingest(comps, envelope, payload):
                            "payload_encoding": "json"}, ep, se, pr, ex)
 
 
+def test_ingest_rejects_payload_not_matching_declared_hash(tmp_path: Path) -> None:
+    """G7 binding (battle-test): the envelope is internally consistent (integrity.value
+    == artifact.sha256) but the ACTUAL payload bytes differ from the declared hash.
+    This must be rejected — the old validation only checked envelope self-consistency,
+    so tampered/mismatched payloads passed through unbound."""
+    comps = _components(tmp_path)
+    honest_payload = json.dumps({"findings": [{"id": "F1"}]})
+    env = _envelope(honest_payload, eidolon="atlas", tier="T1")  # sha256 over honest payload
+    tampered_payload = json.dumps({"findings": [{"id": "EVIL"}]})  # different bytes
+    with pytest.raises(CrystaliumEnforcementError) as ei:
+        _ingest(comps, env, tampered_payload)
+    assert ei.value.reason_code == "INGEST_PAYLOAD_HASH_MISMATCH"
+
+
 def test_t1_roster_artifact_lands_episodic_unverified(tmp_path: Path) -> None:
     comps = _components(tmp_path)
     artifact = {"findings": [{"id": "F1"}], "gaps": ["G1"]}

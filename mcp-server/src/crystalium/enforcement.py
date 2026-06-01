@@ -40,7 +40,7 @@ _stdlib_log = logging.getLogger("crystalium.enforcement")
 
 from crystalium.config import Config
 from crystalium.telemetry import record_call
-from crystalium.trust import Tier, LAYER_CEILING
+from crystalium.trust import LAYER_CEILING, Tier, tier_within_ceiling
 
 log = structlog.get_logger("crystalium.enforcement")
 
@@ -447,13 +447,14 @@ class Enforcement:
         Raises:
             TierCeilingViolation: If consolidated_tier > LAYER_CEILING[layer].
         """
-        ceiling = LAYER_CEILING.get(layer)
-        if ceiling is None:
+        if layer not in LAYER_CEILING:
             return  # unknown layer; let assert_tier_allowed handle it
 
-        # Tier enum: lower value = higher trust.
-        # "exceeds ceiling" means the integer value is greater (less trusted).
-        if consolidated_tier > ceiling:
+        # Single source of truth for the ceiling comparison (trust.tier_within_ceiling).
+        # This is the NAMED G4 guard; the real laundering scenario (a Dream cluster
+        # whose min-trust consolidated tier exceeds the Semantic ceiling) is routed
+        # through it from DreamWorker._consolidate.
+        if not tier_within_ceiling(consolidated_tier, layer):
             raise TierCeilingViolation(consolidated_tier, layer)
 
     # ------------------------------------------------------------------

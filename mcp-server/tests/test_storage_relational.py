@@ -73,8 +73,18 @@ class TestBM25Search:
         tmp_relational_store.insert_crystal(sem)
         tmp_relational_store.insert_crystal(epi)
         results = tmp_relational_store.bm25_search("Python", layer_filter="semantic", k=5)
+        ids = [r["id"] for r in results]
+        # Battle-test fix (low): the old test only looped over results — it passed
+        # vacuously if the filter over-filtered to []. Assert the filter actually
+        # returns the semantic row AND excludes the episodic one, and that both are
+        # present without the filter (so we know the exclusion is the filter's doing).
+        assert len(results) >= 1
+        assert sem["id"] in ids
+        assert epi["id"] not in ids
         for r in results:
             assert r["layer"] == "semantic"
+        unfiltered_ids = [r["id"] for r in tmp_relational_store.bm25_search("Python", k=5)]
+        assert epi["id"] in unfiltered_ids
 
     def test_bm25_search_no_results_on_empty(
         self, tmp_relational_store: RelationalStore

@@ -210,57 +210,62 @@ class Composer:
             tokens = self._tokenize(rec.summary)
             slot_records[slot].append((rec, tokens))
 
-        # Evict within each slot until slot.tokens <= slot.cap
+        # Pass 1 — per-slot eviction: trim each slot to its own (soft) cap.
         evicted_count = 0
-        kept_records: list[Any] = []
+        # Keep (rec, tokens, slot_name) so Pass 2 can evict globally and keep the
+        # per-slot totals accurate.
+        kept: list[tuple[Any, int, str]] = []
         slot_token_totals: dict[str, int] = {slot: 0 for slot in slot_caps}
 
         for slot_name, cap in slot_caps.items():
             items = slot_records[slot_name]
-            # Sort by eviction key ascending so we can pop from the end (cheapest pop)
-            # to KEEP highest-key items. We want to REMOVE lowest-key items first.
-            # Strategy: sort ascending by key, then trim from the front while over cap.
-
-            # Compute total tokens for this slot
             slot_total = sum(t for _, t in items)
 
             if slot_total <= cap:
-                # No eviction needed
-                for rec, _ in items:
-                    kept_records.append(rec)
+                for rec, tok in items:
+                    kept.append((rec, tok, slot_name))
                 slot_token_totals[slot_name] = slot_total
                 continue
 
-            # Sort ascending by eviction key (lowest-key = evicted first)
-            items_sorted = sorted(items, key=lambda pair: _eviction_key(pair[0]))
-
-            # Evict from the front (lowest eviction key) until within cap
-            remaining = list(items_sorted)
+            # Sort ascending by eviction key (lowest-key = evicted first), trim front.
+            remaining = sorted(items, key=lambda pair: _eviction_key(pair[0]))
             running_total = slot_total
-
             while running_total > cap and remaining:
-                evicted_rec, evicted_tokens = remaining.pop(0)  # remove lowest-key
+                evicted_rec, evicted_tokens = remaining.pop(0)
                 running_total -= evicted_tokens
                 evicted_count += 1
-                log.debug(
-                    "evicted",
-                    slot=slot_name,
-                    record_id=evicted_rec.id,
-                    importance=evicted_rec.importance,
-                    tokens=evicted_tokens,
-                )
+                log.debug("evicted", slot=slot_name, record_id=evicted_rec.id,
+                          importance=evicted_rec.importance, tokens=evicted_tokens)
 
-            for rec, _ in remaining:
-                kept_records.append(rec)
+            for rec, tok in remaining:
+                kept.append((rec, tok, slot_name))
             slot_token_totals[slot_name] = running_total
 
         total_tokens = sum(slot_token_totals.values())
 
-        # G6 assertion: total MUST be within total_cap
+        # Pass 2 — global cap reconciliation (G6 invariant). The slot caps are soft
+        # reservations whose sum (3800) intentionally over-subscribes the hard 3500
+        # total_cap; when enough slots fill, the working set must still be trimmed to
+        # total_cap. Per-slot eviction alone can never guarantee this (battle-test
+        # HIGH: the old code asserted instead of evicting and crashed recall). Evict
+        # the globally lowest-eviction-key records across ALL slots until within cap.
+        if total_tokens > total_cap:
+            kept.sort(key=lambda triple: _eviction_key(triple[0]))
+            while total_tokens > total_cap and kept:
+                evicted_rec, evicted_tokens, evicted_slot = kept.pop(0)
+                total_tokens -= evicted_tokens
+                slot_token_totals[evicted_slot] -= evicted_tokens
+                evicted_count += 1
+                log.debug("evicted_global", slot=evicted_slot, record_id=evicted_rec.id,
+                          importance=evicted_rec.importance, tokens=evicted_tokens)
+
+        kept_records = [rec for rec, _, _ in kept]
+
+        # G6 post-condition: the two-pass eviction guarantees this holds by
+        # construction; kept as a hard invariant tripwire.
         assert total_tokens <= total_cap, (
             f"WorkingSetOverflow: total_tokens={total_tokens} > total_cap={total_cap}. "
-            f"Slot breakdown: {slot_token_totals}. "
-            "This indicates slot caps sum > total_cap in config — fix slot allocation."
+            f"Slot breakdown: {slot_token_totals}."
         )
 
         return ComposedSet(
