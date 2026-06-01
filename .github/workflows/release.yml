@@ -7,13 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.1.0). Required for manual runs."
+        description: "Tag to release (e.g. v1.2.0). Required for manual runs."
         required: true
+      skip_image:
+        description: "Skip the container build/push and only (re)attach release assets to an already-published image. Use to add the Eidolon-release asset contract to a tag whose image digest is already pinned downstream — without changing the digest."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -23,6 +25,12 @@ jobs:
   publish-image:
     name: Build + push container to GHCR
     runs-on: ubuntu-latest
+    # Skipped on a workflow_dispatch with skip_image=true so assets can be
+    # (re)attached to an already-published tag without changing the image digest.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.skip_image == false }}
+    permissions:
+      packages: write
+      id-token: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
@@ -83,26 +91,94 @@ jobs:
           echo "Digest: ${{ steps.build.outputs.digest }}"
 
   github-release:
-    name: Create GitHub release
-    needs: publish-image
+    name: Create GitHub release + Eidolon asset contract
+    needs: [publish-image]
+    # Runs on a normal tag-push (after the image lands) and on an asset-only
+    # workflow_dispatch (publish-image skipped). Does not run if the build failed.
+    if: ${{ always() && (needs.publish-image.result == 'success' || needs.publish-image.result == 'skipped') }}
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
-      - name: Create release
-        uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
-          body: |
-            CRYSTALIUM ${{ github.ref_name }} — portable memory harness for the Eidolons.
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
 
-            **Container image:**
-            ```
-            docker pull ghcr.io/${{ github.repository_owner }}/crystalium:${{ github.ref_name }}
-            ```
+      - name: Build release metadata (Eidolon-release contract)
+        id: meta
+        run: |
+          set -euo pipefail
+          tag="${{ steps.tag.outputs.tag }}"
+          version="${tag#v}"
+          mkdir -p dist
+          # Reproducible source tarball of the tagged tree (git sets mtime to commit time).
+          git archive --format=tar --prefix="crystalium-${version}/" HEAD -o dist/source.tar
+          archive_sha="$(sha256sum dist/source.tar | awk '{print $1}')"
+          manifest_sha="null"
+          if [ -f install.manifest.json ]; then
+            manifest_sha="\"$(sha256sum install.manifest.json | awk '{print $1}')\""
+          fi
+          commit="$(git rev-parse HEAD)"
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          jq -n \
+            --arg name "crystalium" \
+            --arg version "$version" \
+            --arg tag "$tag" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg commit "$commit" \
+            --arg tree "$tree" \
+            --arg archive_sha "$archive_sha" \
+            --arg workflow ".github/workflows/release.yml" \
+            --argjson manifest_sha "$manifest_sha" \
+            '{
+              name: $name,
+              version: $version,
+              tag: $tag,
+              source: { type: "github", repo: $repo },
+              commit: $commit,
+              tree: $tree,
+              archive_sha256: $archive_sha,
+              manifest_sha256: $manifest_sha,
+              provenance: {
+                github_attestation: true,
+                workflow: $workflow
+              }
+            }' > dist/release-manifest.json
+          (cd dist && sha256sum source.tar release-manifest.json > SHA256SUMS)
 
-            Digest: `${{ needs.publish-image.outputs.digest }}`
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*
 
-            See `CHANGELOG.md` for details.
+      - name: Publish GitHub release + assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.tag.outputs.tag }}"
+          assets="dist/source.tar dist/release-manifest.json dist/SHA256SUMS"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Existing release (e.g. asset-only re-cut): attach/replace assets,
+            # leave the existing notes intact.
+            # shellcheck disable=SC2086
+            gh release upload "$tag" $assets --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            # shellcheck disable=SC2086
+            gh release create "$tag" $assets \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$tag" \
+              --generate-notes
+          fi
