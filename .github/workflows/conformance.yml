@@ -27,24 +27,37 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build image
-        run: docker compose build
+        run: docker compose build crystalium
+
+      # docker-compose.yml bind-mounts ".:/app", which HIDES the image's baked
+      # /app/.venv — so `docker compose run ... uv run ...` cannot find pytest or
+      # the install deps (see ci.yml header). These jobs therefore use plain
+      # `docker run` against crystalium:dev (the baked image is the source of
+      # truth) and bind-mount only the host target dir so the manifest written by
+      # install.sh survives the --rm container for the validate step.
+      - name: Prepare host install-target directory
+        run: |
+          mkdir -p /tmp/eiis-check-target
+          # World-writable so the container UID can write inside the bind-mount
+          chmod 777 /tmp/eiis-check-target
 
       - name: Run install.sh to produce install target
         run: |
-          docker compose run --rm \
-            -v "$(pwd):/workspace" \
-            -w /workspace \
-            crystalium \
-            bash install.sh --target /tmp/eiis-check-target --non-interactive
-
-      - name: Validate install target against EIIS v1.4 §1.9.1 whitelist (local stub)
-        run: |
-          docker compose run --rm \
+          docker run --rm \
+            --entrypoint bash \
             -v "$(pwd):/workspace" \
             -v "/tmp/eiis-check-target:/tmp/eiis-check-target" \
             -w /workspace \
-            crystalium \
-            python3 -c "
+            crystalium:dev \
+            install.sh --target /tmp/eiis-check-target --non-interactive
+
+      - name: Validate install target against EIIS v1.4 §1.9.1 whitelist (local stub)
+        run: |
+          docker run --rm \
+            -v "/tmp/eiis-check-target:/tmp/eiis-check-target" \
+            --entrypoint python3 \
+            crystalium:dev \
+            -c "
           import json, os, sys
 
           TARGET = '/tmp/eiis-check-target'
@@ -132,20 +145,25 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build image
-        run: docker compose build
+        run: docker compose build crystalium
 
+      # Use plain `docker run` against the baked crystalium:dev image — NOT
+      # `docker compose run`, whose ".:/app" bind-mount hides the baked
+      # /app/.venv and makes `uv run pytest` fail with "Failed to spawn: pytest"
+      # (see ci.yml header). Tests are baked at /app/tests, ECL_VERSION at /app.
       - name: Run ECL envelope test
         run: |
-          docker compose run --rm crystalium \
-            pytest mcp-server/tests/test_ecl_envelope.py -v --tb=short
+          docker run --rm \
+            -e CRYSTALIUM_SKIP_SLOW=1 \
+            crystalium:dev \
+            pytest tests/test_ecl_envelope.py -v --tb=short -p no:cacheprovider
 
       - name: Validate ECL_VERSION matches declared version
         run: |
-          docker compose run --rm \
-            -v "$(pwd):/workspace" \
-            -w /workspace \
-            crystalium \
-            python3 -c "
+          docker run --rm \
+            --entrypoint python3 \
+            crystalium:dev \
+            -c "
           ecl_ver = open('ECL_VERSION').read().strip()
           assert ecl_ver == '2.0', f'ECL_VERSION must be 2.0, got {ecl_ver!r}'
           print(f'ECL_VERSION = {ecl_ver} — PASS')
