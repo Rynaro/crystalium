@@ -46,6 +46,7 @@ from crystalium.enforcement import Enforcement
 from crystalium.gate import PromotionGate
 from crystalium.evb import make_evb_scorer
 from crystalium.importance import importance_score
+from crystalium.ingest_adapter import _HOST_EIDOLONS, _ROSTER_EIDOLONS
 from crystalium.layers.episodic import EpisodicLayer
 from crystalium.layers.execution import ExecutionLayer
 from crystalium.layers.procedural import ProceduralLayer
@@ -71,16 +72,79 @@ _DEFAULT_CALLER: dict[str, Any] = {
 }
 
 
-def _extract_caller_identity() -> dict[str, Any]:
-    """Extract caller identity from MCP request context.
+def _eidolon_identity_tier(eidolon: str) -> Tier:
+    """Map a process-level eidolon name to its trust tier.
 
-    In v0.1 the mcp Python SDK does not expose per-request identity headers,
-    so this always returns the D4 conservative default.
-
-    OQ-3: revisit when SDK surfaces identity headers or a crystalium-specific
-    extension field is defined for callers to pass their identity.
+    Reuses the same roster sets as ingest_adapter (single source of truth):
+      _HOST_EIDOLONS  -> T0 (host LLM / cortex)
+      _ROSTER_EIDOLONS -> T1 (verified Eidolon agent)
+      anything else   -> T3 (unknown / tool-origin; most conservative)
     """
-    return dict(_DEFAULT_CALLER)
+    key = eidolon.strip().lower()
+    if key in _HOST_EIDOLONS:
+        return Tier.T0
+    if key in _ROSTER_EIDOLONS:
+        return Tier.T1
+    return Tier.T3
+
+
+def _extract_caller_identity() -> dict[str, Any]:
+    """Extract caller identity from process-level env vars (v1.2.0).
+
+    Reads CRYSTALIUM_CALLER_EIDOLON and CRYSTALIUM_CALLER_TIER to resolve the
+    process-level trust tier for non-ingest MCP calls. All six Eidolons share
+    one server process, so identity is correctly a process-level env var.
+
+    Resolution order (MIN-trust: higher Tier int = less trust wins):
+      1. If CRYSTALIUM_CALLER_EIDOLON is set, map it through the roster sets
+         imported from ingest_adapter (_ROSTER_EIDOLONS / _HOST_EIDOLONS) to
+         get identity_tier (T0/T1/T3).
+      2. If CRYSTALIUM_CALLER_TIER is set, parse it via Tier.from_str() to get
+         declared_tier.
+      3. final_tier = max(declared_tier, identity_tier)  — MIN-trust convention.
+      4. If neither env var is set, fall back to the D4 conservative T2 default
+         (backward-compatible with pre-v1.2.0 deployments).
+
+    OQ-3 (original): env-var identity is the v1.2 answer; per-request SDK
+    headers remain future work.
+    """
+    import os
+
+    raw_eidolon = os.environ.get("CRYSTALIUM_CALLER_EIDOLON")
+    raw_tier = os.environ.get("CRYSTALIUM_CALLER_TIER")
+
+    if raw_eidolon is None and raw_tier is None:
+        # Neither set → preserve backward-compatible T2 default (D4 conservative).
+        return dict(_DEFAULT_CALLER)
+
+    # Determine identity_tier from eidolon name (if provided).
+    if raw_eidolon is not None:
+        identity_tier: Tier = _eidolon_identity_tier(raw_eidolon)
+    else:
+        # No eidolon name; identity alone doesn't constrain — start at T0 (most
+        # trusted) so the declared tier below drives the result.
+        identity_tier = Tier.T0
+
+    # Determine declared_tier from explicit tier override (if provided).
+    if raw_tier is not None:
+        try:
+            declared_tier: Tier = Tier.from_str(raw_tier)
+        except ValueError:
+            # Unparseable tier string → fall back to identity tier (conservative).
+            declared_tier = identity_tier
+    else:
+        # No explicit tier override → identity alone decides.
+        declared_tier = identity_tier
+
+    # MIN-trust: final tier is the LESS trusted (higher int) of the two.
+    final_tier = max(declared_tier, identity_tier)
+
+    eidolon_name = raw_eidolon if raw_eidolon is not None else _DEFAULT_CALLER["eidolon"]
+    return {
+        "eidolon": eidolon_name,
+        "version": _DEFAULT_CALLER["version"],
+        "tier": str(final_tier),
+    }
 
 
 def _caller_tier(caller: dict[str, Any]) -> Tier:

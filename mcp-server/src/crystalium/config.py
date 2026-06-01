@@ -54,6 +54,27 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Caller identity env vars (v1.2.0) — process-level identity for non-ingest
+# MCP calls. These drive server._extract_caller_identity(), not Config fields,
+# so they are documented here for discoverability alongside the other
+# CRYSTALIUM_* vars but are NOT surfaced as Config fields.
+#
+#   CRYSTALIUM_CALLER_EIDOLON  — Eidolon name (e.g. "atlas", "spectra").
+#       Mapped through the roster sets in ingest_adapter to T0/T1/T3.
+#       Absent → identity contributes no constraint (env-tier drives result).
+#
+#   CRYSTALIUM_CALLER_TIER  — Explicit trust tier override: "T0", "T1", "T2",
+#       or "T3" (case-insensitive). Parsed via Tier.from_str().
+#       MIN-trust rule: final tier = max(declared, identity_tier).
+#       Absent → identity tier drives result.
+#
+#   If neither is set → T2 default (D4 conservative; backward-compatible).
+# ---------------------------------------------------------------------------
+# _env("CRYSTALIUM_CALLER_EIDOLON")  — see server._extract_caller_identity()
+# _env("CRYSTALIUM_CALLER_TIER")     — see server._extract_caller_identity()
+
+
+# ---------------------------------------------------------------------------
 # Config dataclass
 # ---------------------------------------------------------------------------
 
