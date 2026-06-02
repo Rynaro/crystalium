@@ -6,6 +6,12 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-06-02
+
+### Fixed
+
+- **Multi-arch image — the published GHCR image now includes `linux/arm64`** (was `linux/amd64`-only). Apple Silicon hosts could not `docker pull` it ("no matching manifest for linux/arm64/v8"), which broke `eidolons mcp install crystalium` on arm64. The release workflow now builds each platform on its **native runner** (`ubuntu-latest` for amd64, `ubuntu-24.04-arm` for arm64), pushes each by digest, and assembles a manifest list — avoiding slow/flaky qemu cross-builds for the ML-heavy CPU image. No code change; the nexus roster re-pins the new multi-arch index digest.
+
 ## [1.2.0] — 2026-06-01
 
 ### Added

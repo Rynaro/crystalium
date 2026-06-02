@@ -22,32 +22,50 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/crystalium
 
 jobs:
-  publish-image:
-    name: Build + push container to GHCR
-    runs-on: ubuntu-latest
+  # ── Multi-arch image: build each platform on its NATIVE runner, then merge ──
+  # crystalium's CPU image is ML-heavy (torch/lancedb/kuzu); qemu cross-build is
+  # slow + flaky, so we build linux/amd64 on ubuntu-latest and linux/arm64 on the
+  # native ubuntu-24.04-arm runner, push each by digest (no tag), then assemble a
+  # manifest list in the merge job. Apple Silicon (arm64) hosts can then pull.
+  build-image:
+    name: Build ${{ matrix.platform }} image
+    runs-on: ${{ matrix.runner }}
     # Skipped on a workflow_dispatch with skip_image=true so assets can be
     # (re)attached to an already-published tag without changing the image digest.
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.skip_image == false }}
     permissions:
       packages: write
       id-token: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Resolve ref
         id: ref
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "ref=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "version=${{ github.event.inputs.tag }}" | sed 's/=v/=/' >> "$GITHUB_OUTPUT"
           else
             echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-            echo "version=${{ github.ref_name }}" | sed 's/=v/=/' >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.ref.outputs.ref }}
+
+      - name: Compute lowercase image name
+        id: imgname
+        run: |
+          # GHCR rejects uppercase namespaces; lowercase the org slug.
+          lower=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${{ env.REGISTRY }}/$lower" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker buildx
         uses: docker/setup-buildx-action@v3
@@ -59,43 +77,106 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute lowercase image name
-        id: imgname
-        run: |
-          # GHCR rejects uppercase namespaces; lowercase the org slug.
-          lower=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          echo "image=${{ env.REGISTRY }}/$lower" >> "$GITHUB_OUTPUT"
-
-      - name: Build + push (release target, not dev)
+      - name: Build + push by digest (CPU runtime, native arch)
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           target: base
-          # CPU-only runtime image. GPU is buildable-only (make build VARIANT=gpu),
-          # not published: crystalium's single-text embedding workload sees ~zero
-          # GPU benefit and the CUDA wheel is amd64-only + ~6 GB to store/pull.
+          platforms: ${{ matrix.platform }}
           build-args: |
             TORCH_VARIANT=cpu
-          push: true
-          tags: |
-            ${{ steps.imgname.outputs.image }}:${{ steps.ref.outputs.version }}
-            ${{ steps.imgname.outputs.image }}:latest
-          provenance: true
-          sbom: true
+          # push-by-digest: no tag here; the merge job assembles the tagged
+          # manifest list. provenance/sbom off — they create extra manifests
+          # that complicate imagetools create; release attestation is on the
+          # Eidolon-release artefacts (github-release job), not the image.
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ steps.imgname.outputs.image }},push-by-digest=true,name-canonical=true,push=true
 
-      - name: Print digest
+      - name: Export digest
         run: |
-          echo "Published ${{ steps.imgname.outputs.image }}:${{ steps.ref.outputs.version }}"
-          echo "Digest: ${{ steps.build.outputs.digest }}"
+          set -euo pipefail
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-image:
+    name: Merge multi-arch manifest list
+    needs: [build-image]
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.skip_image == false }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.merge.outputs.digest }}
+    steps:
+      - name: Resolve version
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" | sed 's/=v/=/' >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.ref_name }}" | sed 's/=v/=/' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute lowercase image name
+        id: imgname
+        run: |
+          lower=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${{ env.REGISTRY }}/$lower" >> "$GITHUB_OUTPUT"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create + push manifest list
+        id: merge
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          image="${{ steps.imgname.outputs.image }}"
+          version="${{ steps.ref.outputs.version }}"
+          # shellcheck disable=SC2046
+          docker buildx imagetools create \
+            -t "${image}:${version}" \
+            -t "${image}:latest" \
+            $(printf "${image}@sha256:%s " *)
+          digest="$(docker buildx imagetools inspect "${image}:${version}" \
+            --format '{{json .Manifest}}' | jq -r '.digest')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Published multi-arch ${image}:${version} @ ${digest}"
+          docker buildx imagetools inspect "${image}:${version}" | grep -i platform || true
 
   github-release:
     name: Create GitHub release + Eidolon asset contract
-    needs: [publish-image]
+    needs: [merge-image]
     # Runs on a normal tag-push (after the image lands) and on an asset-only
-    # workflow_dispatch (publish-image skipped). Does not run if the build failed.
-    if: ${{ always() && (needs.publish-image.result == 'success' || needs.publish-image.result == 'skipped') }}
+    # workflow_dispatch (image jobs skipped). Does not run if the build failed.
+    if: ${{ always() && (needs.merge-image.result == 'success' || needs.merge-image.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
