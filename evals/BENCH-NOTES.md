@@ -184,6 +184,21 @@ gather→consolidate→prune pipeline in two arm-pairs.
 regression — every augment ships behind its off flag, fully tested; the gate is
 now *evaluable* (metrics defined, no longer null).
 
+**T2 re-examination (2026-06-04) — confirmed OFF, two paths identified.** Re-ran:
+the baseline still ties exactly (consolidation_gain 1/1, drift 0/0, STC retention
+1.0/1.0). Two routes to a discriminating Dream gate, BOTH beyond a fixture tweak:
+(1) the `_gather` per-topic-cluster refinement below (a **production** Dream-worker
+change); and (2) the ledger's preferred **interleaved-multi-task backward-transfer**
+harness — the `forgetting()`/`backward_transfer()`/`forward_transfer()` R-matrix
+functions already exist in `evals/metrics.py:45-72`, but no workload drives them
+(it needs an A→B→A interference stream measuring whether Dream replay/interleave
+reduces catastrophic forgetting of task A). Both are substantial builds with
+genuinely uncertain outcomes (the retention dynamics resemble the W4/FSRS null —
+the prune may not evict task A regardless of replay). Per ablation-as-arbiter we do
+NOT manufacture a consolidation-count win on the coarse single-cluster fixture; the
+W3 flags stay OFF until one of those harnesses is built and shows a confound-free
+win. This is the deliberate honest stopping point, not a skip.
+
 **Why the tie (root cause + [GAP] for a later wave):** v0.1 `_gather`
 (`worker.py:252`) collapses seeds + graph-neighbours into a *single mixed
 cluster*, so consolidation count is ~1 regardless of replay ordering; the mixed

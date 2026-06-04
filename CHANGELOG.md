@@ -8,6 +8,18 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ### Changed (T2 — earn the OFF flags)
 
+- **W3 Dream — re-examined, honest null confirmed; `dream_replay_evb` / `dream_interleave`
+  / `dream_stc` all stay OFF.** The baseline still ties exactly (consolidation_gain 1/1,
+  drift 0/0, STC retention 1.0/1.0) — the v0.1 `_gather` collapses seeds + graph
+  neighbours into a single mixed cluster, so consolidation count is ~1 regardless of
+  replay ordering or STC. Two routes to discrimination were identified, both beyond a
+  fixture tweak: (1) a `_gather` per-topic-cluster refinement (a production Dream-worker
+  change); (2) the ledger's interleaved-multi-task **backward-transfer** harness (the
+  `forgetting`/`backward_transfer` R-matrix functions exist in metrics.py but no
+  workload drives them). Per ablation-as-arbiter, no consolidation-count win is
+  manufactured on the coarse fixture — the flags stay OFF until one harness shows a
+  confound-free win. BENCH-NOTES §W3 updated with both paths.
+
 - **W5(i) pattern completion earned ON — `recall_completion` default flipped to `True`;
   `recall_context_match` stays OFF.** The `retrieval_gate` corpus now adds 24
   lexically-close distractors (share query words, not relevant, not graph-linked) so
