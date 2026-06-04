@@ -75,7 +75,30 @@ path for convention parity and share this caveat. **[GAP]** A future wave could
 relocate the venv (e.g. `UV_PROJECT_ENVIRONMENT=/opt/venv`) so the compose path
 works with live edits; out of scope for W1.
 
-## W2 EVB ablation gate (v0.3.0) — INCONCLUSIVE, flag stays OFF
+## W2 EVB ablation gate — EARNED ON (T2, 2026-06-04)
+
+The deterministic `evals/evb_gate.py` gate decides on **retained-set purity** (the
+axis EVB's `gain×need` actually moves), correcting the original promotion/retention
+criterion which saturated at 1.0 in both arms (non-discriminating):
+
+| axis | on (evb) | off (legacy) | delta |
+|---|---|---|---|
+| retention_precision | 1.00 | 0.33 | **+0.67** |
+| high_value_retention | 1.00 | 1.00 | 0.00 (no regression) |
+| distractor_eviction | 1.00 | 0.00 | +1.00 |
+| promotion_precision | 1.00 | 1.00 | 0.00 (saturated — non-discriminating) |
+
+**Verdict: EVB strictly improves retained-set purity with no high-value-retention
+regression ⇒ `evb_enabled` flipped ON (default).** Legacy's additive blend keeps
+high-need/zero-gain distractors (recency+access ≈ 0.40 > 0.10 threshold) and
+unscored-old crystals (0.5 neutral-outcome term ≈ 0.14 > 0.10); EVB's multiplicative
+scorer zeroes both and keeps only the genuine high-value set. Full suite green with
+the flip (656 passed) — no production coupling. `make bench` canary unaffected (1.0).
+Run: `docker compose run --rm crystalium python -c "from evals.evb_gate import run; print(run())"`.
+
+---
+
+### (Superseded) W2 EVB ablation gate (v0.3.0) — INCONCLUSIVE, flag stayed OFF
 
 `docker run --rm crystalium:dev python -m evals ab --flag evb_enabled` over the
 A/B arm set, evb_threshold=0.5:

@@ -231,11 +231,14 @@ class TestHumanConfirmActive:
 
 
 class TestEvbFlag:
-    """W2: evb_enabled flag + EVB proxy weights (default OFF — ablation-or-revert)."""
+    """W2: evb_enabled flag + EVB proxy weights (EARNED ON in T2 — the
+    discriminating evb_gate shows EVB strictly improves retained-set purity with no
+    high-value-retention regression; the original promotion/retention criterion
+    saturated and could not discriminate)."""
 
-    def test_evb_disabled_by_default(self, tmp_path: Path) -> None:
+    def test_evb_enabled_by_default(self, tmp_path: Path) -> None:
         cfg = Config(data_dir=tmp_path)
-        assert cfg.evb_enabled is False
+        assert cfg.evb_enabled is True
         assert len(cfg.evb_gain_weights) == 3
         assert len(cfg.evb_need_weights) == 3
 

@@ -6,6 +6,20 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (T2 — earn the OFF flags)
+
+- **W2 EVB earned ON — `evb_enabled` default flipped to `True`.** A *discriminating*
+  ablation gate (`evals/evb_gate.py`) now decides on **retained-set purity**
+  (`retention_precision`) under a no-high-value-regression guard — the axis EVB's
+  multiplicative `gain×need` actually moves. The original criterion (promotion
+  precision AND high-value retention) **saturated at 1.0 in both arms** and could
+  never discriminate (the post-1.0 ledger's "INCONCLUSIVE"). Result: EVB
+  `retention_precision` **1.0 vs legacy 0.33** (legacy retains high-need/zero-gain
+  distractors + unscored-old; EVB keeps only genuine value) with **high-value
+  retention tied at 1.0** (no recall cost). Full suite green with the flip — no
+  production coupling. DESIGN-RATIONALE §D6.1 + BENCH-NOTES W2 updated; gate
+  regression test `test_run_returns_evb_wins_on_retention_purity`.
+
 ### Fixed (T1 correctness — three real behavior gaps)
 
 - **G1.1 — `semantic.update()` re-embeds the new revision into the vector store.**

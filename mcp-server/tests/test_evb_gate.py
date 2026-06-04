@@ -23,6 +23,7 @@ def test_gate_metrics_are_defined_both_arms(tmp_path: Path) -> None:
     for arm in (on, off):
         assert arm["promotion_precision"] is not None
         assert arm["high_value_retention"] is not None
+        assert arm["retention_precision"] is not None
         assert arm["distractor_eviction"] is not None
 
 
@@ -43,8 +44,14 @@ def test_high_value_retained_in_both_arms(tmp_path: Path) -> None:
     assert off["high_value_retention"] == pytest.approx(1.0)
 
 
-def test_run_returns_verdict_off_on_tie(tmp_path: Path) -> None:
+def test_run_returns_evb_wins_on_retention_purity(tmp_path: Path) -> None:
     result = run(data_root=str(tmp_path))
-    # Ties on the two DoD axes ⇒ does not strictly beat ⇒ gate_pass False.
-    assert result["gate_pass"] is False
-    assert "axes" in result and "distractor_eviction" in result["axes"]
+    # The DISCRIMINATING gate (W2 earned, T2): EVB strictly improves retained-set
+    # PURITY (retention_precision) with no high-value-retention regression. The
+    # earlier promotion/high-value criterion saturated at 1.0 in BOTH arms (legacy
+    # keeps every hv too), so it could not discriminate — see DESIGN-RATIONALE §D6.1.
+    assert result["gate_pass"] is True
+    rp = result["axes"]["retention_precision"]
+    assert rp["on"] == pytest.approx(1.0)        # EVB retains only genuine value
+    assert rp["off"] < rp["on"]                  # legacy retains distractors → impure
+    assert result["axes"]["high_value_retention"]["delta"] >= 0  # no regression

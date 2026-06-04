@@ -152,9 +152,12 @@ class Config:
 
     # EVB importance (W2, Mattar & Daw 2018). When True, evb_score replaces the
     # legacy importance_score as the single source of truth for eviction + the
-    # composer (the roadmap's "importance.mode: legacy|evb"). Default OFF until the
-    # ablation bench shows it beating legacy (ablation-or-revert). See evb.py.
-    evb_enabled: bool = False
+    # composer (the roadmap's "importance.mode: legacy|evb"). EARNED ON (T2): the
+    # discriminating evb_gate shows EVB strictly improves retained-set purity
+    # (retention_precision 1.0 vs legacy 0.33) with NO high-value-retention
+    # regression — the original promotion/high-value criterion saturated at 1.0 in
+    # both arms (non-discriminating). See DESIGN-RATIONALE §D6.1 / BENCH-NOTES W2.
+    evb_enabled: bool = True
     # Hand-tuned EVB proxy weights (SFMA-style). gain over
     # (outcome_success, novelty, corroboration_potential); need over
     # (recency, access_frequency, predicted_next_task_match). Sum within each
@@ -284,7 +287,7 @@ class Config:
             embed_backend=_env("CRYSTALIUM_EMBED_BACKEND", "sentence-transformers")
             or "sentence-transformers",
             rate_limit_per_minute=_env_int("CRYSTALIUM_RATE_LIMIT_PER_MINUTE", 200),
-            evb_enabled=_env_bool("CRYSTALIUM_EVB_ENABLED", False),
+            evb_enabled=_env_bool("CRYSTALIUM_EVB_ENABLED", True),  # W2 earned ON (T2)
             dream_replay_evb=_env_bool("CRYSTALIUM_DREAM_REPLAY_EVB", False),
             dream_interleave=_env_bool("CRYSTALIUM_DREAM_INTERLEAVE", False),
             dream_interleave_ratio=_env_float("CRYSTALIUM_DREAM_INTERLEAVE_RATIO", 0.5),
