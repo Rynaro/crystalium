@@ -8,6 +8,18 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ### Changed (T2 — earn the OFF flags)
 
+- **W5 predictive prefetch — confound fixed, honest null, `recall_prefetch` stays OFF.**
+  The `prefetch_gate` now predicts the next query with an **imperfect** first-order
+  rotation model (prediction accuracy 0.73 < 1.0) instead of handing the checkpoint
+  the verbatim future query — closing the fabricated-perfect-prediction confound the
+  ledger flagged (a `gate_pass` guard now requires accuracy < 1.0). With that fixed,
+  a **deeper** confound surfaced: the OFF arm has *no recall cache at all*, so the
+  p95 win is cache-vs-no-cache (ordinary cache-warming of repeated queries), not
+  isolated protention. The gate encodes this (`protention_isolated` → False →
+  `gate_pass` False); `recall_prefetch` stays OFF until a cache-on/prefetch-off
+  baseline can credit protention. An honest null, not a flip. BENCH-NOTES §W5(iii)
+  updated; guard tests `test_prefetch_gate.py`.
+
 - **W2 EVB earned ON — `evb_enabled` default flipped to `True`.** A *discriminating*
   ablation gate (`evals/evb_gate.py`) now decides on **retained-set purity**
   (`retention_precision`) under a no-high-value-regression guard — the axis EVB's

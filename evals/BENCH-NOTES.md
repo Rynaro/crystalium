@@ -270,23 +270,41 @@ faculty by the harness. The deliberate cost (the exact paraphrase wording is no
 longer separately stored — pattern separation's inverse) is the intended trade;
 precision (returning the relevant fact) holds.
 
-### (iii) predictive prefetch — PASS-BUT-CONFOUNDED, `recall_prefetch` stays OFF
+### (iii) predictive prefetch — CONFOUND #1 FIXED, confound #2 found, `recall_prefetch` stays OFF (T2, 2026-06-04)
+
+The W5 **[GAP]** below — "needs an *imperfect* predictor" — is now closed: the gate
+predicts the next query with an imperfect first-order rotation model and lets the
+actual stream deviate, so `prediction_accuracy = 0.73 (< 1.0)`, no longer the
+fabricated-perfect signal. A confound guard (`gate_pass` requires `accuracy < 1.0`)
+prevents regression.
+
+| axis | on (prefetch) | off (no cache) |
+|---|---|---|
+| prediction_accuracy | **0.73** (imperfect ✓) | 0.73 |
+| cache_hit_rate | 0.73 | null (no cache) |
+| recall_p95_ms | 0.14 | 189.3 |
+
+**Verdict: still `recall_prefetch` stays OFF — a DEEPER confound surfaced.** With the
+predictor fixed, the p95 win is exposed as **cache-vs-no-cache, not protention**: the
+OFF arm (`recall_prefetch=False`) has **no recall cache at all**, and the queries
+repeat, so the cache warms on first use and every repeat hits *regardless of
+prediction* — the 1300× p95 drop is ordinary caching, not predictive prefetch.
+Crediting protention specifically needs a **cache-on / prefetch-off baseline**, which
+the bundled `recall_prefetch` flag does not expose. The gate now encodes this
+(`protention_isolated = off-arm-has-a-cache` → False → `gate_pass` False). Honest
+null on protention; the cache benefit is real but is a separate (unflagged) axis.
+Guard tests: `test_prefetch_gate.py`.
+
+#### (Superseded) predictive prefetch — PASS-BUT-CONFOUNDED (fabricated predictor)
 
 | axis | on (prefetch) | off (no cache) |
 |---|---|---|
 | cache_hit_rate | 0.50 | null (no cache) |
 | recall_p95_ms | 0.09 | 235.1 |
 
-**Verdict: the gate passes by the letter (hit rate > 0, p95 down ~2600×) but the
-pass is CONFOUNDED ⇒ `recall_prefetch` stays OFF.** The harness feeds the
-checkpoint the *exact verbatim* query the agent then recalls (`predicted_next_query
-== recall query`), so the 0.50 hit rate is fabricated perfect prediction, not an
-earned predictor — and the p95 drop is the warming recall's cost *prepaid at
-checkpoint time* (shifted off the recall critical path, not eliminated). Per
-ablation-as-arbiter we discount confounded passes: the faculty ships gated and
-ready, but the default does not change on a harness-fabricated signal. **[GAP]** a
-trustworthy prefetch gate needs an *imperfect* predictor (next query drawn from a
-realistic distribution, not handed over) so the hit rate reflects real protention.
+The original harness fed the checkpoint the *exact verbatim* query the agent then
+recalled — fabricated perfect prediction. Superseded by the imperfect-predictor gate
+above.
 
 ## W6 security & integrity gates — poisoning ASR PASS; drift bench proven; flags split
 
