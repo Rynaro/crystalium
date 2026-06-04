@@ -6,6 +6,31 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed (T1 correctness — three real behavior gaps)
+
+- **G1.1 — `semantic.update()` re-embeds the new revision into the vector store.**
+  Before this fix, the semantic layer's `update()` method inserted the new revision
+  into the relational/FTS index but never called `vector_store.upsert()` — identical
+  to the episodic-fallback gap closed in a prior battle-test sweep. With
+  `recall_active_only=True`, the superseded original is excluded from recall, so an
+  updated semantic fact silently vanished from the dense recall arm. The fix mirrors
+  the `commit()` embed+upsert pattern (best-effort; null/SKIP_SLOW embedder → no-op).
+  Regression test: `test_semantic_update_reembeds_new_revision`.
+
+- **G1.2 — `bm25_search` FTS5 query sanitization (already in place; fuzz test added).**
+  The `_fts5_query()` sanitizer that prevents `OperationalError` on queries containing
+  `:`, `-`, `*`, `"`, `AND`, etc. was already implemented (`test_bm25_special_chars_no_crash`
+  covers it). The gap ledger entry is closed by confirming the existing tests pass.
+
+- **G1.3 — `tool_calls` audit table is now populated by `record_call()`.**
+  `record_tool_call()` had zero callers; `DreamWorker._orient()` queried a table
+  nothing ever wrote. Fixed by wiring `telemetry.record_call()` to the relational
+  store via `register_relational_store()` (called from `_build_server()`). Every MCP
+  tool call now writes one audit row — `_orient()` reads real recall counts.
+  Best-effort: a DB write failure never propagates to the caller.
+  Regression tests: `test_tool_calls_populated_via_telemetry`,
+  `test_tool_calls_readable_by_orient`.
+
 ## [1.2.1] — 2026-06-02
 
 ### Fixed

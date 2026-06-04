@@ -313,6 +313,118 @@ def test_record_access_no_lost_update_under_concurrency(tmp_path: Path) -> None:
     assert util["access_count"] == n_threads * per_thread   # zero lost increments
 
 
+# --- T1 G1.1: semantic.update() re-embeds the new revision (dense recall path) ---
+
+def test_semantic_update_reembeds_new_revision(tmp_path: Path) -> None:
+    """G1.1: semantic.update() must upsert the new revision into the vector store.
+
+    Before the fix, semantic.update() called insert_crystal() for the new revision
+    but skipped the vector upsert — identical to the episodic fallback gap that
+    _handle_update already fixed. With recall_active_only the superseded original is
+    excluded, so the updated fact silently vanished from dense recall.
+
+    We insert directly into the relational store (bypassing the promotion gate, which
+    is driven by witness count) so the crystal is present and updateable in all
+    environments including CRYSTALIUM_SKIP_SLOW.
+    """
+    from crystalium.server import _build_components
+    cfg = Config(data_dir=tmp_path / "sem_upd", rate_limit_per_minute=10**9)
+    (_e, _a, _ep, semantic, _pr, _ex, _g, _s, relational) = _build_components(cfg)
+
+    # Insert a semantic crystal directly (bypasses gate; SKIP_SLOW-safe)
+    cid = "sem-direct-001"
+    relational.insert_crystal({
+        "id": cid, "layer": "semantic", "trust_tier": "T1",
+        "validation_state": "validated", "status": "active",
+        "summary": "deploy region is us-east-1", "content_ref": "a" * 64,
+        "scope": {"project": "p"},
+        "provenance": {"source": "verified_agent", "created_at": _NOW.isoformat()},
+        "utility": {"importance": 0.0},
+        "temporal": {"t_valid_from": _NOW.isoformat(), "t_valid_to": None, "superseded_by": None},
+    })
+
+    # Spy the vector store on the semantic layer
+    spy = MagicMock()
+    spy.embed.return_value = [0.1, 0.2, 0.3]
+    semantic.vector_store = spy
+
+    out = semantic.update(
+        record_id=cid,
+        patch={"summary": "deploy region is eu-west-1"},
+        reason="region migration",
+        caller_tier=Tier.T1,
+    )
+    new_id = out["id"]
+
+    # The new revision must have been upserted into the vector store
+    assert spy.upsert.called, "vector_store.upsert was never called after semantic.update()"
+    assert spy.upsert.call_args.kwargs.get("crystal_id") == new_id
+
+
+# --- T1 G1.3: tool_calls audit table is populated by record_call() ---
+
+def test_tool_calls_populated_via_telemetry(tmp_path: Path) -> None:
+    """G1.3: record_call() (via register_relational_store) must write to tool_calls.
+
+    Before the fix, record_tool_call() had zero callers — DreamWorker._orient()
+    queried a perpetually-empty table. Wiring the store into telemetry makes every
+    tool invocation appear in the audit table.
+    """
+    import sqlite3
+
+    from crystalium.telemetry import record_call, register_relational_store, reset_latency_samples
+
+    store = RelationalStore(db_path=tmp_path / "audit.sqlite")
+    register_relational_store(store)
+    try:
+        reset_latency_samples()
+        record_call(tool="crystalium.recall", layer="episodic", tier="T1",
+                    op="recall", result="ok", latency_ms=42.0)
+        record_call(tool="crystalium.commit", layer="semantic", tier="T1",
+                    op="commit", result="ok", latency_ms=10.0)
+
+        with sqlite3.connect(str(store.db_path)) as conn:
+            rows = conn.execute("SELECT tool, result FROM tool_calls ORDER BY ts").fetchall()
+
+        assert len(rows) == 2
+        assert rows[0][0] == "crystalium.recall"
+        assert rows[1][0] == "crystalium.commit"
+    finally:
+        # Deregister so other tests are not affected by the side-channel
+        register_relational_store(None)
+
+
+def test_tool_calls_readable_by_orient(tmp_path: Path) -> None:
+    """G1.3: DreamWorker._orient() reads the tool_calls count from a populated table."""
+    import datetime as _dt
+
+    from crystalium.dream.worker import DreamWorker
+    from crystalium.telemetry import record_call, register_relational_store, reset_latency_samples
+
+    store = RelationalStore(db_path=tmp_path / "orient.sqlite")
+    register_relational_store(store)
+    try:
+        reset_latency_samples()
+        # Write two recall calls into the audit table
+        record_call(tool="crystalium.recall", layer=None, tier="T1",
+                    op="recall", result="ok", latency_ms=55.0)
+        record_call(tool="crystalium.recall", layer=None, tier="T1",
+                    op="recall", result="ok", latency_ms=60.0)
+
+        worker = DreamWorker(
+            relational=store,
+            vector_store=MagicMock(),
+            graph_store=MagicMock(),
+            enforcement=MagicMock(),
+            gate=MagicMock(),
+            importance_fn=lambda **k: 0.0,
+        )
+        summary = worker._orient(now=_dt.datetime.now(_dt.UTC))
+        assert "total_recalls=2" in summary, f"_orient did not report 2 recalls: {summary!r}"
+    finally:
+        register_relational_store(None)
+
+
 def test_merge_provenance_no_lost_corroboration_under_concurrency(tmp_path: Path) -> None:
     """Concurrent merge_provenance() must not drop corroboration bumps."""
     import json as _json

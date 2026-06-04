@@ -98,6 +98,28 @@ def tool_span(
 
 
 # ---------------------------------------------------------------------------
+# G1.3 audit-table wiring — RelationalStore callback
+#
+# Keeping the telemetry module import-cycle-free: the RelationalStore reference
+# is injected at server startup via register_relational_store() rather than
+# imported directly. Every record_call() then writes one row to tool_calls so
+# DreamWorker._orient() (and any future drift detector) can query real data.
+# ---------------------------------------------------------------------------
+
+_relational_store: Any = None  # set by register_relational_store() at startup
+
+
+def register_relational_store(store: Any) -> None:
+    """Register the process-level RelationalStore for audit-table writes (G1.3).
+
+    Called once from _build_server() after the store is constructed. Setting
+    this to None disables audit writes (test isolation, null-store arm).
+    """
+    global _relational_store
+    _relational_store = store
+
+
+# ---------------------------------------------------------------------------
 # Single telemetry sink — called by every tool at the end of its handler
 # ---------------------------------------------------------------------------
 
@@ -153,6 +175,23 @@ def record_call(
     _record_latency(tool, latency_ms)
     _record_availability(tool, result)
     log.info("tool_call", **fields)
+
+    # G1.3: write to the tool_calls audit table so DreamWorker._orient() reads
+    # real data and the table is a queryable audit trail (not DDL-only).
+    # Best-effort: a DB error must never propagate to the caller.
+    if _relational_store is not None:
+        import contextlib
+        with contextlib.suppress(Exception):
+            _relational_store.record_tool_call(
+                tool=tool,
+                layer=layer,
+                tier=tier,
+                op=op,
+                result=result,
+                latency_ms=round(latency_ms, 2),
+                overflow=overflow_flag,
+                error=error,
+            )
 
 
 # ---------------------------------------------------------------------------
