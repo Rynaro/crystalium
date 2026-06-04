@@ -248,25 +248,31 @@ gate; it is an operator action, not an A/B axis.
 
 `docker run --rm crystalium:dev python -m evals {retrieval-gate,dedup-gate,prefetch-gate}`
 (real bge-m3 embedder; kuzu graph). Three independent two-arm ablations, one per
-DoD axis. Result: **one clean win (dedup), two non-flips (completion/context
-inconclusive; prefetch confounded).**
+DoD axis. Result (updated T2): **two clean wins (dedup + completion, both ON),
+three honest nulls (context_match no rank lift; prefetch cache-confounded; FSRS no
+margin) stay OFF.**
 
-### (i) completion + context_match — INCONCLUSIVE, flags OFF
+### (i) completion EARNED ON; context_match stays OFF (T2, 2026-06-04)
+
+The **[GAP]** below is closed: the fixture now adds **24 lexically-close distractors**
+(share query words, NOT relevant, NOT graph-linked) so flat dense recall fills up
+*without* the graph-distant spokes — creating the "missed-by-similarity but
+reachable-by-graph" gap the faculty targets.
 
 | axis | flat | completion | both |
 |---|---|---|---|
-| multihop_f1 | 0.60 | 0.60 | 0.60 |
-| context_rank (lower=better) | 1 | 1 (context arm) | 1 |
+| multihop_f1 | 0.12 | **0.18** | 0.18 |
+| multihop_recall | 0.67 | **1.00** | 1.00 |
+| context_rank (lower=better) | 1 | — | 1 (context arm: 1) |
 
-**Verdict: neither lifts ⇒ `recall_completion` and `recall_context_match` stay
-OFF.** With a 7-crystal corpus and k=10, the dense arm already retrieves *every*
-crystal, so the seeded hub→spoke edges add nothing the flat fusion didn't already
-surface — there is no "missed-by-similarity but reachable-by-graph" gap for
-completion to fill, and the context-matching crystal already ranks at 1 without
-the re-rank. Honest null; the synthetic fixture is too small to create the
-multi-hop gap the faculty targets. **[GAP]** a discriminating fixture needs a
-corpus large enough (k ≪ |relevant|) that similarity recall misses graph-reachable
-relevants — a larger-fixture follow-up, not a redesign.
+**Verdict: completion LIFTS multi-hop recall/F1 ⇒ flip `recall_completion` ON; context
+stays OFF.** Flat dense recall misses the 2-hop spoke (lexically distant, ranked below
+the distractors → recall 0.67); the decaying multi-hop walk recovers it → recall 1.0,
+F1 0.12→0.18. A genuine graph-reachability win. **`recall_context_match` shows no rank
+lift (the context-matching crystal already ranks 1 in both arms) → stays OFF (honest
+null on that faculty).** `recall_completion` default flipped ON; full suite green with
+the flip (661 passed) — the graph walk runs on every recall without breakage. Guard
+tests: `test_retrieval_gate.py`.
 
 ### (ii) dedup-merge (pattern separation) — PASS, flip `write_dedup_merge` ON
 

@@ -196,10 +196,10 @@ class Config:
     # Retrieval intelligence (W5, Aetheryte II) — each faculty behind its own flag,
     # default OFF (ablation-or-revert). The recall pipeline + chokepoint are unchanged
     # when all are off.
-    recall_completion: bool = False        # pattern completion: decaying multi-hop graph walk
+    recall_completion: bool = True         # EARNED ON (T2): multi-hop graph walk recovers graph-reachable relevants flat dense recall misses (retrieval_gate F1 0.12→0.18, recall 0.67→1.0). See BENCH-NOTES §W5(i).
     completion_max_hops: int = 2
     completion_decay: float = 0.5
-    recall_context_match: bool = False     # encoding-specificity: post-RRF context re-rank
+    recall_context_match: bool = False     # encoding-specificity: post-RRF context re-rank — stays OFF (T2: no rank lift in the discriminating gate)
     write_dedup_merge: bool = True         # W5 gate PASS (confound-free): merge near-dups at write
     sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
     recall_prefetch: bool = False          # protention: pre-warm recall cache on plan_checkpoint
@@ -298,7 +298,7 @@ class Config:
             r_floor=_env_float("CRYSTALIUM_R_FLOOR", 0.7),
             resurface_floor=_env_float("CRYSTALIUM_RESURFACE_FLOOR", 0.85),
             evb_percentile=_env_float("CRYSTALIUM_EVB_PERCENTILE", 0.5),
-            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", False),
+            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", True),  # W5(i) earned ON (T2)
             completion_max_hops=_env_int("CRYSTALIUM_COMPLETION_MAX_HOPS", 2),
             completion_decay=_env_float("CRYSTALIUM_COMPLETION_DECAY", 0.5),
             recall_context_match=_env_bool("CRYSTALIUM_RECALL_CONTEXT_MATCH", False),

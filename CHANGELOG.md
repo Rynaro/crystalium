@@ -8,6 +8,18 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ### Changed (T2 — earn the OFF flags)
 
+- **W5(i) pattern completion earned ON — `recall_completion` default flipped to `True`;
+  `recall_context_match` stays OFF.** The `retrieval_gate` corpus now adds 24
+  lexically-close distractors (share query words, not relevant, not graph-linked) so
+  flat dense recall fills its top-k *without* the graph-distant spokes — creating the
+  "missed-by-similarity but reachable-by-graph" gap the 7-crystal fixture couldn't.
+  Result: the decaying multi-hop walk recovers the missed 2-hop spoke → **multihop
+  recall 0.67 → 1.0, F1 0.12 → 0.18** (graph store confirmed real, not the null stub).
+  A genuine graph-reachability win → `recall_completion` ON; full suite green with the
+  flip (661 passed). `recall_context_match` shows **no rank lift** (the context crystal
+  already ranks first in both arms) → stays OFF (honest null). BENCH-NOTES §W5(i)
+  updated; guard tests `test_retrieval_gate.py`.
+
 - **W4 FSRS forgetting — discriminating workload built, honest null, `forgetting_fsrs` stays OFF.**
   The `forgetting_gate` was rebuilt to the ledger's prescription (60 ticks, sustained
   noise 4/tick, prune-every-tick) PLUS the keystone is now recalled only every 8th
