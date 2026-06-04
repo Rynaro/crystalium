@@ -8,6 +8,19 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ### Changed (T2 — earn the OFF flags)
 
+- **W4 FSRS forgetting — discriminating workload built, honest null, `forgetting_fsrs` stays OFF.**
+  The `forgetting_gate` was rebuilt to the ledger's prescription (60 ticks, sustained
+  noise 4/tick, prune-every-tick) PLUS the keystone is now recalled only every 8th
+  tick — the value×recency discriminator that should make pure-recency LRU drop it
+  while FSRS's spaced-repetition stability keeps it. Noise is seeded by index (not
+  uuid) so the memory axes are reproducible; the gate now requires a *meaningful*
+  (≥10%) plateau margin, not a noise-level strict-`<`. Result: **FSRS does not beat
+  LRU** — both arms retain the keystone at an 8-tick gap (LRU's accumulated access
+  keeps it above the prune threshold) and the plateau is identical (1.379 both). An
+  honest null, confirmed not for lack of trying — a win would need params engineered
+  to make LRU drop the keystone (manufacturing). BENCH-NOTES §W4 updated; guard tests
+  `test_forgetting_gate.py`.
+
 - **W5 predictive prefetch — confound fixed, honest null, `recall_prefetch` stays OFF.**
   The `prefetch_gate` now predicts the next query with an **imperfect** first-order
   rotation model (prediction accuracy 0.73 < 1.0) instead of handing the checkpoint

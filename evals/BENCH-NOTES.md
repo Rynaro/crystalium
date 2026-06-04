@@ -220,12 +220,26 @@ the plateau axis ties and the gate fails. Honest null; the faculty (FSRS decay,
 value-aware eviction, re-surfacing, protected class, RTBF) ships fully tested
 behind the off flag.
 
-**[GAP — the noisiest-wave tuning follow-up]** To separate the arms, a later pass
-needs a **longer session** and/or **more aggressive eviction** (higher r_floor,
-more frequent prune, larger noise:signal ratio) so FSRS's value-aware eviction
-visibly plateaus memory while LRU grows. This is parameter/iteration tuning
-(roadmap budgeted "several A/B iterations"), not a redesign. Until then the flag
-stays OFF.
+**[GAP CLOSED — follow-up run, still a null] (T2, 2026-06-04)** The longer/aggressive
+pass was done: 60 ticks, 4 noise/tick, prune EVERY tick, and the keystone recalled
+only every 8th tick (the value×recency discriminator — between accesses it "ages",
+so a pure-recency LRU should drop it while FSRS's spaced-repetition stability keeps
+it). Noise summaries are now seeded by index (not uuid), so the memory axes are
+reproducible. Result — **FSRS still does NOT beat LRU:**
+
+| axis | on (fsrs) | off (lru) | delta |
+|---|---|---|---|
+| memory_size_plateau (lower=flatter) | 1.379 | 1.379 | 0.0 (identical) |
+| high_value_retention | 1.0 | 1.0 | 0.0 (both keep the keystone) |
+
+Both arms **retain the keystone even at an 8-tick recall gap** — LRU's accumulated
+access frequency keeps it above the prune threshold, so the value×recency contention
+the ledger hoped for never bites — and the plateau is identical. The gate now requires
+a **meaningful (≥10%) plateau margin** (no production default should flip on a
+~2% synthetic, sign-unstable difference). **`forgetting_fsrs` stays OFF — an honest
+null confirmed, not for lack of trying.** A win would require params engineered to
+make LRU drop the keystone, which would be manufacturing the result. Guard tests:
+`test_forgetting_gate.py`.
 
 **Note:** the right-to-be-forgotten op is exercised by `test_rtbf.py`, not this
 gate; it is an operator action, not an A/B axis.
