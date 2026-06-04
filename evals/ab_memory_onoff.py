@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -106,6 +107,19 @@ def _build_live_handlers(config_override: Optional[dict[str, Any]] = None) -> di
     # CanaryEnv scope filter; do NOT pass it into Config(**...).
     run_id = str(uuid.uuid4())[:8]
     project = cfg_kwargs.pop("project", f"canary-{run_id}")
+
+    # Canary reproducibility (the real G1.1 "canary 0.80" resolution): isolate
+    # each run in a FRESH ephemeral data_dir. Without this every run shares the
+    # persistent ~/.crystalium/default store (the mounted crystalium_data volume),
+    # so cross-run write_dedup_merge merges new writes into prior runs' crystals
+    # and defeats the per-mission scope filter — silently collapsing the headline
+    # (observed: pass_rate_on=1.0 on a clean store vs 0.25 on a polluted one). A
+    # per-run store makes `make bench` deterministic without a manual volume wipe.
+    # An explicit data_dir override (e.g. an ops/inspection run) opts out.
+    if "data_dir" not in cfg_kwargs:
+        cfg_kwargs["data_dir"] = Path(
+            tempfile.mkdtemp(prefix=f"crystalium-canary-{run_id}-")
+        )
 
     config = Config(**cfg_kwargs)
     (

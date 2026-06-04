@@ -31,6 +31,20 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   Regression tests: `test_tool_calls_populated_via_telemetry`,
   `test_tool_calls_readable_by_orient`.
 
+- **Canary reproducibility — `_build_live_handlers` isolates each run in a fresh
+  ephemeral `data_dir`** (the real resolution of the ledger's "G1.1 blocks the
+  canary 0.80"). The headline A/B (`make bench`) shared the persistent
+  `~/.crystalium/default` store (the mounted `crystalium_data` volume) across
+  runs, so cross-run `write_dedup_merge` merged new writes into prior runs'
+  crystals and defeated the per-mission scope filter, collapsing the headline to
+  `pass_rate_on=0.25`. **This was a test-harness confound, not a production
+  re-index gap:** the update path already re-embeds, so on a clean store the
+  canary scores `pass_rate_on=1.0` (beats off `0.0`, CAN-4 passes) on **both
+  `main` and this branch**. Each canary run now gets its own store (an explicit
+  `data_dir` override opts out), making `make bench` deterministic without a
+  manual `docker compose down -v`. Regression test:
+  `test_canary_run_uses_fresh_ephemeral_data_dir`.
+
 ## [1.2.1] — 2026-06-02
 
 ### Fixed

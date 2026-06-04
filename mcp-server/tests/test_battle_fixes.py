@@ -451,3 +451,37 @@ def test_merge_provenance_no_lost_corroboration_under_concurrency(tmp_path: Path
     # corroboration starts at 1, each of n merges bumps by 1 -> 1 + n
     assert prov["corroboration"] == 1 + n_threads
     assert len(prov["merged_authors"]) == n_threads   # every distinct author retained
+
+
+def test_canary_run_uses_fresh_ephemeral_data_dir(monkeypatch) -> None:
+    """Canary reproducibility (the real G1.1 'canary 0.80' resolution): each
+    _build_live_handlers() run must inject a FRESH ephemeral data_dir, never the
+    persistent ~/.crystalium/default volume. Sharing the default store lets
+    cross-run write_dedup_merge pollute prior runs' crystals and collapses the
+    headline (observed 0.25 instead of the true 1.0). Distinct per-run stores keep
+    `make bench` deterministic without a manual volume wipe."""
+    import evals.ab_memory_onoff as ab
+
+    seen: list = []
+
+    class _SpyConfig:
+        def __init__(self, **kwargs):
+            seen.append(kwargs.get("data_dir"))
+
+    # Stub the heavy component build so this stays a unit test (no embedder deps).
+    monkeypatch.setattr("crystalium.config.Config", _SpyConfig)
+    monkeypatch.setattr(
+        "crystalium.server._build_components",
+        lambda cfg: tuple(MagicMock() for _ in range(9)),
+    )
+
+    ab._build_live_handlers()
+    ab._build_live_handlers()
+
+    default = str(Path("~/.crystalium/default/").expanduser())
+    assert len(seen) == 2
+    for dd in seen:
+        assert dd is not None, "canary must inject a data_dir, not fall back to the default volume"
+        assert str(dd) != default, "canary must NOT use the persistent default store"
+        assert "crystalium-canary-" in str(dd)
+    assert str(seen[0]) != str(seen[1]), "each run must get its OWN ephemeral store"
