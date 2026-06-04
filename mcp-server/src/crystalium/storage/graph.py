@@ -14,6 +14,7 @@ Design:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,17 @@ log = structlog.get_logger("crystalium.storage.graph")
 VALID_RELATIONS: frozenset[str] = frozenset({"LINKS_TO", "SUPERSEDES", "CITES"})
 
 _NODE_WARN_THRESHOLD = 10_000
+
+# Bound kuzu's per-database virtual reservation. kuzu's DEFAULT max_db_size is ~8 TB
+# (it mmaps that much virtual address space up front); in a constrained container
+# (memory cgroup / RLIMIT_AS) that mmap fails — "Buffer manager exception: Mmap for
+# size 8796093022208 failed". It only surfaces once the graph is actually queried,
+# which `recall_completion` (earned ON in T2) now does on every recall. A bounded,
+# power-of-two cap (1 GiB default, generous past the 10k-node v0.1 threshold) and a
+# bounded buffer pool keep kuzu allocatable everywhere; both are env-tunable up for
+# large deployments.
+_KUZU_MAX_DB_SIZE = int(os.environ.get("CRYSTALIUM_KUZU_MAX_DB_SIZE", str(1 << 30)))  # 1 GiB
+_KUZU_BUFFER_POOL = int(os.environ.get("CRYSTALIUM_KUZU_BUFFER_POOL", str(1 << 28)))  # 256 MiB
 
 
 class GraphStore:
@@ -53,7 +65,15 @@ class GraphStore:
             # as a directory when it expects to create it itself.
             # Only ensure the PARENT directory exists.
             self.kuzu_dir.parent.mkdir(parents=True, exist_ok=True)
-            self._db = kuzu.Database(str(self.kuzu_dir))
+            try:
+                self._db = kuzu.Database(
+                    str(self.kuzu_dir),
+                    buffer_pool_size=_KUZU_BUFFER_POOL,
+                    max_db_size=_KUZU_MAX_DB_SIZE,
+                )
+            except TypeError:
+                # Older kuzu without the size kwargs — fall back to defaults.
+                self._db = kuzu.Database(str(self.kuzu_dir))
             self._conn = kuzu.Connection(self._db)
             self._ensure_schema()
         return self._conn

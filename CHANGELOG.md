@@ -69,6 +69,19 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   production coupling. DESIGN-RATIONALE §D6.1 + BENCH-NOTES W2 updated; gate
   regression test `test_run_returns_evb_wins_on_retention_purity`.
 
+### Fixed
+
+- **kuzu graph store: bound the per-database virtual reservation (1 GiB default,
+  env-tunable) instead of kuzu's ~8 TB default `max_db_size`.** kuzu mmaps
+  `max_db_size` of virtual address space up front; in a constrained CI container
+  (memory cgroup / `RLIMIT_AS`) that 8 TB mmap fails ("Buffer manager exception:
+  Mmap for size 8796093022208 failed"). It only surfaced once the graph is actually
+  *queried* — which `recall_completion` (earned ON in T2) now does on every recall —
+  so `test_rtbf` started failing in CI though it passed locally. `GraphStore` now
+  opens `kuzu.Database(..., buffer_pool_size=256 MiB, max_db_size=1 GiB)` (both via
+  `CRYSTALIUM_KUZU_BUFFER_POOL` / `CRYSTALIUM_KUZU_MAX_DB_SIZE`), with a `TypeError`
+  fallback for older kuzu. Graph ops + completion unchanged (21 graph/rtbf tests pass).
+
 ### Fixed (T1 correctness — three real behavior gaps)
 
 - **G1.1 — `semantic.update()` re-embeds the new revision into the vector store.**
