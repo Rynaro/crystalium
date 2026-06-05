@@ -6,6 +6,8 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-06-04
+
 ### Changed (T2 — earn the OFF flags)
 
 - **W3 Dream — re-examined, honest null confirmed; `dream_replay_evb` / `dream_interleave`
