@@ -152,9 +152,12 @@ class Config:
 
     # EVB importance (W2, Mattar & Daw 2018). When True, evb_score replaces the
     # legacy importance_score as the single source of truth for eviction + the
-    # composer (the roadmap's "importance.mode: legacy|evb"). Default OFF until the
-    # ablation bench shows it beating legacy (ablation-or-revert). See evb.py.
-    evb_enabled: bool = False
+    # composer (the roadmap's "importance.mode: legacy|evb"). EARNED ON (T2): the
+    # discriminating evb_gate shows EVB strictly improves retained-set purity
+    # (retention_precision 1.0 vs legacy 0.33) with NO high-value-retention
+    # regression — the original promotion/high-value criterion saturated at 1.0 in
+    # both arms (non-discriminating). See DESIGN-RATIONALE §D6.1 / BENCH-NOTES W2.
+    evb_enabled: bool = True
     # Hand-tuned EVB proxy weights (SFMA-style). gain over
     # (outcome_success, novelty, corroboration_potential); need over
     # (recency, access_frequency, predicted_next_task_match). Sum within each
@@ -193,10 +196,10 @@ class Config:
     # Retrieval intelligence (W5, Aetheryte II) — each faculty behind its own flag,
     # default OFF (ablation-or-revert). The recall pipeline + chokepoint are unchanged
     # when all are off.
-    recall_completion: bool = False        # pattern completion: decaying multi-hop graph walk
+    recall_completion: bool = True         # EARNED ON (T2): multi-hop graph walk recovers graph-reachable relevants flat dense recall misses (retrieval_gate F1 0.12→0.18, recall 0.67→1.0). See BENCH-NOTES §W5(i).
     completion_max_hops: int = 2
     completion_decay: float = 0.5
-    recall_context_match: bool = False     # encoding-specificity: post-RRF context re-rank
+    recall_context_match: bool = False     # encoding-specificity: post-RRF context re-rank — stays OFF (T2: no rank lift in the discriminating gate)
     write_dedup_merge: bool = True         # W5 gate PASS (confound-free): merge near-dups at write
     sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
     recall_prefetch: bool = False          # protention: pre-warm recall cache on plan_checkpoint
@@ -284,7 +287,7 @@ class Config:
             embed_backend=_env("CRYSTALIUM_EMBED_BACKEND", "sentence-transformers")
             or "sentence-transformers",
             rate_limit_per_minute=_env_int("CRYSTALIUM_RATE_LIMIT_PER_MINUTE", 200),
-            evb_enabled=_env_bool("CRYSTALIUM_EVB_ENABLED", False),
+            evb_enabled=_env_bool("CRYSTALIUM_EVB_ENABLED", True),  # W2 earned ON (T2)
             dream_replay_evb=_env_bool("CRYSTALIUM_DREAM_REPLAY_EVB", False),
             dream_interleave=_env_bool("CRYSTALIUM_DREAM_INTERLEAVE", False),
             dream_interleave_ratio=_env_float("CRYSTALIUM_DREAM_INTERLEAVE_RATIO", 0.5),
@@ -295,7 +298,7 @@ class Config:
             r_floor=_env_float("CRYSTALIUM_R_FLOOR", 0.7),
             resurface_floor=_env_float("CRYSTALIUM_RESURFACE_FLOOR", 0.85),
             evb_percentile=_env_float("CRYSTALIUM_EVB_PERCENTILE", 0.5),
-            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", False),
+            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", True),  # W5(i) earned ON (T2)
             completion_max_hops=_env_int("CRYSTALIUM_COMPLETION_MAX_HOPS", 2),
             completion_decay=_env_float("CRYSTALIUM_COMPLETION_DECAY", 0.5),
             recall_context_match=_env_bool("CRYSTALIUM_RECALL_CONTEXT_MATCH", False),

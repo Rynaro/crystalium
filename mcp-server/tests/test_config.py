@@ -231,11 +231,14 @@ class TestHumanConfirmActive:
 
 
 class TestEvbFlag:
-    """W2: evb_enabled flag + EVB proxy weights (default OFF — ablation-or-revert)."""
+    """W2: evb_enabled flag + EVB proxy weights (EARNED ON in T2 — the
+    discriminating evb_gate shows EVB strictly improves retained-set purity with no
+    high-value-retention regression; the original promotion/retention criterion
+    saturated and could not discriminate)."""
 
-    def test_evb_disabled_by_default(self, tmp_path: Path) -> None:
+    def test_evb_enabled_by_default(self, tmp_path: Path) -> None:
         cfg = Config(data_dir=tmp_path)
-        assert cfg.evb_enabled is False
+        assert cfg.evb_enabled is True
         assert len(cfg.evb_gain_weights) == 3
         assert len(cfg.evb_need_weights) == 3
 
@@ -326,12 +329,12 @@ class TestRetrievalFlags:
     """W5 retrieval-intelligence flags (default OFF — ablation-or-revert)."""
 
     def test_retrieval_defaults(self, tmp_path: Path) -> None:
-        # W5 ablation outcome: dedup-merge won its gate confound-free -> ON by
-        # default; completion/context (inconclusive) + prefetch (confounded pass)
-        # stay OFF. See evals/BENCH-NOTES.md "W5 retrieval-faculty gates".
+        # W5 ablation outcome (updated T2): dedup-merge + completion won their gates
+        # confound-free -> ON by default; context (no rank lift) + prefetch (cache-
+        # confounded) stay OFF. See evals/BENCH-NOTES.md "W5 retrieval-faculty gates".
         cfg = Config(data_dir=tmp_path)
-        assert cfg.recall_completion is False
-        assert cfg.recall_context_match is False
+        assert cfg.recall_completion is True      # EARNED ON (T2): multi-hop walk lifts F1
+        assert cfg.recall_context_match is False  # no rank lift -> stays OFF
         assert cfg.write_dedup_merge is True
         assert cfg.recall_prefetch is False
         assert cfg.completion_max_hops == 2

@@ -27,6 +27,21 @@ here is shipped green by lowering a bar.
   bi-temporal supersession unchanged.
 - **Exit:** CAN-4 passes on-arm; canary memory-on ≥ 0.80 AND beats off; a regression
   test asserts an updated crystal is dense-recallable.
+- **RESOLVED (T1 pass) — diagnosis corrected.** The production re-index gap was
+  already closed: `_handle_update`'s fallback path re-embeds (and `episodic.update`
+  upserts), so on a **clean store** the canary scores `pass_rate_on=1.0` (CAN-4
+  passes, beats off `0.0`) on **both `main` and the fix branch**. The `0.25`
+  observed under the canary was a **test-harness confound, not a production gap**:
+  `_build_live_handlers` shared the persistent `~/.crystalium/default` store across
+  runs, so cross-run `write_dedup_merge` polluted the scope filter. Fix shipped:
+  (a) `semantic.update()` now re-embeds too (a genuine *layer-completeness* gap —
+  the semantic direct-update path lacked the upsert the others had); (b) the canary
+  now isolates each run in a fresh ephemeral `data_dir`, making `make bench`
+  deterministic without a manual volume wipe. Regression tests:
+  `test_semantic_update_reembeds_new_revision`, `test_canary_run_uses_fresh_ephemeral_data_dir`.
+  *Latent follow-up:* `procedural.update()` / `execution.update()` layer methods
+  still lack the upsert (not exercised by the canary, which routes through
+  `_handle_update`'s fallback) — close for full layer symmetry.
 
 ### G1.2 — `bm25_search` passes raw queries to FTS5 (syntax injection / crash)
 - **Symptom:** a recall query containing `:`/`-`/`*` etc. raises `OperationalError: no

@@ -28,6 +28,27 @@ _PROJECT = "retrieval-gate"
 _QUERY = "acme login session token rotation"
 _AGENT_CLASS = "backend"
 
+# Lexically-close DISTRACTORS (share query words, NOT relevant, NOT graph-linked).
+# With a small corpus + k=10 the spokes were already dense-recalled, so completion
+# could add nothing (the ledger's "k >= |corpus|" confound). These distractors fill
+# flat's top-k and push the graph-only-reachable spokes OUT of dense range, so the
+# multi-hop walk has a real gap to recover. The spokes share NO query words, so they
+# rank below every distractor under dense recall.
+_DISTRACTORS = [
+    "acme login page redesign mockups", "session token cookie consent banner",
+    "acme login button hover animation", "token rotation marketing announcement",
+    "login screen accessibility audit notes", "session timeout copy rewrite",
+    "acme token branded swag inventory", "login analytics dashboard palette",
+    "acme session lounge furniture order", "token vending machine restock",
+    "login form placeholder text review", "session replay tooling comparison",
+    "acme login onboarding email draft", "rotation roster for support shifts",
+    "token economy whitepaper summary", "login latency status page wording",
+    "acme session sponsorship contract", "token gating landing page hero",
+    "login confetti animation timing", "session cookie GDPR FAQ entry",
+    "acme login wallpaper design set", "token launch party guest list",
+    "rotation of conference booth staff", "login splash gradient picker",
+]
+
 
 def _commit(episodic, summary: str, tier, *, enc_ctx: dict | None = None) -> str:
     payload: dict[str, Any] = {"summary": summary, "scope": {"project": _PROJECT,
@@ -69,6 +90,10 @@ def run_arm(*, completion: bool, context_match: bool, data_root: str) -> dict[st
     spoke2 = _commit(episodic, "incident postmortem 2025 outage", Tier.T1)
     _noise1 = _commit(episodic, "unrelated billing invoice notes", Tier.T1)
     _noise2 = _commit(episodic, "frontend css grid layout tips", Tier.T1)
+    # Lexically-close distractors so k=10 dense recall fills up WITHOUT the spokes
+    # (which share no query words) — the multi-hop walk then has a gap to recover.
+    for _d in _DISTRACTORS:
+        _commit(episodic, _d, Tier.T1)
 
     # Context pair: both lexically match the query; one matches the scope context.
     ctx_match = _commit(episodic, "acme login session token guide",

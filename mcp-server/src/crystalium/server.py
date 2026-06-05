@@ -56,7 +56,12 @@ from crystalium.storage.blob import BlobStore
 from crystalium.storage.graph import GraphStore
 from crystalium.storage.relational import RelationalStore
 from crystalium.storage.vector import VectorStore
-from crystalium.telemetry import emit_latency_panel, record_call, tool_span
+from crystalium.telemetry import (
+    emit_latency_panel,
+    record_call,
+    register_relational_store,
+    tool_span,
+)
 from crystalium.trust import Tier
 
 log = structlog.get_logger("crystalium.server")
@@ -603,6 +608,10 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
         scheduler,
         relational,
     ) = _build_components(config)
+
+    # G1.3: wire the audit table so telemetry.record_call() writes each tool
+    # call into tool_calls — DreamWorker._orient() can then read real counts.
+    register_relational_store(relational)
 
     @server.list_tools()
     async def _list_tools() -> list[Tool]:

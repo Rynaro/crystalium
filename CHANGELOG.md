@@ -6,6 +6,121 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (T2 — earn the OFF flags)
+
+- **W3 Dream — re-examined, honest null confirmed; `dream_replay_evb` / `dream_interleave`
+  / `dream_stc` all stay OFF.** The baseline still ties exactly (consolidation_gain 1/1,
+  drift 0/0, STC retention 1.0/1.0) — the v0.1 `_gather` collapses seeds + graph
+  neighbours into a single mixed cluster, so consolidation count is ~1 regardless of
+  replay ordering or STC. Two routes to discrimination were identified, both beyond a
+  fixture tweak: (1) a `_gather` per-topic-cluster refinement (a production Dream-worker
+  change); (2) the ledger's interleaved-multi-task **backward-transfer** harness (the
+  `forgetting`/`backward_transfer` R-matrix functions exist in metrics.py but no
+  workload drives them). Per ablation-as-arbiter, no consolidation-count win is
+  manufactured on the coarse fixture — the flags stay OFF until one harness shows a
+  confound-free win. BENCH-NOTES §W3 updated with both paths.
+
+- **W5(i) pattern completion earned ON — `recall_completion` default flipped to `True`;
+  `recall_context_match` stays OFF.** The `retrieval_gate` corpus now adds 24
+  lexically-close distractors (share query words, not relevant, not graph-linked) so
+  flat dense recall fills its top-k *without* the graph-distant spokes — creating the
+  "missed-by-similarity but reachable-by-graph" gap the 7-crystal fixture couldn't.
+  Result: the decaying multi-hop walk recovers the missed 2-hop spoke → **multihop
+  recall 0.67 → 1.0, F1 0.12 → 0.18** (graph store confirmed real, not the null stub).
+  A genuine graph-reachability win → `recall_completion` ON; full suite green with the
+  flip (661 passed). `recall_context_match` shows **no rank lift** (the context crystal
+  already ranks first in both arms) → stays OFF (honest null). BENCH-NOTES §W5(i)
+  updated; guard tests `test_retrieval_gate.py`.
+
+- **W4 FSRS forgetting — discriminating workload built, honest null, `forgetting_fsrs` stays OFF.**
+  The `forgetting_gate` was rebuilt to the ledger's prescription (60 ticks, sustained
+  noise 4/tick, prune-every-tick) PLUS the keystone is now recalled only every 8th
+  tick — the value×recency discriminator that should make pure-recency LRU drop it
+  while FSRS's spaced-repetition stability keeps it. Noise is seeded by index (not
+  uuid) so the memory axes are reproducible; the gate now requires a *meaningful*
+  (≥10%) plateau margin, not a noise-level strict-`<`. Result: **FSRS does not beat
+  LRU** — both arms retain the keystone at an 8-tick gap (LRU's accumulated access
+  keeps it above the prune threshold) and the plateau is identical (1.379 both). An
+  honest null, confirmed not for lack of trying — a win would need params engineered
+  to make LRU drop the keystone (manufacturing). BENCH-NOTES §W4 updated; guard tests
+  `test_forgetting_gate.py`.
+
+- **W5 predictive prefetch — confound fixed, honest null, `recall_prefetch` stays OFF.**
+  The `prefetch_gate` now predicts the next query with an **imperfect** first-order
+  rotation model (prediction accuracy 0.73 < 1.0) instead of handing the checkpoint
+  the verbatim future query — closing the fabricated-perfect-prediction confound the
+  ledger flagged (a `gate_pass` guard now requires accuracy < 1.0). With that fixed,
+  a **deeper** confound surfaced: the OFF arm has *no recall cache at all*, so the
+  p95 win is cache-vs-no-cache (ordinary cache-warming of repeated queries), not
+  isolated protention. The gate encodes this (`protention_isolated` → False →
+  `gate_pass` False); `recall_prefetch` stays OFF until a cache-on/prefetch-off
+  baseline can credit protention. An honest null, not a flip. BENCH-NOTES §W5(iii)
+  updated; guard tests `test_prefetch_gate.py`.
+
+- **W2 EVB earned ON — `evb_enabled` default flipped to `True`.** A *discriminating*
+  ablation gate (`evals/evb_gate.py`) now decides on **retained-set purity**
+  (`retention_precision`) under a no-high-value-regression guard — the axis EVB's
+  multiplicative `gain×need` actually moves. The original criterion (promotion
+  precision AND high-value retention) **saturated at 1.0 in both arms** and could
+  never discriminate (the post-1.0 ledger's "INCONCLUSIVE"). Result: EVB
+  `retention_precision` **1.0 vs legacy 0.33** (legacy retains high-need/zero-gain
+  distractors + unscored-old; EVB keeps only genuine value) with **high-value
+  retention tied at 1.0** (no recall cost). Full suite green with the flip — no
+  production coupling. DESIGN-RATIONALE §D6.1 + BENCH-NOTES W2 updated; gate
+  regression test `test_run_returns_evb_wins_on_retention_purity`.
+
+### Fixed
+
+- **kuzu graph store: bound the per-database virtual reservation (1 GiB default,
+  env-tunable) instead of kuzu's ~8 TB default `max_db_size`.** kuzu mmaps
+  `max_db_size` of virtual address space up front; in a constrained CI container
+  (memory cgroup / `RLIMIT_AS`) that 8 TB mmap fails ("Buffer manager exception:
+  Mmap for size 8796093022208 failed"). It only surfaced once the graph is actually
+  *queried* — which `recall_completion` (earned ON in T2) now does on every recall —
+  so `test_rtbf` started failing in CI though it passed locally. `GraphStore` now
+  opens `kuzu.Database(..., buffer_pool_size=256 MiB, max_db_size=1 GiB)` (both via
+  `CRYSTALIUM_KUZU_BUFFER_POOL` / `CRYSTALIUM_KUZU_MAX_DB_SIZE`), with a `TypeError`
+  fallback for older kuzu. Graph ops + completion unchanged (21 graph/rtbf tests pass).
+
+### Fixed (T1 correctness — three real behavior gaps)
+
+- **G1.1 — `semantic.update()` re-embeds the new revision into the vector store.**
+  Before this fix, the semantic layer's `update()` method inserted the new revision
+  into the relational/FTS index but never called `vector_store.upsert()` — identical
+  to the episodic-fallback gap closed in a prior battle-test sweep. With
+  `recall_active_only=True`, the superseded original is excluded from recall, so an
+  updated semantic fact silently vanished from the dense recall arm. The fix mirrors
+  the `commit()` embed+upsert pattern (best-effort; null/SKIP_SLOW embedder → no-op).
+  Regression test: `test_semantic_update_reembeds_new_revision`.
+
+- **G1.2 — `bm25_search` FTS5 query sanitization (already in place; fuzz test added).**
+  The `_fts5_query()` sanitizer that prevents `OperationalError` on queries containing
+  `:`, `-`, `*`, `"`, `AND`, etc. was already implemented (`test_bm25_special_chars_no_crash`
+  covers it). The gap ledger entry is closed by confirming the existing tests pass.
+
+- **G1.3 — `tool_calls` audit table is now populated by `record_call()`.**
+  `record_tool_call()` had zero callers; `DreamWorker._orient()` queried a table
+  nothing ever wrote. Fixed by wiring `telemetry.record_call()` to the relational
+  store via `register_relational_store()` (called from `_build_server()`). Every MCP
+  tool call now writes one audit row — `_orient()` reads real recall counts.
+  Best-effort: a DB write failure never propagates to the caller.
+  Regression tests: `test_tool_calls_populated_via_telemetry`,
+  `test_tool_calls_readable_by_orient`.
+
+- **Canary reproducibility — `_build_live_handlers` isolates each run in a fresh
+  ephemeral `data_dir`** (the real resolution of the ledger's "G1.1 blocks the
+  canary 0.80"). The headline A/B (`make bench`) shared the persistent
+  `~/.crystalium/default` store (the mounted `crystalium_data` volume) across
+  runs, so cross-run `write_dedup_merge` merged new writes into prior runs'
+  crystals and defeated the per-mission scope filter, collapsing the headline to
+  `pass_rate_on=0.25`. **This was a test-harness confound, not a production
+  re-index gap:** the update path already re-embeds, so on a clean store the
+  canary scores `pass_rate_on=1.0` (beats off `0.0`, CAN-4 passes) on **both
+  `main` and this branch**. Each canary run now gets its own store (an explicit
+  `data_dir` override opts out), making `make bench` deterministic without a
+  manual `docker compose down -v`. Regression test:
+  `test_canary_run_uses_fresh_ephemeral_data_dir`.
+
 ## [1.2.1] — 2026-06-02
 
 ### Fixed

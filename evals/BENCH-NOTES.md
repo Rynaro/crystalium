@@ -75,7 +75,30 @@ path for convention parity and share this caveat. **[GAP]** A future wave could
 relocate the venv (e.g. `UV_PROJECT_ENVIRONMENT=/opt/venv`) so the compose path
 works with live edits; out of scope for W1.
 
-## W2 EVB ablation gate (v0.3.0) — INCONCLUSIVE, flag stays OFF
+## W2 EVB ablation gate — EARNED ON (T2, 2026-06-04)
+
+The deterministic `evals/evb_gate.py` gate decides on **retained-set purity** (the
+axis EVB's `gain×need` actually moves), correcting the original promotion/retention
+criterion which saturated at 1.0 in both arms (non-discriminating):
+
+| axis | on (evb) | off (legacy) | delta |
+|---|---|---|---|
+| retention_precision | 1.00 | 0.33 | **+0.67** |
+| high_value_retention | 1.00 | 1.00 | 0.00 (no regression) |
+| distractor_eviction | 1.00 | 0.00 | +1.00 |
+| promotion_precision | 1.00 | 1.00 | 0.00 (saturated — non-discriminating) |
+
+**Verdict: EVB strictly improves retained-set purity with no high-value-retention
+regression ⇒ `evb_enabled` flipped ON (default).** Legacy's additive blend keeps
+high-need/zero-gain distractors (recency+access ≈ 0.40 > 0.10 threshold) and
+unscored-old crystals (0.5 neutral-outcome term ≈ 0.14 > 0.10); EVB's multiplicative
+scorer zeroes both and keeps only the genuine high-value set. Full suite green with
+the flip (656 passed) — no production coupling. `make bench` canary unaffected (1.0).
+Run: `docker compose run --rm crystalium python -c "from evals.evb_gate import run; print(run())"`.
+
+---
+
+### (Superseded) W2 EVB ablation gate (v0.3.0) — INCONCLUSIVE, flag stayed OFF
 
 `docker run --rm crystalium:dev python -m evals ab --flag evb_enabled` over the
 A/B arm set, evb_threshold=0.5:
@@ -161,6 +184,21 @@ gather→consolidate→prune pipeline in two arm-pairs.
 regression — every augment ships behind its off flag, fully tested; the gate is
 now *evaluable* (metrics defined, no longer null).
 
+**T2 re-examination (2026-06-04) — confirmed OFF, two paths identified.** Re-ran:
+the baseline still ties exactly (consolidation_gain 1/1, drift 0/0, STC retention
+1.0/1.0). Two routes to a discriminating Dream gate, BOTH beyond a fixture tweak:
+(1) the `_gather` per-topic-cluster refinement below (a **production** Dream-worker
+change); and (2) the ledger's preferred **interleaved-multi-task backward-transfer**
+harness — the `forgetting()`/`backward_transfer()`/`forward_transfer()` R-matrix
+functions already exist in `evals/metrics.py:45-72`, but no workload drives them
+(it needs an A→B→A interference stream measuring whether Dream replay/interleave
+reduces catastrophic forgetting of task A). Both are substantial builds with
+genuinely uncertain outcomes (the retention dynamics resemble the W4/FSRS null —
+the prune may not evict task A regardless of replay). Per ablation-as-arbiter we do
+NOT manufacture a consolidation-count win on the coarse single-cluster fixture; the
+W3 flags stay OFF until one of those harnesses is built and shows a confound-free
+win. This is the deliberate honest stopping point, not a skip.
+
 **Why the tie (root cause + [GAP] for a later wave):** v0.1 `_gather`
 (`worker.py:252`) collapses seeds + graph-neighbours into a *single mixed
 cluster*, so consolidation count is ~1 regardless of replay ordering; the mixed
@@ -197,12 +235,26 @@ the plateau axis ties and the gate fails. Honest null; the faculty (FSRS decay,
 value-aware eviction, re-surfacing, protected class, RTBF) ships fully tested
 behind the off flag.
 
-**[GAP — the noisiest-wave tuning follow-up]** To separate the arms, a later pass
-needs a **longer session** and/or **more aggressive eviction** (higher r_floor,
-more frequent prune, larger noise:signal ratio) so FSRS's value-aware eviction
-visibly plateaus memory while LRU grows. This is parameter/iteration tuning
-(roadmap budgeted "several A/B iterations"), not a redesign. Until then the flag
-stays OFF.
+**[GAP CLOSED — follow-up run, still a null] (T2, 2026-06-04)** The longer/aggressive
+pass was done: 60 ticks, 4 noise/tick, prune EVERY tick, and the keystone recalled
+only every 8th tick (the value×recency discriminator — between accesses it "ages",
+so a pure-recency LRU should drop it while FSRS's spaced-repetition stability keeps
+it). Noise summaries are now seeded by index (not uuid), so the memory axes are
+reproducible. Result — **FSRS still does NOT beat LRU:**
+
+| axis | on (fsrs) | off (lru) | delta |
+|---|---|---|---|
+| memory_size_plateau (lower=flatter) | 1.379 | 1.379 | 0.0 (identical) |
+| high_value_retention | 1.0 | 1.0 | 0.0 (both keep the keystone) |
+
+Both arms **retain the keystone even at an 8-tick recall gap** — LRU's accumulated
+access frequency keeps it above the prune threshold, so the value×recency contention
+the ledger hoped for never bites — and the plateau is identical. The gate now requires
+a **meaningful (≥10%) plateau margin** (no production default should flip on a
+~2% synthetic, sign-unstable difference). **`forgetting_fsrs` stays OFF — an honest
+null confirmed, not for lack of trying.** A win would require params engineered to
+make LRU drop the keystone, which would be manufacturing the result. Guard tests:
+`test_forgetting_gate.py`.
 
 **Note:** the right-to-be-forgotten op is exercised by `test_rtbf.py`, not this
 gate; it is an operator action, not an A/B axis.
@@ -211,25 +263,31 @@ gate; it is an operator action, not an A/B axis.
 
 `docker run --rm crystalium:dev python -m evals {retrieval-gate,dedup-gate,prefetch-gate}`
 (real bge-m3 embedder; kuzu graph). Three independent two-arm ablations, one per
-DoD axis. Result: **one clean win (dedup), two non-flips (completion/context
-inconclusive; prefetch confounded).**
+DoD axis. Result (updated T2): **two clean wins (dedup + completion, both ON),
+three honest nulls (context_match no rank lift; prefetch cache-confounded; FSRS no
+margin) stay OFF.**
 
-### (i) completion + context_match — INCONCLUSIVE, flags OFF
+### (i) completion EARNED ON; context_match stays OFF (T2, 2026-06-04)
+
+The **[GAP]** below is closed: the fixture now adds **24 lexically-close distractors**
+(share query words, NOT relevant, NOT graph-linked) so flat dense recall fills up
+*without* the graph-distant spokes — creating the "missed-by-similarity but
+reachable-by-graph" gap the faculty targets.
 
 | axis | flat | completion | both |
 |---|---|---|---|
-| multihop_f1 | 0.60 | 0.60 | 0.60 |
-| context_rank (lower=better) | 1 | 1 (context arm) | 1 |
+| multihop_f1 | 0.12 | **0.18** | 0.18 |
+| multihop_recall | 0.67 | **1.00** | 1.00 |
+| context_rank (lower=better) | 1 | — | 1 (context arm: 1) |
 
-**Verdict: neither lifts ⇒ `recall_completion` and `recall_context_match` stay
-OFF.** With a 7-crystal corpus and k=10, the dense arm already retrieves *every*
-crystal, so the seeded hub→spoke edges add nothing the flat fusion didn't already
-surface — there is no "missed-by-similarity but reachable-by-graph" gap for
-completion to fill, and the context-matching crystal already ranks at 1 without
-the re-rank. Honest null; the synthetic fixture is too small to create the
-multi-hop gap the faculty targets. **[GAP]** a discriminating fixture needs a
-corpus large enough (k ≪ |relevant|) that similarity recall misses graph-reachable
-relevants — a larger-fixture follow-up, not a redesign.
+**Verdict: completion LIFTS multi-hop recall/F1 ⇒ flip `recall_completion` ON; context
+stays OFF.** Flat dense recall misses the 2-hop spoke (lexically distant, ranked below
+the distractors → recall 0.67); the decaying multi-hop walk recovers it → recall 1.0,
+F1 0.12→0.18. A genuine graph-reachability win. **`recall_context_match` shows no rank
+lift (the context-matching crystal already ranks 1 in both arms) → stays OFF (honest
+null on that faculty).** `recall_completion` default flipped ON; full suite green with
+the flip (661 passed) — the graph walk runs on every recall without breakage. Guard
+tests: `test_retrieval_gate.py`.
 
 ### (ii) dedup-merge (pattern separation) — PASS, flip `write_dedup_merge` ON
 
@@ -247,23 +305,41 @@ faculty by the harness. The deliberate cost (the exact paraphrase wording is no
 longer separately stored — pattern separation's inverse) is the intended trade;
 precision (returning the relevant fact) holds.
 
-### (iii) predictive prefetch — PASS-BUT-CONFOUNDED, `recall_prefetch` stays OFF
+### (iii) predictive prefetch — CONFOUND #1 FIXED, confound #2 found, `recall_prefetch` stays OFF (T2, 2026-06-04)
+
+The W5 **[GAP]** below — "needs an *imperfect* predictor" — is now closed: the gate
+predicts the next query with an imperfect first-order rotation model and lets the
+actual stream deviate, so `prediction_accuracy = 0.73 (< 1.0)`, no longer the
+fabricated-perfect signal. A confound guard (`gate_pass` requires `accuracy < 1.0`)
+prevents regression.
+
+| axis | on (prefetch) | off (no cache) |
+|---|---|---|
+| prediction_accuracy | **0.73** (imperfect ✓) | 0.73 |
+| cache_hit_rate | 0.73 | null (no cache) |
+| recall_p95_ms | 0.14 | 189.3 |
+
+**Verdict: still `recall_prefetch` stays OFF — a DEEPER confound surfaced.** With the
+predictor fixed, the p95 win is exposed as **cache-vs-no-cache, not protention**: the
+OFF arm (`recall_prefetch=False`) has **no recall cache at all**, and the queries
+repeat, so the cache warms on first use and every repeat hits *regardless of
+prediction* — the 1300× p95 drop is ordinary caching, not predictive prefetch.
+Crediting protention specifically needs a **cache-on / prefetch-off baseline**, which
+the bundled `recall_prefetch` flag does not expose. The gate now encodes this
+(`protention_isolated = off-arm-has-a-cache` → False → `gate_pass` False). Honest
+null on protention; the cache benefit is real but is a separate (unflagged) axis.
+Guard tests: `test_prefetch_gate.py`.
+
+#### (Superseded) predictive prefetch — PASS-BUT-CONFOUNDED (fabricated predictor)
 
 | axis | on (prefetch) | off (no cache) |
 |---|---|---|
 | cache_hit_rate | 0.50 | null (no cache) |
 | recall_p95_ms | 0.09 | 235.1 |
 
-**Verdict: the gate passes by the letter (hit rate > 0, p95 down ~2600×) but the
-pass is CONFOUNDED ⇒ `recall_prefetch` stays OFF.** The harness feeds the
-checkpoint the *exact verbatim* query the agent then recalls (`predicted_next_query
-== recall query`), so the 0.50 hit rate is fabricated perfect prediction, not an
-earned predictor — and the p95 drop is the warming recall's cost *prepaid at
-checkpoint time* (shifted off the recall critical path, not eliminated). Per
-ablation-as-arbiter we discount confounded passes: the faculty ships gated and
-ready, but the default does not change on a harness-fabricated signal. **[GAP]** a
-trustworthy prefetch gate needs an *imperfect* predictor (next query drawn from a
-realistic distribution, not handed over) so the hit rate reflects real protention.
+The original harness fed the checkpoint the *exact verbatim* query the agent then
+recalled — fabricated perfect prediction. Superseded by the imperfect-predictor gate
+above.
 
 ## W6 security & integrity gates — poisoning ASR PASS; drift bench proven; flags split
 

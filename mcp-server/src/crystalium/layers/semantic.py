@@ -492,6 +492,24 @@ class SemanticLayer:
 
             self.relational.insert_crystal(new_record)
 
+            # G1.1: re-embed the new revision into the vector store so it is
+            # surfaced by the dense recall arm. Without this the updated crystal
+            # lives only in the relational/FTS index while recall_active_only
+            # excludes the superseded original — the fact silently vanishes.
+            # Best-effort (guard for None vector_store and SKIP_SLOW empty embed).
+            if self.vector_store is not None:
+                try:
+                    _text = new_record.get("summary") or ""
+                    _vec = self.vector_store.embed(_text)
+                    if _vec:
+                        self.vector_store.upsert(
+                            crystal_id=new_id,
+                            vector=_vec,
+                            metadata={"layer": "semantic"},
+                        )
+                except Exception as _exc:
+                    log.warning("update_vector_reindex_skipped", crystal_id=new_id, error=str(_exc))
+
             log.info(
                 "semantic_update",
                 old_id=record_id,
