@@ -260,6 +260,17 @@ def recall(
     NEVER writes to the store. Exit 0 on success, exit 1 on error (stderr message).
     """
     import os
+    import structlog
+
+    # Route all structlog output to stderr so stdout carries exactly one JSON document
+    # (or --format text lines).  Scoped to this command only; serve behavior is untouched
+    # because serve calls telemetry.configure_logging() after startup which overwrites this.
+    #
+    # Use sys.__stderr__ (the real stderr fd) rather than sys.stderr so that Click's
+    # CliRunner — which replaces sys.stderr with a capture buffer — does not mix log
+    # lines into the captured stdout.  In production Docker, sys.__stderr__ is sys.stderr.
+    _stderr = getattr(sys, "__stderr__", sys.stderr) or sys.stderr
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_stderr))
 
     # Lazy imports — heavy deps are NEVER pulled on the fast path (D-G2b).
     # All collaborator imports live INSIDE the function body so that

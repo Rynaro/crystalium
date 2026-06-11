@@ -111,7 +111,7 @@ def _find_json_line(output: str) -> str:
 
 
 def test_recall_happy_json_shape(tmp_path: Path) -> None:
-    """recall --query Q --scope-project P → exit 0; stdout parses as RecallResult JSON."""
+    """recall --query Q --scope-project P → exit 0; stdout is exactly one JSON document."""
     data_dir = str(tmp_path / "crystalium_data")
     fake_result = _fake_recall_result()
 
@@ -127,9 +127,10 @@ def test_recall_happy_json_shape(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, f"Expected exit 0, got {result.exit_code}.\nOutput:\n{result.output}"
 
-    # stdout must contain a valid JSON line (structlog debug lines may precede it)
-    json_line = _find_json_line(result.output)
-    parsed = json.loads(json_line)
+    # STRICT: stdout must be exactly one JSON line with no preamble — structlog
+    # must be routed to stderr so that `jq` consumers never see log lines on stdout.
+    # If this fails with JSONDecodeError the structlog-to-stderr redirect is broken.
+    parsed = json.loads(result.output)
     assert "records" in parsed
     assert "slot_breakdown" in parsed
     assert "total_tokens" in parsed
@@ -165,10 +166,14 @@ def test_recall_format_text(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     lines = [ln for ln in result.output.splitlines() if ln.strip()]
     assert len(lines) >= 1, "Expected at least one output line"
-    # Each line must match [layer/tier] pattern
+    # STRICT: every non-empty stdout line must be a record line — no structlog preamble,
+    # no JSON, no extra lines of any kind.  structlog must be on stderr (regression lock).
     pattern = re.compile(r"^\[\w+/T\d\] ")
     for line in lines:
-        assert pattern.match(line), f"Line does not match [layer/tier] pattern: {line!r}"
+        assert pattern.match(line), (
+            f"Non-record line found on stdout in --format text mode — "
+            f"structlog may have leaked to stdout: {line!r}"
+        )
     # No JSON curly braces
     assert "{" not in result.output, "JSON output found in text mode"
 
