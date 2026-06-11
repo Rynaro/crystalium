@@ -8,6 +8,17 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [1.4.0] — 2026-06-11
 
+### Fixed
+
+- **`index` CLI crash — `Redactor()` constructed without required `config` argument.**
+  `python -m crystalium index <path>` raised `TypeError: Redactor.__init__() missing 1
+  required positional argument: 'config'` because `__main__.index` instantiated `Redactor()`
+  bare while the constructor requires `config: Config`. The existing index tests passed
+  vacuously because they mocked `Redactor`. Fixed by mirroring the `recall` command pattern:
+  `Redactor(config=config)`. Regression tests added: a mock-based kwarg assertion
+  (`test_index_redactor_receives_config`) and a full CliRunner end-to-end smoke
+  (`test_index_single_file_exits_0`).
+
 ### Added
 
 - **One-shot `recall` CLI subcommand (GAP-2 — out-of-MCP-session memory pre-flight for

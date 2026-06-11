@@ -138,7 +138,7 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
     blob_store = BlobStore(root=config.blob_root)
     relational = RelationalStore(db_path=config.sqlite_path)
     enforcement = Enforcement(config)
-    redactor = Redactor()
+    redactor = Redactor(config=config)
 
     importance_fn = _select_importance_fn(config)
     episodic = EpisodicLayer(
