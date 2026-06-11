@@ -1,9 +1,12 @@
-"""W4 tests: CLI subcommands (doctor + promote list).
+"""W4 tests: CLI subcommands (doctor + promote list + index).
 
 Tests:
   test_doctor_healthy_exits_0             — healthy env → exit code 0
   test_doctor_readonly_data_dir_nonzero   — read-only data_dir → non-zero exit
   test_promote_list_returns_pending_rows  — mock RelationalStore → rows printed
+  test_index_redactor_receives_config     — Redactor constructed with config kwarg (regression:
+                                           bare Redactor() crashed with TypeError)
+  test_index_single_file_exits_0          — index a single .md file against a real tmp data dir
 
 Container-first: run via
   docker compose run --rm crystalium pytest mcp-server/tests/test_cli.py -v
@@ -318,3 +321,67 @@ def test_promote_review_reject_calls_gate(tmp_path: Path) -> None:
 
         mock_gate_instance.process_pending.assert_called_once_with(promo_id, "reject")
     assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# index — Redactor config-kwarg regression (pre-existing bug: bare Redactor() crashed)
+# ---------------------------------------------------------------------------
+
+
+def test_index_redactor_receives_config(tmp_path: Path) -> None:
+    """Regression: index command must pass config=<Config> to Redactor, not Redactor().
+
+    Before the fix, `Redactor()` in the index command raised:
+      TypeError: Redactor.__init__() missing 1 required positional argument: 'config'
+
+    This test patches Redactor at the module level and asserts the constructor was
+    called with the `config` keyword argument (not bare).
+    """
+    data_dir = tmp_path / "crystalium_data"
+    data_dir.mkdir()
+    md_file = tmp_path / "note.md"
+    md_file.write_text("# Hello\nThis is a test document.")
+
+    # Redactor is a lazy local import inside index(), so patch it at the source module.
+    with patch("crystalium.aetheryte.redact.Redactor") as MockRedactor:
+        mock_redactor_instance = MagicMock()
+        MockRedactor.return_value = mock_redactor_instance
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["index", str(tmp_path)],
+            env={"CRYSTALIUM_DATA_DIR": str(data_dir)},
+            catch_exceptions=False,
+        )
+
+    # Redactor must have been constructed with a config keyword argument — never bare.
+    assert MockRedactor.called, "Redactor was not instantiated at all"
+    call_kwargs = MockRedactor.call_args
+    assert call_kwargs.kwargs.get("config") is not None, (
+        "Redactor() was called without config= kwarg — "
+        "this is the regression that causes TypeError at runtime"
+    )
+
+
+def test_index_single_file_exits_0(tmp_path: Path) -> None:
+    """index against a real tmp data dir with a single .md file exits 0 and reports 1 indexed."""
+    data_dir = tmp_path / "crystalium_data"
+    data_dir.mkdir()
+    md_file = tmp_path / "note.md"
+    md_file.write_text("# Hello\nThis is a test document for crystalium index.")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["index", str(tmp_path), "--ext", ".md"],
+        env={"CRYSTALIUM_DATA_DIR": str(data_dir)},
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, (
+        f"index exited {result.exit_code}.\nOutput:\n{result.output}"
+    )
+    assert "1 indexed" in result.output, (
+        f"Expected '1 indexed' in output.\nOutput:\n{result.output}"
+    )

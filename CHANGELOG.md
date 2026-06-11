@@ -6,6 +6,36 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-06-11
+
+### Fixed
+
+- **`index` CLI crash — `Redactor()` constructed without required `config` argument.**
+  `python -m crystalium index <path>` raised `TypeError: Redactor.__init__() missing 1
+  required positional argument: 'config'` because `__main__.index` instantiated `Redactor()`
+  bare while the constructor requires `config: Config`. The existing index tests passed
+  vacuously because they mocked `Redactor`. Fixed by mirroring the `recall` command pattern:
+  `Redactor(config=config)`. Regression tests added: a mock-based kwarg assertion
+  (`test_index_redactor_receives_config`) and a full CliRunner end-to-end smoke
+  (`test_index_single_file_exits_0`).
+
+### Added
+
+- **One-shot `recall` CLI subcommand (GAP-2 — out-of-MCP-session memory pre-flight for
+  the Eidolons harness).** `python -m crystalium recall --query TEXT --scope-project TEXT`
+  returns a slot-budgeted `RecallResult` as JSON to stdout without requiring a running MCP
+  server. Designed for use in a plain-bash SessionStart hook that cannot hold an MCP transport.
+  **BM25-only fast path by default** (no torch/lance/kuzu imports on the common path; cold-start
+  is seconds, not 30s). `--full` opt-in constructs the full vector+graph arms with the server's
+  Null-fallback pattern. **Never writes to the store** (`persist_dynamics=False`,
+  `forgetting_fsrs=False`). The enforcement chokepoint at `Aetheryte.recall()` is preserved:
+  `caller_tier` passes through `assert_tier_allowed` (recall is universally allowed at all tiers;
+  the assertion runs for telemetry). `--format json` (default) emits `RecallResult.model_dump()`;
+  `--format text` emits compact `[layer/tier] summary` lines. Exit 0 on success, exit 1 on any
+  error (stderr message, no partial JSON on stdout). Flags: `--query` (required),
+  `--scope-project` (required), `--scope-visibility`, `--k` (default 10), `--layers` (CSV),
+  `--full/--no-full`, `--format`, `--config`.
+
 ## [1.3.0] — 2026-06-04
 
 ### Changed (T2 — earn the OFF flags)

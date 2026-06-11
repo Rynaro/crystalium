@@ -3,6 +3,7 @@
 Subcommands:
   serve     — start the MCP server (stdio transport, D2)
   index     — bulk-load a directory of .md/.txt files into Episodic (T0)
+  recall    — read-only one-shot hybrid recall (out-of-MCP-session, BM25 fast path)
   dream     — manually trigger the Dream worker
   doctor    — health checks: imports, config, schemas, data_dir writable, optional deps
   canary    — run the canary suite (W5 stub in v0.1)
@@ -137,7 +138,7 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
     blob_store = BlobStore(root=config.blob_root)
     relational = RelationalStore(db_path=config.sqlite_path)
     enforcement = Enforcement(config)
-    redactor = Redactor()
+    redactor = Redactor(config=config)
 
     importance_fn = _select_importance_fn(config)
     episodic = EpisodicLayer(
@@ -187,6 +188,177 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
             click.echo(f"  ERROR {f.name}: {exc}", err=True)
 
     click.echo(f"\nDone: {ok} indexed, {errors} errors.")
+
+
+# ---------------------------------------------------------------------------
+# recall — read-only one-shot hybrid recall (GAP-2; out-of-MCP-session)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--query", required=True, help="Free-text recall query.")
+@click.option(
+    "--scope-project",
+    "scope_project",
+    required=True,
+    help="Scope.project (min_length=1).",
+)
+@click.option(
+    "--scope-visibility",
+    "scope_visibility",
+    default=None,
+    help="Scope.agent_class_visibility (default: None → all).",
+)
+@click.option(
+    "--k",
+    default=10,
+    type=int,
+    show_default=True,
+    help="Max records to return (clamped max(0, int)).",
+)
+@click.option(
+    "--layers",
+    "layers_csv",
+    default=None,
+    help="CSV subset of episodic,semantic,procedural,execution (default: all four).",
+)
+@click.option(
+    "--full/--no-full",
+    "full",
+    default=False,
+    help="Construct vector+graph arms (server Null-fallback pattern; cold-start heavy).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "text"]),
+    default="json",
+    show_default=True,
+    help="Output format: json = RecallResult JSON; text = compact per-record lines.",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+    help="Path to crystalium.yaml (default: env vars).",
+)
+def recall(
+    query: str,
+    scope_project: str,
+    scope_visibility: Optional[str],
+    k: int,
+    layers_csv: Optional[str],
+    full: bool,
+    fmt: str,
+    config_path: Optional[Path],
+) -> None:
+    """Read-only hybrid recall from CRYSTALIUM memory (one-shot; out-of-MCP-session).
+
+    FAST PATH (default): BM25/FTS5 only — no torch/lance/kuzu imports.
+    --full: construct vector+graph arms (server Null-fallback pattern; cold-start heavy).
+    NEVER writes to the store. Exit 0 on success, exit 1 on error (stderr message).
+    """
+    import os
+    import structlog
+
+    # Route all structlog output to stderr so stdout carries exactly one JSON document
+    # (or --format text lines).  Scoped to this command only; serve behavior is untouched
+    # because serve calls telemetry.configure_logging() after startup which overwrites this.
+    #
+    # Use sys.__stderr__ (the real stderr fd) rather than sys.stderr so that Click's
+    # CliRunner — which replaces sys.stderr with a capture buffer — does not mix log
+    # lines into the captured stdout.  In production Docker, sys.__stderr__ is sys.stderr.
+    _stderr = getattr(sys, "__stderr__", sys.stderr) or sys.stderr
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_stderr))
+
+    # Lazy imports — heavy deps are NEVER pulled on the fast path (D-G2b).
+    # All collaborator imports live INSIDE the function body so that
+    # `recall --help` does not trigger any heavy-dep resolution.
+    from crystalium.config import Config
+    from crystalium.aetheryte.retrieve import Aetheryte
+    from crystalium.aetheryte.redact import Redactor
+    from crystalium.composer import Composer
+    from crystalium.enforcement import Enforcement
+    from crystalium.schemas import Scope
+    from crystalium.server import _NullVectorStore, _NullGraphStore
+    from crystalium.storage.relational import RelationalStore
+    from crystalium.trust import Tier
+
+    config = (
+        Config.from_yaml(config_path)
+        if (config_path and config_path.exists())
+        else Config.from_env()
+    )
+
+    relational = RelationalStore(db_path=config.sqlite_path)
+    enforcement = Enforcement(config)
+    redactor = Redactor(config=config)
+    composer = Composer(config)
+    importance_fn = _select_importance_fn(config)
+
+    if full:
+        # --full: construct vector+graph with the server's Null-fallback pattern.
+        try:
+            from crystalium.storage.vector import VectorStore
+
+            vector_store = VectorStore(lance_dir=config.lance_path)
+        except Exception:  # noqa: BLE001
+            vector_store = _NullVectorStore()
+        try:
+            from crystalium.storage.graph import GraphStore
+
+            graph_store = GraphStore(kuzu_dir=config.kuzu_path)
+        except Exception:  # noqa: BLE001
+            graph_store = _NullGraphStore()
+    else:
+        # FAST PATH: BM25/FTS5 only. No vector/graph construction, no heavy imports.
+        vector_store = _NullVectorStore()
+        graph_store = _NullGraphStore()
+
+    aetheryte = Aetheryte(
+        relational=relational,
+        vector_store=vector_store,
+        graph_store=graph_store,
+        enforcement=enforcement,
+        redactor=redactor,
+        importance_fn=importance_fn,
+        composer=composer,
+        # READ-ONLY guarantee: never persist dynamics, never run FSRS lapse writes.
+        persist_dynamics=False,
+        forgetting_fsrs=False,
+        recall_active_only=config.recall_active_only,
+    )
+
+    # Parse and validate --layers CSV.
+    layers = None
+    if layers_csv:
+        valid_layers = {"episodic", "semantic", "procedural", "execution"}
+        layers = [s.strip() for s in layers_csv.split(",") if s.strip()]
+        bad = [lay for lay in layers if lay not in valid_layers]
+        if bad:
+            raise click.ClickException(
+                f"Unknown layer(s): {', '.join(bad)} "
+                f"(valid: {', '.join(sorted(valid_layers))})"
+            )
+
+    scope = Scope(project=scope_project, agent_class_visibility=scope_visibility, sensitivity_tag=None)
+    caller_tier = Tier.from_str(os.environ.get("CRYSTALIUM_CALLER_TIER", "T1"))
+    k_clamped = max(0, int(k))
+
+    try:
+        result = aetheryte.recall(
+            scope=scope, query=query, k=k_clamped, layers=layers, caller_tier=caller_tier
+        )
+    except Exception as exc:  # enforcement error or store error → exit 1
+        raise click.ClickException(f"recall failed: {exc}") from exc
+
+    if fmt == "json":
+        click.echo(json.dumps(result.model_dump(), default=str))
+    else:
+        for r in result.records:
+            d = r.model_dump() if hasattr(r, "model_dump") else r
+            click.echo(f"[{d['layer']}/{d['trust_tier']}] {d['summary']}")
 
 
 # ---------------------------------------------------------------------------
