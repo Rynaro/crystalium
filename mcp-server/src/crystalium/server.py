@@ -43,6 +43,7 @@ from crystalium.dream.scheduler import DreamScheduler
 from crystalium.dream.worker import DreamWorker
 from crystalium.ecl import build_for_tool_result, emit_sidecar
 from crystalium.enforcement import Enforcement
+from crystalium.export.graph_export import ExportFlags, GraphExporter
 from crystalium.gate import PromotionGate
 from crystalium.evb import make_evb_scorer
 from crystalium.importance import importance_score
@@ -355,6 +356,52 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                 },
             },
         },
+        {
+            "name": "crystalium.graph_export",
+            "description": (
+                "Export the scoped memory graph as nodes[]+edges[] "
+                "(JSON canonical, or graphml/cytoscape adapter). "
+                "Nodes = redacted crystal summaries (never raw blob); "
+                "edges = LINKS_TO (kuzu) + derived SUPERSEDES/MERGED_FROM/CONFLICTS_WITH. "
+                "Read-only; bounded (limit<=10000); universally allowed (read op). "
+                "Rate-limited (200 calls/min)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["scope"],
+                "properties": {
+                    "scope": {
+                        "type": "object",
+                        "description": "{project, agent_class_visibility, sensitivity_tag}",
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["json", "graphml", "cytoscape"],
+                        "default": "json",
+                    },
+                    "layers": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["episodic", "semantic", "procedural", "execution"],
+                        },
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 5000,
+                        "description": "Node cap (clamped to 10000)",
+                    },
+                    "include": {
+                        "type": "object",
+                        "description": (
+                            "Optional override flags (§6.4): include_quarantined, "
+                            "include_deprecated, include_superseded, all_visibility, "
+                            "include_content_ref, include_drift, synthesize_links, dangling_policy"
+                        ),
+                    },
+                },
+            },
+        },
     ]
 
 
@@ -616,6 +663,10 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
     # call into tool_calls — DreamWorker._orient() can then read real counts.
     register_relational_store(relational)
 
+    # W-GE5: build the graph exporter once; shared by the MCP dispatch handler.
+    # graph_store is not returned from _build_components but is stored on aetheryte.
+    exporter = GraphExporter(relational_store=relational, graph_store=aetheryte.graph_store)
+
     @server.list_tools()
     async def _list_tools() -> list[Tool]:
         return [Tool(**t) for t in build_tool_manifest()]
@@ -705,6 +756,26 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     # Surface the recall/commit/forget/dream latency panels +
                     # recall p95 (W8 SLO) at the close of the session.
                     emit_latency_panel()
+
+                elif name == "crystalium.graph_export":
+                    # W-GE5: read op — universally allowed; inherits assert_rate_limit above.
+                    # NO assert_tier_allowed for a commit (never writes crystals).
+                    result = _handle_graph_export(arguments, exporter, aetheryte.redactor, caller_tier)
+                    fmt = arguments.get("format", "json")
+                    if fmt == "graphml":
+                        from crystalium.export.adapters import to_graphml
+                        payload_str = to_graphml(result)
+                        result_bytes = payload_str.encode()
+                    elif fmt == "cytoscape":
+                        from crystalium.export.adapters import to_cytoscape
+                        result_bytes = json.dumps(
+                            to_cytoscape(result), sort_keys=True, default=str
+                        ).encode()
+                    else:
+                        result_bytes = json.dumps(
+                            result, sort_keys=True, default=str
+                        ).encode()
+                    artifact_kind = "graph-export"
 
                 else:
                     from crystalium.enforcement import CrystaliumEnforcementError
@@ -1256,3 +1327,64 @@ def _handle_session_end(
         "enqueued": run_id is not None,
         "dream_run_id": run_id,
     }
+
+
+def _handle_graph_export(
+    args: dict[str, Any],
+    exporter: "GraphExporter",
+    redactor: "Redactor",
+    caller_tier: "Tier",
+) -> dict[str, Any]:
+    """Handle crystalium.graph_export (W-GE5, spec §8.2).
+
+    Read-only; universally allowed; ECL envelope auto-inherited via
+    _emit_ecl_sidecar in the dispatch loop.
+
+    Steps (mirroring _handle_recall):
+      1. Parse scope from arguments.
+      2. Clamp limit to [0, 10000].
+      3. Build ExportFlags from arguments.get("include", {}).
+      4. Call exporter.export(...) — the one canonical core (G-GE6 parity).
+      5. Return the canonical dict (format adaptation is done in the dispatch
+         branch, not here, so the ECL payload hashes the actually-returned bytes).
+    """
+    from crystalium.storage.relational import MAX_EXPORT_NODES
+
+    raw_scope = args.get("scope", {})
+    scope = {
+        "project": raw_scope.get("project", "default"),
+        "agent_class_visibility": raw_scope.get("agent_class_visibility"),
+        "sensitivity_tag": raw_scope.get("sensitivity_tag", "none") or "none",
+    }
+
+    try:
+        limit = max(0, min(int(args.get("limit", 5000)), MAX_EXPORT_NODES))
+    except (TypeError, ValueError):
+        limit = 5000
+
+    layers = args.get("layers")
+
+    include = args.get("include") or {}
+    flags = ExportFlags(
+        include_quarantined=bool(include.get("include_quarantined", False)),
+        include_deprecated=bool(include.get("include_deprecated", False)),
+        include_superseded=bool(include.get("include_superseded", False)),
+        all_visibility=bool(include.get("all_visibility", False)),
+        include_content_ref=bool(include.get("include_content_ref", False)),
+        include_drift=bool(include.get("include_drift", False)),
+        synthesize_links=bool(include.get("synthesize_links", False)),
+        # backfill_links is NOT exposed on MCP surface (write path is CLI-only)
+        backfill_links=False,
+        dangling_policy=str(include.get("dangling_policy", "drop")),
+    )
+
+    result = exporter.export(
+        scope=scope,
+        layers=layers,
+        limit=limit,
+        include_flags=flags,
+        redactor=redactor,
+    )
+    # Inject caller_tier into generated_from for audit provenance
+    result["generated_from"]["caller_tier"] = getattr(caller_tier, "name", str(caller_tier))
+    return result

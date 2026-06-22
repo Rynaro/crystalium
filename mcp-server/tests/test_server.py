@@ -292,15 +292,15 @@ def test_default_caller_constant_matches_expected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_tool_manifest_returns_8_tools() -> None:
-    """build_tool_manifest() must return exactly 8 tool definitions (W7: +ingest)."""
+def test_build_tool_manifest_returns_9_tools() -> None:
+    """build_tool_manifest() must return exactly 9 tool definitions (W-GE5: +graph_export)."""
     from crystalium.server import build_tool_manifest
     tools = build_tool_manifest()
-    assert len(tools) == 8
+    assert len(tools) == 9
 
 
 def test_build_tool_manifest_has_required_tool_names() -> None:
-    """All 8 tool names are present (the 7 original + W7 crystalium.ingest)."""
+    """All 9 tool names are present (the 8 original + W-GE5 crystalium.graph_export)."""
     from crystalium.server import build_tool_manifest
     tools = build_tool_manifest()
     names = {t["name"] for t in tools}
@@ -313,6 +313,7 @@ def test_build_tool_manifest_has_required_tool_names() -> None:
         "crystalium.plan_checkpoint",
         "crystalium.plan_replan",
         "crystalium.session_end",
+        "crystalium.graph_export",
     }
     assert names == expected, f"Tool manifest mismatch: {names ^ expected}"
 
