@@ -31,6 +31,13 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+#: Hard cap on export node scans (FINDING-010, graph.py:27 mirrors _NODE_WARN_THRESHOLD).
+MAX_EXPORT_NODES: int = 10_000
+
+# ---------------------------------------------------------------------------
 # DDL
 # ---------------------------------------------------------------------------
 
@@ -834,6 +841,138 @@ class RelationalStore:
                 (status, promotion_id),
             )
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # Graph export enumerators (GAP-2, W-GE1)
+    # ------------------------------------------------------------------
+
+    def list_for_export(
+        self,
+        project: str,
+        *,
+        agent_class_visibility: str | None = None,
+        layers: list[str] | None = None,
+        include_quarantined: bool = False,
+        include_deprecated: bool = False,
+        include_superseded: bool = False,
+        limit: int = 5000,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Bounded, scope-filtered crystal enumerator for graph export (GAP-2).
+
+        Ordering: created_at DESC, id ASC (stable tiebreak). Returns _row_to_dict()
+        rows (relational.py:360). Applies the §5.3 default filter unless the
+        include_* flags relax it. NEVER an unbounded scan: limit is clamped to
+        MAX_EXPORT_NODES (FINDING-010, graph.py:27). The caller paginates via offset
+        until len(batch) < limit OR the node cap is reached.
+        """
+        limit = min(max(0, limit), MAX_EXPORT_NODES)
+        params: list[Any] = [project]
+        conditions = ["json_extract(scope, '$.project') = ?"]
+
+        # §5.3 default filter: status=active unless include_deprecated
+        if include_deprecated:
+            conditions.append("status IN ('active', 'deprecated')")
+        else:
+            conditions.append("status = 'active'")
+
+        # §5.3 default filter: exclude quarantined unless include_quarantined
+        if not include_quarantined:
+            conditions.append("validation_state != 'quarantined'")
+
+        # §5.3 default filter: exclude superseded unless include_superseded
+        if not include_superseded:
+            conditions.append(
+                "(json_extract(temporal, '$.superseded_by') IS NULL "
+                "OR json_extract(temporal, '$.superseded_by') = '')"
+            )
+            conditions.append(
+                "(json_extract(temporal, '$.t_valid_to') IS NULL "
+                "OR json_extract(temporal, '$.t_valid_to') = '')"
+            )
+
+        # Visibility predicate: crystal's agent_class_visibility IS NULL = visible to all
+        if agent_class_visibility is not None:
+            conditions.append(
+                "(json_extract(scope, '$.agent_class_visibility') IS NULL "
+                "OR json_extract(scope, '$.agent_class_visibility') = '' "
+                "OR json_extract(scope, '$.agent_class_visibility') = 'all' "
+                "OR json_extract(scope, '$.agent_class_visibility') = ?)"
+            )
+            params.append(agent_class_visibility)
+
+        # Optional layer filter
+        if layers:
+            placeholders = ",".join("?" * len(layers))
+            conditions.append(f"layer IN ({placeholders})")
+            params.extend(layers)
+
+        where_sql = " AND ".join(conditions)
+        params.extend([limit, offset])
+        sql = (
+            f"SELECT * FROM crystals WHERE {where_sql} "
+            f"ORDER BY created_at DESC, id ASC "
+            f"LIMIT ? OFFSET ?"
+        )
+        with self._connect() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def count_for_export(
+        self,
+        project: str,
+        *,
+        agent_class_visibility: str | None = None,
+        layers: list[str] | None = None,
+        include_quarantined: bool = False,
+        include_deprecated: bool = False,
+        include_superseded: bool = False,
+    ) -> int:
+        """Return the pre-truncation count of exportable crystals for G-GE5 (GAP-2).
+
+        Single bounded SELECT count(*) with the same WHERE as list_for_export —
+        cheap, no row hydration. Used for counts.nodes_total_estimate.
+        """
+        params: list[Any] = [project]
+        conditions = ["json_extract(scope, '$.project') = ?"]
+
+        if include_deprecated:
+            conditions.append("status IN ('active', 'deprecated')")
+        else:
+            conditions.append("status = 'active'")
+
+        if not include_quarantined:
+            conditions.append("validation_state != 'quarantined'")
+
+        if not include_superseded:
+            conditions.append(
+                "(json_extract(temporal, '$.superseded_by') IS NULL "
+                "OR json_extract(temporal, '$.superseded_by') = '')"
+            )
+            conditions.append(
+                "(json_extract(temporal, '$.t_valid_to') IS NULL "
+                "OR json_extract(temporal, '$.t_valid_to') = '')"
+            )
+
+        if agent_class_visibility is not None:
+            conditions.append(
+                "(json_extract(scope, '$.agent_class_visibility') IS NULL "
+                "OR json_extract(scope, '$.agent_class_visibility') = '' "
+                "OR json_extract(scope, '$.agent_class_visibility') = 'all' "
+                "OR json_extract(scope, '$.agent_class_visibility') = ?)"
+            )
+            params.append(agent_class_visibility)
+
+        if layers:
+            placeholders = ",".join("?" * len(layers))
+            conditions.append(f"layer IN ({placeholders})")
+            params.extend(layers)
+
+        where_sql = " AND ".join(conditions)
+        sql = f"SELECT count(*) FROM crystals WHERE {where_sql}"
+        with self._connect() as conn:
+            row = conn.execute(sql, tuple(params)).fetchone()
+        return int(row[0]) if row else 0
 
     # ------------------------------------------------------------------
     # Telemetry sink

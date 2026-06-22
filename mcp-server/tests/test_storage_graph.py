@@ -100,3 +100,82 @@ class TestNeighborExpand:
         tmp_graph_store.add_node("rf-test", "semantic")
         with pytest.raises(ValueError, match="Invalid rel_filter"):
             tmp_graph_store.neighbor_expand(["rf-test"], rel_filter="INVENTED")
+
+
+# ---------------------------------------------------------------------------
+# W-GE1: GraphStore.all_edges tests
+# ---------------------------------------------------------------------------
+
+
+class TestAllEdges:
+    """Tests for GraphStore.all_edges (GAP-2, W-GE1)."""
+
+    def test_all_edges_empty_graph(self, tmp_graph_store: GraphStore) -> None:
+        """Empty graph returns empty list."""
+        edges = tmp_graph_store.all_edges()
+        assert edges == []
+
+    def test_all_edges_returns_links_to(self, tmp_graph_store: GraphStore) -> None:
+        tmp_graph_store.add_node("ae-a", "semantic")
+        tmp_graph_store.add_node("ae-b", "semantic")
+        tmp_graph_store.add_edge("ae-a", "ae-b", "LINKS_TO")
+        edges = tmp_graph_store.all_edges()
+        assert ("ae-a", "ae-b", "LINKS_TO") in edges
+
+    def test_all_edges_rel_filter_links_to(self, tmp_graph_store: GraphStore) -> None:
+        tmp_graph_store.add_node("rf-ae-a", "semantic")
+        tmp_graph_store.add_node("rf-ae-b", "semantic")
+        tmp_graph_store.add_node("rf-ae-c", "semantic")
+        tmp_graph_store.add_edge("rf-ae-a", "rf-ae-b", "LINKS_TO")
+        tmp_graph_store.add_edge("rf-ae-a", "rf-ae-c", "CITES")
+        links = tmp_graph_store.all_edges(rel_filter="LINKS_TO")
+        assert all(e[2] == "LINKS_TO" for e in links)
+        assert ("rf-ae-a", "rf-ae-b", "LINKS_TO") in links
+        assert ("rf-ae-a", "rf-ae-c", "CITES") not in links
+
+    def test_all_edges_rel_filter_invalid_raises(self, tmp_graph_store: GraphStore) -> None:
+        with pytest.raises(ValueError, match="Invalid rel_filter"):
+            tmp_graph_store.all_edges(rel_filter="INVENTED_REL")
+
+    def test_all_edges_tuple_shape(self, tmp_graph_store: GraphStore) -> None:
+        tmp_graph_store.add_node("shape-a", "episodic")
+        tmp_graph_store.add_node("shape-b", "episodic")
+        tmp_graph_store.add_edge("shape-a", "shape-b", "LINKS_TO")
+        edges = tmp_graph_store.all_edges(rel_filter="LINKS_TO")
+        assert len(edges) >= 1
+        from_id, to_id, rel_type = edges[0]
+        assert isinstance(from_id, str)
+        assert isinstance(to_id, str)
+        assert rel_type in {"LINKS_TO", "SUPERSEDES", "CITES"}
+
+    def test_all_edges_limit_bounds(self, tmp_graph_store: GraphStore) -> None:
+        """all_edges with limit=1 returns at most 1 edge."""
+        tmp_graph_store.add_node("lim-a", "semantic")
+        tmp_graph_store.add_node("lim-b", "semantic")
+        tmp_graph_store.add_node("lim-c", "semantic")
+        tmp_graph_store.add_edge("lim-a", "lim-b", "LINKS_TO")
+        tmp_graph_store.add_edge("lim-a", "lim-c", "LINKS_TO")
+        edges = tmp_graph_store.all_edges(rel_filter="LINKS_TO", limit=1)
+        assert len(edges) <= 1
+
+    def test_all_edges_pagination(self, tmp_graph_store: GraphStore) -> None:
+        """Offset pagination returns disjoint batches."""
+        tmp_graph_store.add_node("pag-a", "semantic")
+        tmp_graph_store.add_node("pag-b", "semantic")
+        tmp_graph_store.add_node("pag-c", "semantic")
+        tmp_graph_store.add_edge("pag-a", "pag-b", "LINKS_TO")
+        tmp_graph_store.add_edge("pag-a", "pag-c", "LINKS_TO")
+        page1 = tmp_graph_store.all_edges(rel_filter="LINKS_TO", limit=1, offset=0)
+        page2 = tmp_graph_store.all_edges(rel_filter="LINKS_TO", limit=1, offset=1)
+        assert len(page1) <= 1
+        assert len(page2) <= 1
+        if page1 and page2:
+            assert page1[0] != page2[0]
+
+    def test_null_graph_store_all_edges_returns_empty(self) -> None:
+        """_NullGraphStore.all_edges must return []."""
+        from crystalium.server import _NullGraphStore
+        null_store = _NullGraphStore()
+        assert null_store.all_edges() == []
+        assert null_store.all_edges(rel_filter="LINKS_TO") == []
+        assert null_store.all_edges(rel_filter="LINKS_TO", limit=100) == []

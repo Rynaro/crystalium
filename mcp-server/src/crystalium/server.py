@@ -551,6 +551,9 @@ class _NullGraphStore:
     def add_edge(self, *args, **kwargs) -> None:  # noqa: ARG002 — W5 edge writes no-op
         return None
 
+    def all_edges(self, **kwargs) -> list:  # noqa: ARG002 — GAP-2 no-kuzu fallback
+        return []
+
 
 # ---------------------------------------------------------------------------
 # ECL sidecar helper (G7)
