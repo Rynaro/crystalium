@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from crystalium.storage.relational import RelationalStore
+from crystalium.storage.relational import MAX_EXPORT_NODES, RelationalStore
 
 
 class TestRelationalStoreBasics:
@@ -180,3 +180,198 @@ class TestTelemetrySink:
             overflow=False,
             error=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# W-GE1: list_for_export / count_for_export enumerator tests
+# ---------------------------------------------------------------------------
+
+
+class TestListForExport:
+    """Tests for RelationalStore.list_for_export and count_for_export (GAP-2, W-GE1)."""
+
+    def _insert(self, store: RelationalStore, crystal: dict) -> dict:
+        store.insert_crystal(crystal)
+        return crystal
+
+    def test_max_export_nodes_constant(self) -> None:
+        """MAX_EXPORT_NODES must equal 10000 (FINDING-010)."""
+        assert MAX_EXPORT_NODES == 10_000
+
+    def test_list_returns_active_crystals(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        c = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        results = tmp_relational_store.list_for_export(c["scope"]["project"])
+        ids = [r["id"] for r in results]
+        assert c["id"] in ids
+
+    def test_list_excludes_deprecated_by_default(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        c = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        tmp_relational_store.set_status(c["id"], "deprecated")
+        results = tmp_relational_store.list_for_export(c["scope"]["project"])
+        assert c["id"] not in [r["id"] for r in results]
+
+    def test_list_includes_deprecated_with_flag(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        c = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        tmp_relational_store.set_status(c["id"], "deprecated")
+        results = tmp_relational_store.list_for_export(
+            c["scope"]["project"], include_deprecated=True
+        )
+        assert c["id"] in [r["id"] for r in results]
+
+    def test_list_excludes_quarantined_by_default(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        c = self._insert(tmp_relational_store, sample_crystal(layer="semantic", validation_state="quarantined"))
+        results = tmp_relational_store.list_for_export(c["scope"]["project"])
+        assert c["id"] not in [r["id"] for r in results]
+
+    def test_list_includes_quarantined_with_flag(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        c = self._insert(tmp_relational_store, sample_crystal(layer="semantic", validation_state="quarantined"))
+        results = tmp_relational_store.list_for_export(
+            c["scope"]["project"], include_quarantined=True
+        )
+        assert c["id"] in [r["id"] for r in results]
+
+    def test_list_excludes_superseded_by_default(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        from datetime import datetime, timezone
+        c_old = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        c_new = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        tmp_relational_store.mark_superseded(c_old["id"], c_new["id"], datetime.now(timezone.utc))
+        results = tmp_relational_store.list_for_export(c_old["scope"]["project"])
+        ids = [r["id"] for r in results]
+        assert c_old["id"] not in ids
+        assert c_new["id"] in ids
+
+    def test_list_includes_superseded_with_flag(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        from datetime import datetime, timezone
+        c_old = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        c_new = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        tmp_relational_store.mark_superseded(c_old["id"], c_new["id"], datetime.now(timezone.utc))
+        results = tmp_relational_store.list_for_export(
+            c_old["scope"]["project"], include_superseded=True
+        )
+        ids = [r["id"] for r in results]
+        assert c_old["id"] in ids
+
+    def test_list_scoped_to_project(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        """list_for_export must not return crystals from a different project."""
+        c_a = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        # Manually insert a crystal in a different project
+        import uuid as _uuid
+        import json
+        c_b_id = str(_uuid.uuid4())
+        from crystalium.storage.relational import _to_json
+        c_b = sample_crystal(layer="semantic", crystal_id=c_b_id)
+        c_b["scope"] = {"project": "other-project", "agent_class_visibility": None, "sensitivity_tag": "none"}
+        tmp_relational_store.insert_crystal(c_b)
+        results = tmp_relational_store.list_for_export(c_a["scope"]["project"])
+        ids = [r["id"] for r in results]
+        assert c_a["id"] in ids
+        assert c_b_id not in ids
+
+    def test_limit_clamped_to_max_export_nodes(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        """Passing limit > MAX_EXPORT_NODES must be clamped to MAX_EXPORT_NODES."""
+        c = self._insert(tmp_relational_store, sample_crystal(layer="semantic"))
+        # Pass an absurdly large limit; should not error and should return the crystal
+        results = tmp_relational_store.list_for_export(
+            c["scope"]["project"], limit=99_999
+        )
+        assert len(results) <= MAX_EXPORT_NODES
+
+    def test_pagination_via_offset(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        """Offset pagination returns the second page."""
+        project = "page-test-project"
+        inserted = []
+        for _ in range(3):
+            c = sample_crystal(layer="semantic")
+            c["scope"] = {"project": project, "agent_class_visibility": None, "sensitivity_tag": "none"}
+            tmp_relational_store.insert_crystal(c)
+            inserted.append(c["id"])
+        page1 = tmp_relational_store.list_for_export(project, limit=2, offset=0)
+        page2 = tmp_relational_store.list_for_export(project, limit=2, offset=2)
+        # Page1 has 2 results; page2 has 1
+        assert len(page1) == 2
+        assert len(page2) == 1
+        # No overlap
+        ids1 = {r["id"] for r in page1}
+        ids2 = {r["id"] for r in page2}
+        assert ids1.isdisjoint(ids2)
+
+    def test_layer_filter(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        project = "layer-filter-project"
+        sem = sample_crystal(layer="semantic")
+        sem["scope"]["project"] = project
+        tmp_relational_store.insert_crystal(sem)
+        ep = sample_crystal(layer="episodic")
+        ep["scope"]["project"] = project
+        tmp_relational_store.insert_crystal(ep)
+        results = tmp_relational_store.list_for_export(project, layers=["semantic"])
+        assert all(r["layer"] == "semantic" for r in results)
+
+    def test_visibility_filter(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        """Crystals with a different agent_class_visibility must be excluded."""
+        project = "vis-filter-project"
+        c_public = sample_crystal(layer="semantic")
+        c_public["scope"]["project"] = project
+        c_public["scope"]["agent_class_visibility"] = None
+        tmp_relational_store.insert_crystal(c_public)
+        c_forge = sample_crystal(layer="semantic")
+        c_forge["scope"]["project"] = project
+        c_forge["scope"]["agent_class_visibility"] = "forge"
+        tmp_relational_store.insert_crystal(c_forge)
+        # Query as "spectra" — should see public (null) but not forge-only
+        results = tmp_relational_store.list_for_export(
+            project, agent_class_visibility="spectra"
+        )
+        ids = [r["id"] for r in results]
+        assert c_public["id"] in ids
+        assert c_forge["id"] not in ids
+
+    def test_count_for_export_matches_list(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        project = "count-test-project"
+        for _ in range(3):
+            c = sample_crystal(layer="semantic")
+            c["scope"]["project"] = project
+            tmp_relational_store.insert_crystal(c)
+        count = tmp_relational_store.count_for_export(project)
+        listed = tmp_relational_store.list_for_export(project, limit=MAX_EXPORT_NODES)
+        assert count == len(listed)
+
+    def test_count_respects_same_filters_as_list(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        """count_for_export with include_quarantined=True > without."""
+        project = "count-filter-project"
+        c_active = sample_crystal(layer="semantic")
+        c_active["scope"]["project"] = project
+        tmp_relational_store.insert_crystal(c_active)
+        c_quar = sample_crystal(layer="semantic", validation_state="quarantined")
+        c_quar["scope"]["project"] = project
+        tmp_relational_store.insert_crystal(c_quar)
+        count_default = tmp_relational_store.count_for_export(project)
+        count_with_quar = tmp_relational_store.count_for_export(project, include_quarantined=True)
+        assert count_with_quar > count_default

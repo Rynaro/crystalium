@@ -289,3 +289,66 @@ class GraphStore:
     def node_count(self) -> int:
         """Return the total number of Crystal nodes in the graph."""
         return self._node_count()
+
+    def all_edges(
+        self,
+        *,
+        rel_filter: str | None = None,
+        limit: int = 50000,
+        offset: int = 0,
+    ) -> list[tuple[str, str, str]]:
+        """Enumerate (from_id, to_id, rel_type) edges from KuzuDB (GAP-2, W-GE1).
+
+        Cypher: MATCH (a:Crystal)-[r:REL_TYPE]->(b:Crystal) RETURN a.id, b.id, type(r)
+        One query per rel type when rel_filter is None (kuzu REL tables are typed
+        separately — graph.py:93-99). Paginated via SKIP/LIMIT. Returns [] on any
+        kuzu error (mirrors neighbor_expand's defensive try/except, graph.py:253).
+
+        Args:
+            rel_filter: None = all VALID_RELATIONS; else one specific type.
+            limit:      Max edges to return (bounded; edges can exceed node count).
+            offset:     Pagination cursor (SKIP n rows).
+
+        Returns:
+            List of (from_id, to_id, rel_type) tuples. Empty on error.
+        """
+        _EDGE_WARN_THRESHOLD = 10 * _NODE_WARN_THRESHOLD  # 100_000
+
+        if rel_filter is not None and rel_filter not in VALID_RELATIONS:
+            raise ValueError(f"Invalid rel_filter: {rel_filter!r}. Must be one of {sorted(VALID_RELATIONS)}.")
+
+        rels_to_query: list[str] = [rel_filter] if rel_filter else sorted(VALID_RELATIONS)
+        results: list[tuple[str, str, str]] = []
+
+        try:
+            conn = self._get_conn()
+            for rel in rels_to_query:
+                try:
+                    query = (
+                        f"MATCH (a:Crystal)-[:{rel}]->(b:Crystal) "
+                        f"RETURN a.id, b.id "
+                        f"SKIP {offset} LIMIT {limit}"
+                    )
+                    result = conn.execute(query)
+                    while True:
+                        row = result.get_next()
+                        if row is None:
+                            break
+                        results.append((str(row[0]), str(row[1]), rel))
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("all_edges_rel_error", rel=rel, error=str(exc))
+                    continue
+        except Exception as exc:  # noqa: BLE001
+            log.warning("all_edges_error", error=str(exc))
+            return []
+
+        total = len(results)
+        if total > _EDGE_WARN_THRESHOLD:
+            log.warning(
+                "all_edges_count_high",
+                edge_count=total,
+                threshold=_EDGE_WARN_THRESHOLD,
+                advice="Edge count exceeds 10×MAX_EXPORT_NODES; consider paginating.",
+            )
+
+        return results

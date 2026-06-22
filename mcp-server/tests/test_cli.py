@@ -1,4 +1,4 @@
-"""W4 tests: CLI subcommands (doctor + promote list + index).
+"""W4 tests: CLI subcommands (doctor + promote list + index + export).
 
 Tests:
   test_doctor_healthy_exits_0             — healthy env → exit code 0
@@ -7,6 +7,7 @@ Tests:
   test_index_redactor_receives_config     — Redactor constructed with config kwarg (regression:
                                            bare Redactor() crashed with TypeError)
   test_index_single_file_exits_0          — index a single .md file against a real tmp data dir
+  TestExportCli (W-GE4)                   — export subcommand: valid JSON, flags, --output, exit codes
 
 Container-first: run via
   docker compose run --rm crystalium pytest mcp-server/tests/test_cli.py -v
@@ -385,3 +386,243 @@ def test_index_single_file_exits_0(tmp_path: Path) -> None:
     assert "1 indexed" in result.output, (
         f"Expected '1 indexed' in output.\nOutput:\n{result.output}"
     )
+
+
+# ---------------------------------------------------------------------------
+# export (W-GE4) — CLI export subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestExportCli:
+    """W-GE4: crystalium export subcommand tests.
+
+    Uses a real (tmp) RelationalStore + _NullGraphStore so no kuzu/lance deps needed.
+    Mirrors spec §8.1 and §10 W-GE4 acceptance gate.
+    """
+
+    def _invoke_export(
+        self,
+        tmp_path: Path,
+        extra_args: list[str] | None = None,
+        env_overrides: dict | None = None,
+    ):
+        """Helper: set up a minimal data dir and invoke the export command."""
+        data_dir = tmp_path / "crystalium_data"
+        data_dir.mkdir(exist_ok=True)
+
+        env = {"CRYSTALIUM_DATA_DIR": str(data_dir)}
+        if env_overrides:
+            env.update(env_overrides)
+
+        args = ["export", "--scope-project", "cli-test-project"]
+        if extra_args:
+            args.extend(extra_args)
+
+        runner = CliRunner()
+        return runner.invoke(cli, args, env=env, catch_exceptions=False)
+
+    def test_export_emits_valid_canonical_json(self, tmp_path: Path) -> None:
+        """export emits valid canonical JSON on stdout (G-GE4 CLI arm)."""
+        import json as _json
+        result = self._invoke_export(tmp_path)
+        assert result.exit_code == 0, (
+            f"export exited {result.exit_code}.\nOutput:\n{result.output}"
+        )
+        payload = _json.loads(result.output)
+        assert payload["schema_version"] == "graph-export.v1"
+        assert "generated_from" in payload
+        assert "counts" in payload
+        assert "truncated" in payload
+        assert "nodes" in payload
+        assert "edges" in payload
+
+    def test_export_stdout_is_pure_json(self, tmp_path: Path) -> None:
+        """export stdout contains ONLY the JSON payload (structlog routed to stderr)."""
+        import json as _json
+        result = self._invoke_export(tmp_path)
+        assert result.exit_code == 0, result.output
+        # Must parse as JSON without error
+        _json.loads(result.output.strip())
+
+    def test_export_generated_from_project_matches(self, tmp_path: Path) -> None:
+        """generated_from.project matches --scope-project."""
+        import json as _json
+        result = self._invoke_export(tmp_path)
+        assert result.exit_code == 0, result.output
+        payload = _json.loads(result.output)
+        assert payload["generated_from"]["project"] == "cli-test-project"
+
+    def test_export_scope_visibility_flag(self, tmp_path: Path) -> None:
+        """--scope-visibility sets agent_class_visibility in generated_from."""
+        import json as _json
+        result = self._invoke_export(tmp_path, extra_args=["--scope-visibility", "spectra"])
+        assert result.exit_code == 0, result.output
+        payload = _json.loads(result.output)
+        assert payload["generated_from"]["agent_class_visibility"] == "spectra"
+
+    def test_export_limit_flag_wired(self, tmp_path: Path) -> None:
+        """--limit is wired: counts.nodes <= limit."""
+        import json as _json
+        result = self._invoke_export(tmp_path, extra_args=["--limit", "3"])
+        assert result.exit_code == 0, result.output
+        payload = _json.loads(result.output)
+        assert payload["counts"]["nodes"] <= 3
+
+    def test_export_output_writes_file(self, tmp_path: Path) -> None:
+        """--output writes the payload to a file and prints the path on stdout."""
+        import json as _json
+        out_file = tmp_path / "export_out.json"
+        result = self._invoke_export(tmp_path, extra_args=["--output", str(out_file)])
+        assert result.exit_code == 0, result.output
+        assert out_file.exists(), f"--output file not created: {out_file}"
+        payload = _json.loads(out_file.read_text())
+        assert payload["schema_version"] == "graph-export.v1"
+        # stdout should echo the file path
+        assert str(out_file) in result.output
+
+    def test_export_exit_0_on_success(self, tmp_path: Path) -> None:
+        """export exits 0 on success."""
+        result = self._invoke_export(tmp_path)
+        assert result.exit_code == 0, (
+            f"Expected exit 0, got {result.exit_code}.\nOutput:\n{result.output}"
+        )
+
+    def test_export_missing_scope_project_exits_nonzero(self, tmp_path: Path) -> None:
+        """export without --scope-project exits non-zero (Click required option)."""
+        data_dir = tmp_path / "crystalium_data"
+        data_dir.mkdir(exist_ok=True)
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["export"],
+            env={"CRYSTALIUM_DATA_DIR": str(data_dir)},
+            catch_exceptions=True,
+        )
+        assert result.exit_code != 0, (
+            "Expected non-zero exit when --scope-project is missing"
+        )
+
+    def test_export_truncated_flag_set_when_limit_exceeded(self, tmp_path: Path) -> None:
+        """truncated:true when we insert more crystals than --limit."""
+        import json as _json
+        import uuid as _uuid
+        from crystalium.storage.relational import RelationalStore as _RS
+        from datetime import datetime, timezone
+
+        data_dir = tmp_path / "crystalium_data"
+        data_dir.mkdir(exist_ok=True)
+
+        # Directly populate a real RelationalStore in the data dir.
+        # CRYSTALIUM_DATA_DIR sets config.data_dir; Config derives sqlite_path = data_dir / "index.sqlite".
+        sqlite_path = data_dir / "index.sqlite"
+        rel = _RS(db_path=sqlite_path)
+        now = datetime.now(timezone.utc).isoformat()
+        for i in range(5):
+            cid = f"cli-trunc-{i:03d}"
+            c = {
+                "id": cid,
+                "layer": "semantic",
+                "summary": f"crystal {i}",
+                "provenance": {"source": "verified_agent", "author_agent": "test", "task_id": None, "created_at": now},
+                "trust_tier": "T1",
+                "validation_state": "unverified",
+                "scope": {"project": "cli-test-project", "agent_class_visibility": None, "sensitivity_tag": "none"},
+                "temporal": {"t_valid_from": now, "t_valid_to": None, "superseded_by": None},
+                "utility": {"access_count": 1, "last_access": now, "outcome_success_score": None, "importance": 0.5, "novelty_at_write": 0.5},
+                "status": "active",
+            }
+            rel.insert_crystal(c)
+
+        result = self._invoke_export(
+            tmp_path,
+            extra_args=["--limit", "3"],
+            env_overrides={"CRYSTALIUM_DATA_DIR": str(data_dir)},
+        )
+        assert result.exit_code == 0, result.output
+        payload = _json.loads(result.output)
+        assert payload["truncated"] is True
+        assert len(payload["nodes"]) == 3
+
+    def test_export_include_flags_accepted(self, tmp_path: Path) -> None:
+        """All include flags are accepted without error."""
+        result = self._invoke_export(
+            tmp_path,
+            extra_args=[
+                "--include-quarantined",
+                "--include-deprecated",
+                "--include-superseded",
+                "--all-visibility",
+                "--include-content-ref",
+                "--include-drift",
+                "--synthesize-links",
+                "--dangling-policy", "keep",
+            ],
+        )
+        assert result.exit_code == 0, (
+            f"export with all include flags failed:\n{result.output}"
+        )
+
+    def test_export_format_json_default(self, tmp_path: Path) -> None:
+        """--format json (default) produces a JSON object."""
+        import json as _json
+        result = self._invoke_export(tmp_path, extra_args=["--format", "json"])
+        assert result.exit_code == 0, result.output
+        payload = _json.loads(result.output)
+        assert isinstance(payload, dict)
+
+    def test_export_invalid_layer_exits_nonzero(self, tmp_path: Path) -> None:
+        """--layers with an invalid layer name exits non-zero."""
+        data_dir = tmp_path / "crystalium_data"
+        data_dir.mkdir(exist_ok=True)
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["export", "--scope-project", "p", "--layers", "episodic,bogus_layer"],
+            env={"CRYSTALIUM_DATA_DIR": str(data_dir)},
+            catch_exceptions=True,
+        )
+        assert result.exit_code != 0, (
+            "Expected non-zero exit for invalid layer"
+        )
+
+    def test_export_calls_graph_exporter_core(self, tmp_path: Path) -> None:
+        """export calls GraphExporter.export() — the shared core (G-GE6 structural parity)."""
+        import json as _json
+        from unittest.mock import MagicMock
+
+        data_dir = tmp_path / "crystalium_data"
+        data_dir.mkdir(exist_ok=True)
+
+        fake_result = {
+            "schema_version": "graph-export.v1",
+            "generated_from": {
+                "project": "cli-test-project",
+                "agent_class_visibility": None,
+                "layers": None,
+                "generated_at": "2026-06-22T12:00:00+00:00",
+                "caller_tier": None,
+            },
+            "counts": {"nodes": 0, "edges": 0, "nodes_total_estimate": 0,
+                       "edges_dropped_dangling": 0, "edges_deduped": 0},
+            "truncated": False,
+            "nodes": [],
+            "edges": [],
+        }
+
+        mock_exporter_instance = MagicMock()
+        mock_exporter_instance.export.return_value = fake_result
+        mock_exporter_cls = MagicMock(return_value=mock_exporter_instance)
+
+        with patch("crystalium.__main__.GraphExporter", mock_exporter_cls):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["export", "--scope-project", "cli-test-project"],
+                env={"CRYSTALIUM_DATA_DIR": str(data_dir)},
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert mock_exporter_instance.export.called, "GraphExporter.export was not called"
+        payload = _json.loads(result.output)
+        assert payload["schema_version"] == "graph-export.v1"
