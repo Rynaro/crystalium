@@ -540,3 +540,143 @@ class TestCrystalV2Fields:
         assert crystal2.tags == ["x"]
         assert crystal2.protected is True
         assert crystal2.encoding_context == {"k": "v"}
+
+
+# ---------------------------------------------------------------------------
+# graph-export.v1.json (W-GE3)
+# ---------------------------------------------------------------------------
+
+
+def _good_graph_export() -> dict:
+    """Minimal valid graph-export payload."""
+    import datetime
+    now = datetime.datetime(2026, 6, 22, 12, 0, 0, tzinfo=datetime.timezone.utc).isoformat()
+    return {
+        "schema_version": "graph-export.v1",
+        "generated_from": {
+            "project": "test-project",
+            "agent_class_visibility": None,
+            "layers": None,
+            "generated_at": now,
+            "caller_tier": None,
+        },
+        "counts": {
+            "nodes": 1,
+            "edges": 1,
+            "nodes_total_estimate": 1,
+            "edges_dropped_dangling": 0,
+            "edges_deduped": 0,
+        },
+        "truncated": False,
+        "nodes": [
+            {
+                "id": "crystal-abc",
+                "layer": "semantic",
+                "summary": "Test crystal summary.",
+                "trust_tier": "T1",
+                "validation_state": "unverified",
+                "status": "active",
+                "importance": 0.5,
+                "tags": [],
+                "protected": False,
+                "scope_project": "test-project",
+            }
+        ],
+        "edges": [
+            {
+                "from": "crystal-abc",
+                "to": "crystal-def",
+                "type": "LINKS_TO",
+                "source": "kuzu",
+                "weight": 1.0,
+                "metadata": {},
+            }
+        ],
+    }
+
+
+class TestGraphExportSchema:
+    def setup_method(self) -> None:
+        self.schema = load_schema("graph-export.v1.json")
+
+    def test_schema_parses_as_json(self) -> None:
+        assert isinstance(self.schema, dict)
+
+    def test_schema_has_required_meta_fields(self) -> None:
+        assert "$schema" in self.schema
+        assert "$id" in self.schema
+        assert "title" in self.schema
+        assert "description" in self.schema
+        assert self.schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+
+    def test_valid_export_validates(self) -> None:
+        validate(self.schema, _good_graph_export())
+
+    def test_missing_schema_version_rejected(self) -> None:
+        bad = _good_graph_export()
+        del bad["schema_version"]
+        assert_invalid(self.schema, bad, "schema_version is required")
+
+    def test_wrong_schema_version_rejected(self) -> None:
+        bad = _good_graph_export()
+        bad["schema_version"] = "graph-export.v2"
+        assert_invalid(self.schema, bad, "schema_version const must be graph-export.v1")
+
+    def test_missing_truncated_rejected(self) -> None:
+        bad = _good_graph_export()
+        del bad["truncated"]
+        assert_invalid(self.schema, bad, "truncated is required")
+
+    def test_missing_counts_rejected(self) -> None:
+        bad = _good_graph_export()
+        del bad["counts"]
+        assert_invalid(self.schema, bad, "counts is required")
+
+    def test_missing_nodes_rejected(self) -> None:
+        bad = _good_graph_export()
+        del bad["nodes"]
+        assert_invalid(self.schema, bad, "nodes is required")
+
+    def test_missing_edges_rejected(self) -> None:
+        bad = _good_graph_export()
+        del bad["edges"]
+        assert_invalid(self.schema, bad, "edges is required")
+
+    def test_node_missing_required_field_rejected(self) -> None:
+        bad = _good_graph_export()
+        del bad["nodes"][0]["summary"]
+        assert_invalid(self.schema, bad, "node summary is required")
+
+    def test_node_invalid_layer_rejected(self) -> None:
+        bad = _good_graph_export()
+        bad["nodes"][0]["layer"] = "working_memory"
+        assert_invalid(self.schema, bad, "invalid layer enum")
+
+    def test_edge_missing_source_rejected(self) -> None:
+        bad = _good_graph_export()
+        del bad["edges"][0]["source"]
+        assert_invalid(self.schema, bad, "edge source is required")
+
+    def test_edge_invalid_source_rejected(self) -> None:
+        bad = _good_graph_export()
+        bad["edges"][0]["source"] = "postgres"
+        assert_invalid(self.schema, bad, "source must be kuzu or derived")
+
+    def test_edge_invalid_type_rejected(self) -> None:
+        bad = _good_graph_export()
+        bad["edges"][0]["type"] = "INVENTED_REL"
+        assert_invalid(self.schema, bad, "type must be one of the valid enum values")
+
+    def test_empty_nodes_and_edges_valid(self) -> None:
+        """An export with no nodes and no edges is valid (empty project)."""
+        empty = _good_graph_export()
+        empty["nodes"] = []
+        empty["edges"] = []
+        empty["counts"]["nodes"] = 0
+        empty["counts"]["edges"] = 0
+        validate(self.schema, empty)
+
+    def test_additional_top_level_properties_rejected(self) -> None:
+        bad = _good_graph_export()
+        bad["unexpected_key"] = "surprise"
+        assert_invalid(self.schema, bad, "additionalProperties: false at top level")

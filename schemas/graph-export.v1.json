@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rynaro/crystalium/schemas/graph-export.v1.json",
+  "title": "GraphExport",
+  "description": "Canonical graph export artefact produced by crystalium.graph_export / crystalium export CLI. Nodes = redacted crystal summaries (never raw blob); edges = LINKS_TO (kuzu) + derived SUPERSEDES/MERGED_FROM/CONFLICTS_WITH (§5.1 D1). Schema frozen for v0.1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_from", "counts", "truncated", "nodes", "edges"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Frozen schema version identifier.",
+      "const": "graph-export.v1"
+    },
+    "generated_from": {
+      "type": "object",
+      "description": "Provenance of this export: scope parameters + generation timestamp.",
+      "additionalProperties": false,
+      "required": ["project", "generated_at"],
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "scope.project this export was bounded to.",
+          "minLength": 1
+        },
+        "agent_class_visibility": {
+          "type": ["string", "null"],
+          "description": "Which agent class requested the export (null = all).",
+          "minLength": 1
+        },
+        "layers": {
+          "type": ["array", "null"],
+          "description": "Layer subset filter applied (null = all layers).",
+          "items": {
+            "type": "string",
+            "enum": ["episodic", "semantic", "procedural", "execution"]
+          }
+        },
+        "generated_at": {
+          "type": "string",
+          "description": "RFC 3339 timestamp when the export was produced.",
+          "format": "date-time"
+        },
+        "caller_tier": {
+          "type": ["string", "null"],
+          "description": "Trust tier of the caller (from MCP context). null when called via CLI.",
+          "enum": ["T0", "T1", "T2", "T3", null]
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "description": "Summary statistics for this export.",
+      "additionalProperties": false,
+      "required": ["nodes", "edges", "nodes_total_estimate", "edges_dropped_dangling", "edges_deduped"],
+      "properties": {
+        "nodes": {
+          "type": "integer",
+          "description": "Number of nodes emitted (may be < nodes_total_estimate when truncated).",
+          "minimum": 0
+        },
+        "edges": {
+          "type": "integer",
+          "description": "Number of edges emitted (post-hygiene).",
+          "minimum": 0
+        },
+        "nodes_total_estimate": {
+          "type": "integer",
+          "description": "Pre-truncation count from count_for_export() (>= nodes).",
+          "minimum": 0
+        },
+        "edges_dropped_dangling": {
+          "type": "integer",
+          "description": "Edges dropped by HYG-1 (dangling endpoint not in nodes[]).",
+          "minimum": 0
+        },
+        "edges_deduped": {
+          "type": "integer",
+          "description": "Duplicate (from, to, type) tuples collapsed by HYG-2.",
+          "minimum": 0
+        }
+      }
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "true when the node --limit cap was hit and nodes_total_estimate > nodes (G-GE5)."
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Redacted, summary-only projections of SQLite crystal rows. Sorted by id ascending (HYG-4).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "layer", "summary", "trust_tier", "validation_state", "status", "importance"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Crystal identifier (UUID).",
+            "minLength": 1
+          },
+          "layer": {
+            "type": "string",
+            "description": "Memory layer.",
+            "enum": ["episodic", "semantic", "procedural", "execution"]
+          },
+          "summary": {
+            "type": "string",
+            "description": "Redacted crystal summary (never raw blob). Passed through the Redactor.",
+            "minLength": 1
+          },
+          "trust_tier": {
+            "type": "string",
+            "description": "Trust tier at admission time.",
+            "enum": ["T0", "T1", "T2", "T3"]
+          },
+          "validation_state": {
+            "type": "string",
+            "description": "Current admission state.",
+            "enum": ["validated", "unverified", "quarantined", "candidate"]
+          },
+          "status": {
+            "type": "string",
+            "description": "Lifecycle status.",
+            "enum": ["candidate", "active", "deprecated"]
+          },
+          "importance": {
+            "type": "number",
+            "description": "Cached importance score [0, 1] from utility.importance.",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339 timestamp when the crystal was created (provenance.created_at).",
+            "format": "date-time"
+          },
+          "last_access": {
+            "type": "string",
+            "description": "RFC 3339 timestamp of most recent recall (utility.last_access).",
+            "format": "date-time"
+          },
+          "tags": {
+            "type": "array",
+            "description": "Retrieval tags (default []).",
+            "items": {"type": "string"},
+            "default": []
+          },
+          "protected": {
+            "type": "boolean",
+            "description": "Exempt from Dream eviction (default false). Surfaced only; never changes inclusion.",
+            "default": false
+          },
+          "content_ref": {
+            "type": "string",
+            "description": "OMITTED by default (GAP-3). When --include-content-ref: the opaque SHA-256 hash only. NEVER the resolved blob bytes.",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "scope_project": {
+            "type": "string",
+            "description": "scope.project for cross-checking (redundant with generated_from.project)."
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "description": "Post-hygiene (HYG-1..4) typed edges. Sorted by (type, from, to) ascending (HYG-4).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "type", "source"],
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Source crystal id.",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "description": "Destination crystal id.",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "description": "Edge type (§5.1 D1).",
+            "enum": ["LINKS_TO", "SUPERSEDES", "MERGED_FROM", "CONFLICTS_WITH", "CITES"]
+          },
+          "source": {
+            "type": "string",
+            "description": "Origin of this edge: kuzu = read from KuzuDB; derived = synthesized from relational state.",
+            "enum": ["kuzu", "derived"]
+          },
+          "weight": {
+            "type": "number",
+            "description": "Type-specific weight (default 1.0). MERGED_FROM uses corroboration count; CONFLICTS_WITH uses similarity.",
+            "minimum": 0
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Type-specific provenance. additionalProperties:true inside metadata only.",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  }
+}
