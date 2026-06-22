@@ -4,6 +4,7 @@ Subcommands:
   serve     — start the MCP server (stdio transport, D2)
   index     — bulk-load a directory of .md/.txt files into Episodic (T0)
   recall    — read-only one-shot hybrid recall (out-of-MCP-session, BM25 fast path)
+  export    — export the scoped memory graph as nodes[]+edges[] (JSON; GraphML/Cytoscape in W-GE6)
   dream     — manually trigger the Dream worker
   doctor    — health checks: imports, config, schemas, data_dir writable, optional deps
   canary    — run the canary suite (W5 stub in v0.1)
@@ -27,6 +28,7 @@ import click
 from crystalium.storage.relational import RelationalStore  # noqa: F401 — test-patchable
 from crystalium.gate import PromotionGate  # noqa: F401 — test-patchable
 from crystalium.enforcement import Enforcement  # noqa: F401 — test-patchable
+from crystalium.export.graph_export import GraphExporter  # noqa: F401 — test-patchable
 
 
 def _select_importance_fn(config):
@@ -359,6 +361,239 @@ def recall(
         for r in result.records:
             d = r.model_dump() if hasattr(r, "model_dump") else r
             click.echo(f"[{d['layer']}/{d['trust_tier']}] {d['summary']}")
+
+
+# ---------------------------------------------------------------------------
+# export — graph export (W-GE4, D3a) — read-only by default
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--scope-project",
+    "scope_project",
+    required=True,
+    help="scope.project (min_length 1).",
+)
+@click.option(
+    "--scope-visibility",
+    "scope_visibility",
+    default=None,
+    help="agent_class_visibility filter (default: None → all).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "graphml", "cytoscape"]),
+    default="json",
+    show_default=True,
+    help="Output format. graphml/cytoscape adapters land in W-GE6; json is fully supported.",
+)
+@click.option(
+    "--layers",
+    "layers_csv",
+    default=None,
+    help="CSV subset of episodic,semantic,procedural,execution (default: all four).",
+)
+@click.option(
+    "--limit",
+    default=5000,
+    type=int,
+    show_default=True,
+    help="Node cap (default 5000, hard max 10000).",
+)
+@click.option("--include-quarantined", "include_quarantined", is_flag=True, default=False)
+@click.option("--include-deprecated", "include_deprecated", is_flag=True, default=False)
+@click.option("--include-superseded", "include_superseded", is_flag=True, default=False)
+@click.option("--all-visibility", "all_visibility", is_flag=True, default=False,
+              help="Ignore agent_class_visibility filter; include crystals for all agents.")
+@click.option("--include-content-ref", "include_content_ref", is_flag=True, default=False,
+              help="Emit the opaque SHA-256 hash of episodic content_ref (hash only, never blob).")
+@click.option("--include-drift", "include_drift", is_flag=True, default=False,
+              help="Include CONFLICTS_WITH edges from drift_audit ledger (CONFLICT-2; default OFF).")
+@click.option("--synthesize-links", "synthesize_links", is_flag=True, default=False,
+              help="Read-only co-occurrence LINKS_TO fallback when KuzuDB has no edges (§5.4(b)).")
+@click.option("--backfill-links", "backfill_links", is_flag=True, default=False,
+              help="WRITE path: backfill LINKS_TO in KuzuDB from recent_crystal_ids (§5.4(a)). "
+                   "Operator-gated; will prompt for confirmation unless --yes is given.")
+@click.option(
+    "--dangling-policy",
+    "dangling_policy",
+    type=click.Choice(["drop", "keep"]),
+    default="drop",
+    show_default=True,
+    help="How to handle edges whose endpoint is not in the emitted nodes set.",
+)
+@click.option(
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write artefact to file (default: stdout).",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+    help="Path to crystalium.yaml (default: env vars).",
+)
+@click.option("--yes", is_flag=True, default=False,
+              help="Skip confirmation prompts (e.g. for --backfill-links).")
+def export(
+    scope_project: str,
+    scope_visibility: Optional[str],
+    fmt: str,
+    layers_csv: Optional[str],
+    limit: int,
+    include_quarantined: bool,
+    include_deprecated: bool,
+    include_superseded: bool,
+    all_visibility: bool,
+    include_content_ref: bool,
+    include_drift: bool,
+    synthesize_links: bool,
+    backfill_links: bool,
+    dangling_policy: str,
+    output_path: Optional[Path],
+    config_path: Optional[Path],
+    yes: bool,
+) -> None:
+    """Export the scoped memory graph as nodes[]+edges[] canonical JSON (D3a).
+
+    READ-ONLY by default. The SOLE exception is --backfill-links (operator-gated
+    WRITE to KuzuDB graph adjacency; prints a warning and requires confirmation).
+    Uses the same GraphExporter core as the MCP crystalium.graph_export tool (G-GE6 parity).
+    Exit 0 on success, exit 1 on error (stderr message), mirroring recall.
+
+    --format graphml/cytoscape adapters land in W-GE6; for now those values are
+    accepted but will raise NotImplementedError at runtime until W-GE6.
+    """
+    import structlog
+
+    # Route all structlog output to stderr so stdout carries exactly one JSON document.
+    # Use sys.__stderr__ (the real stderr fd) so CliRunner capture buffers stay clean.
+    _stderr = getattr(sys, "__stderr__", sys.stderr) or sys.stderr
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_stderr))
+
+    # Lazy heavy imports inside the body (mirror recall discipline — D-G2b).
+    # NOTE: GraphExporter is ALSO imported at module-level (test-patchable via
+    # `patch("crystalium.__main__.GraphExporter")`). The local import below is
+    # for ExportFlags only; we access GraphExporter via the module-level binding
+    # so that tests can patch it at the __main__ namespace.
+    import crystalium.__main__ as _this_module
+    from crystalium.config import Config
+    from crystalium.aetheryte.redact import Redactor
+    from crystalium.server import _NullGraphStore
+    from crystalium.storage.relational import RelationalStore as _RS
+    from crystalium.export.graph_export import ExportFlags
+
+    config = (
+        Config.from_yaml(config_path)
+        if (config_path and config_path.exists())
+        else Config.from_env()
+    )
+
+    # --backfill-links is a write path; require explicit confirmation (§5.4(a), spec §8.1).
+    if backfill_links:
+        import structlog as _slog
+        _log = _slog.get_logger("crystalium.cli.export")
+        _log.warning(
+            "backfill_links_write_path",
+            project=scope_project,
+            advice="--backfill-links will WRITE graph adjacency to KuzuDB. "
+                   "This is irreversible for any previously-absent edges.",
+        )
+        if not yes:
+            click.confirm(
+                f"Write LINKS_TO backfill to KuzuDB for project {scope_project!r}? "
+                "This modifies graph adjacency (not crystals).",
+                abort=True,
+            )
+
+    # Parse --layers CSV.
+    layers = None
+    if layers_csv:
+        valid_layers = {"episodic", "semantic", "procedural", "execution"}
+        layers = [s.strip() for s in layers_csv.split(",") if s.strip()]
+        bad = [lay for lay in layers if lay not in valid_layers]
+        if bad:
+            raise click.ClickException(
+                f"Unknown layer(s): {', '.join(bad)} "
+                f"(valid: {', '.join(sorted(valid_layers))})"
+            )
+
+    # Build stores.  Fast path: relational always needed; kuzu only when --backfill-links
+    # or when we want real LINKS_TO edges (try to construct; fall back to _NullGraphStore).
+    relational = _RS(db_path=config.sqlite_path)
+    redactor = Redactor(config=config)
+
+    try:
+        from crystalium.storage.graph import GraphStore as _GraphStore
+        graph_store = _GraphStore(kuzu_dir=config.kuzu_path)
+    except Exception:  # noqa: BLE001 — kuzu absent or init error → null fallback
+        graph_store = _NullGraphStore()
+
+    flags = ExportFlags(
+        include_quarantined=include_quarantined,
+        include_deprecated=include_deprecated,
+        include_superseded=include_superseded,
+        all_visibility=all_visibility,
+        include_content_ref=include_content_ref,
+        include_drift=include_drift,
+        synthesize_links=synthesize_links,
+        backfill_links=backfill_links,
+        dangling_policy=dangling_policy,
+    )
+
+    scope = {
+        "project": scope_project,
+        "agent_class_visibility": scope_visibility,
+        "sensitivity_tag": "none",
+    }
+
+    # Use the module-level GraphExporter so tests can patch it at __main__.GraphExporter.
+    exporter = _this_module.GraphExporter(relational_store=relational, graph_store=graph_store)
+
+    try:
+        result = exporter.export(
+            scope=scope,
+            layers=layers,
+            limit=limit,
+            include_flags=flags,
+            redactor=redactor,
+        )
+    except Exception as exc:
+        raise click.ClickException(f"export failed: {exc}") from exc
+
+    # Format adapters (graphml/cytoscape land in W-GE6; stub them for now).
+    if fmt == "json":
+        payload = json.dumps(result, default=str)
+    elif fmt == "graphml":
+        try:
+            from crystalium.export.adapters import to_graphml
+            payload = to_graphml(result)
+        except ImportError:
+            raise click.ClickException(
+                "graphml adapter not yet available (lands in W-GE6). Use --format json."
+            )
+    elif fmt == "cytoscape":
+        try:
+            from crystalium.export.adapters import to_cytoscape
+            payload = json.dumps(to_cytoscape(result), default=str)
+        except ImportError:
+            raise click.ClickException(
+                "cytoscape adapter not yet available (lands in W-GE6). Use --format json."
+            )
+    else:
+        raise click.ClickException(f"Unknown format: {fmt!r}")
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.write_text(payload, encoding="utf-8")
+        click.echo(str(output_path), err=False)
+    else:
+        click.echo(payload)
 
 
 # ---------------------------------------------------------------------------
