@@ -4,10 +4,15 @@ Container-first: run via:
   docker compose run --rm crystalium pytest mcp-server/tests/test_graph_export.py -v
 
 Gates implemented here:
-  G-GE2: rich source-tagged edge synthesis    (test_g_ge2_rich_edges, test_g_ge2_edge_source_tag)
-  G-GE4: edge hygiene (dangling/dedup/loop)   (test_g_ge4_edge_hygiene)
-  G-GE1: canonical JSON validates schema      (test_g_ge1_json_validates)
-  G-GE5: truncation flag + bounded            (test_g_ge5_truncation_flag)
+  G-GE1: canonical JSON validates schema       (test_g_ge1_json_validates)
+  G-GE2: rich source-tagged edge synthesis     (test_g_ge2_rich_edges, test_g_ge2_edge_source_tag)
+  G-GE3: visibility and redaction defaults     (test_g_ge3_visibility_defaults)
+  G-GE4: edge hygiene (dangling/dedup/loop)    (test_g_ge4_edge_hygiene)
+  G-GE5: truncation flag and bounded           (test_g_ge5_truncation_flag)
+  G-GE6: CLI and MCP parity                   (test_g_ge6_cli_mcp_parity)
+  G-GE7: ECL sidecar auto-emitted             (test_g_ge7_ecl_sidecar)
+  G-GE8: adapter mechanical fidelity          (test_g_ge8_adapter_counts)
+  CAN-GE1: rich-synthesis beats kuzu-only     (test_can_ge1_rich_edges_beat_kuzu_only)
 """
 
 from __future__ import annotations
@@ -919,3 +924,295 @@ class TestGGE7EclSidecar:
         from crystalium.enforcement import CrystaliumEnforcementError
         with pytest.raises(CrystaliumEnforcementError):
             raise CrystaliumEnforcementError("Unknown tool 'bogus'.", reason_code="UNKNOWN_TOOL")
+
+
+# ---------------------------------------------------------------------------
+# G-GE8: Adapter mechanical fidelity (§3 G-GE8)
+# ---------------------------------------------------------------------------
+
+
+class TestGGE8AdapterCounts:
+    """G-GE8: GraphML and Cytoscape adapters preserve node/edge counts and
+    propagate type + source on every edge (mechanical, count-preserving).
+    """
+
+    # A minimal canonical fixture with m=3 nodes and n=4 edges of mixed types.
+    _CANONICAL: dict = {
+        "schema_version": "graph-export.v1",
+        "generated_from": {"project": "ge8-project"},
+        "counts": {"nodes": 3, "edges": 4, "nodes_total_estimate": 3,
+                   "edges_dropped_dangling": 0, "edges_deduped": 0},
+        "truncated": False,
+        "nodes": [
+            {"id": "ge8-a", "layer": "semantic", "summary": "Alpha", "trust_tier": "T1",
+             "validation_state": "unverified", "status": "active", "importance": 0.9},
+            {"id": "ge8-b", "layer": "episodic", "summary": "Beta", "trust_tier": "T2",
+             "validation_state": "unverified", "status": "active", "importance": 0.5},
+            {"id": "ge8-c", "layer": "procedural", "summary": "Gamma", "trust_tier": "T1",
+             "validation_state": "validated", "status": "active", "importance": 0.3},
+        ],
+        "edges": [
+            {"from": "ge8-a", "to": "ge8-b", "type": "LINKS_TO",       "source": "kuzu",    "weight": 1.0, "metadata": {}},
+            {"from": "ge8-b", "to": "ge8-c", "type": "SUPERSEDES",     "source": "derived", "weight": 1.0, "metadata": {}},
+            {"from": "ge8-a", "to": "ge8-c", "type": "MERGED_FROM",    "source": "derived", "weight": 2.0, "metadata": {}},
+            {"from": "ge8-b", "to": "ge8-a", "type": "CONFLICTS_WITH", "source": "derived", "weight": 0.9, "metadata": {}},
+        ],
+    }
+
+    def test_g_ge8_adapter_counts(self) -> None:
+        """G-GE8 anchor: GraphML and Cytoscape both preserve m+n counts and edge type/source."""
+        from crystalium.export.adapters import to_graphml, to_cytoscape
+        import xml.etree.ElementTree as ET
+
+        canonical = self._CANONICAL
+        m = len(canonical["nodes"])   # 3
+        n = len(canonical["edges"])   # 4
+
+        # ── GraphML ────────────────────────────────────────────────────────
+        gml_str = to_graphml(canonical)
+        root = ET.fromstring(gml_str)
+        ns = {"g": "http://graphml.graphdrawing.org/graphml"}
+        graph_el = root.find("g:graph", ns)
+        assert graph_el is not None, "<graph> element missing from GraphML output"
+
+        node_els = graph_el.findall("g:node", ns)
+        edge_els = graph_el.findall("g:edge", ns)
+        assert len(node_els) == m, f"GraphML expected {m} <node>, got {len(node_els)}"
+        assert len(edge_els) == n, f"GraphML expected {n} <edge>, got {len(edge_els)}"
+
+        # Every edge must carry <data key="type"> and <data key="source">
+        for edge_el in edge_els:
+            data_map = {d.attrib["key"]: d.text for d in edge_el.findall("g:data", ns)}
+            assert "type" in data_map, f"GraphML edge missing <data key='type'>: {ET.tostring(edge_el)}"
+            assert "source" in data_map, f"GraphML edge missing <data key='source'>: {ET.tostring(edge_el)}"
+            assert data_map["source"] in ("kuzu", "derived"), (
+                f"GraphML edge source invalid: {data_map['source']!r}"
+            )
+            # <data key="weight"> must be present too
+            assert "weight" in data_map, f"GraphML edge missing <data key='weight'>: {data_map}"
+
+        # ── Cytoscape ──────────────────────────────────────────────────────
+        cy = to_cytoscape(canonical)
+        cy_nodes = cy["elements"]["nodes"]
+        cy_edges = cy["elements"]["edges"]
+        assert len(cy_nodes) == m, f"Cytoscape expected {m} nodes, got {len(cy_nodes)}"
+        assert len(cy_edges) == n, f"Cytoscape expected {n} edges, got {len(cy_edges)}"
+
+        # Every edge must carry edge_source (CRYSTALIUM source tag remapped)
+        for cy_edge in cy_edges:
+            d = cy_edge["data"]
+            assert "edge_source" in d, f"Cytoscape edge missing edge_source: {d}"
+            assert d["edge_source"] in ("kuzu", "derived"), (
+                f"Cytoscape edge edge_source invalid: {d['edge_source']!r}"
+            )
+            # type must survive
+            assert "type" in d, f"Cytoscape edge missing type: {d}"
+            # source/target are Cytoscape endpoints (not CRYSTALIUM source tag)
+            assert "source" in d, f"Cytoscape edge missing source (endpoint): {d}"
+            assert "target" in d, f"Cytoscape edge missing target (endpoint): {d}"
+
+    def test_g_ge8_graphml_node_count(self) -> None:
+        """to_graphml emits exactly m <node> elements (count-preserving, G-GE8)."""
+        from crystalium.export.adapters import to_graphml
+        import xml.etree.ElementTree as ET
+
+        canonical = self._CANONICAL
+        gml_str = to_graphml(canonical)
+        root = ET.fromstring(gml_str)
+        ns = {"g": "http://graphml.graphdrawing.org/graphml"}
+        nodes = root.find("g:graph", ns).findall("g:node", ns)
+        assert len(nodes) == len(canonical["nodes"])
+
+    def test_g_ge8_cytoscape_edge_source_is_endpoint_not_crystalium_tag(self) -> None:
+        """In Cytoscape output, data.source is the source endpoint id, NOT kuzu/derived.
+        The CRYSTALIUM source tag is in data.edge_source.
+        """
+        from crystalium.export.adapters import to_cytoscape
+        cy = to_cytoscape(self._CANONICAL)
+        for cy_edge in cy["elements"]["edges"]:
+            d = cy_edge["data"]
+            # data.source should NOT be 'kuzu' or 'derived' — it's an endpoint id
+            assert d["source"] not in ("kuzu", "derived"), (
+                f"data.source should be an endpoint id, not the CRYSTALIUM source tag: {d}"
+            )
+            # data.edge_source IS the CRYSTALIUM source tag
+            assert d["edge_source"] in ("kuzu", "derived")
+
+    def test_g_ge8_graphml_edge_source_data_not_attribute(self) -> None:
+        """In GraphML, the CRYSTALIUM source tag is in <data key='source'>, NOT
+        in the <edge source='...'> XML attribute (which holds the endpoint id).
+        """
+        from crystalium.export.adapters import to_graphml
+        import xml.etree.ElementTree as ET
+
+        gml_str = to_graphml(self._CANONICAL)
+        root = ET.fromstring(gml_str)
+        ns = {"g": "http://graphml.graphdrawing.org/graphml"}
+        edge_els = root.find("g:graph", ns).findall("g:edge", ns)
+        for edge_el in edge_els:
+            # XML attribute 'source' is an endpoint id (should NOT be kuzu/derived)
+            xml_source_attr = edge_el.attrib.get("source", "")
+            assert xml_source_attr not in ("kuzu", "derived"), (
+                f"GraphML <edge source='...'> should be endpoint id, got {xml_source_attr!r}"
+            )
+            # <data key="source"> should be kuzu or derived
+            data_map = {d.attrib["key"]: d.text for d in edge_el.findall("g:data", ns)}
+            assert data_map.get("source") in ("kuzu", "derived"), (
+                f"<data key='source'> should be kuzu/derived, got {data_map.get('source')!r}"
+            )
+
+    def test_g_ge8_empty_graph_adapters(self) -> None:
+        """Both adapters handle empty nodes/edges gracefully (count-preserving at 0+0)."""
+        from crystalium.export.adapters import to_graphml, to_cytoscape
+        import xml.etree.ElementTree as ET
+
+        empty = {
+            "schema_version": "graph-export.v1",
+            "generated_from": {"project": "empty"},
+            "counts": {"nodes": 0, "edges": 0, "nodes_total_estimate": 0,
+                       "edges_dropped_dangling": 0, "edges_deduped": 0},
+            "truncated": False,
+            "nodes": [],
+            "edges": [],
+        }
+        gml_str = to_graphml(empty)
+        root = ET.fromstring(gml_str)
+        ns = {"g": "http://graphml.graphdrawing.org/graphml"}
+        assert root.find("g:graph", ns).findall("g:node", ns) == []
+        assert root.find("g:graph", ns).findall("g:edge", ns) == []
+
+        cy = to_cytoscape(empty)
+        assert cy["elements"]["nodes"] == []
+        assert cy["elements"]["edges"] == []
+
+
+# ---------------------------------------------------------------------------
+# CAN-GE1: Feature canary — rich-synthesis beats kuzu-only (§12)
+# ---------------------------------------------------------------------------
+
+
+class TestCanGE1RichEdgesBeatKuzuOnly:
+    """CAN-GE1: full synthesized export edge-type cardinality strictly >= kuzu-only.
+
+    Proves D1 ("rich-synthesis beats kuzu-only"):
+      - Kuzu-only arm: export with only LINKS_TO edges from kuzu → only 1 edge type.
+      - Full arm: export with all four edge sources populated → 4 edge types.
+      - Full >= kuzu-only + 3 extra types (SUPERSEDES, MERGED_FROM, CONFLICTS_WITH).
+      - 100% of edges source-tagged.
+    """
+
+    def _build_full_fixture(self, tmp_path: Path):
+        """Build a fixture with all four edge sources populated."""
+        rel = RelationalStore(db_path=tmp_path / "canary.sqlite")
+        graph = GraphStore(kuzu_dir=tmp_path / "canary.kuzu")
+
+        project = "canary-project"
+
+        # (a) LINKS_TO: a → b via kuzu
+        c_a = _make_crystal(crystal_id="can-a", project=project)
+        c_b = _make_crystal(crystal_id="can-b", project=project)
+        for c in (c_a, c_b):
+            rel.insert_crystal(c)
+            graph.add_node(c["id"], c["layer"])
+        graph.add_edge(c_a["id"], c_b["id"], "LINKS_TO")
+
+        # (b) SUPERSEDES: c_old superseded by c_new
+        c_old = _make_crystal(crystal_id="can-old", project=project)
+        c_new = _make_crystal(crystal_id="can-new", project=project)
+        for c in (c_old, c_new):
+            rel.insert_crystal(c)
+            graph.add_node(c["id"], c["layer"])
+        rel.mark_superseded(c_old["id"], c_new["id"], datetime.now(timezone.utc))
+
+        # (c) MERGED_FROM: c_merged absorbed agent-x's contribution (c_e)
+        c_e = _make_crystal(crystal_id="can-e", project=project, author_agent="canary-agent-x")
+        c_merged = _make_crystal(crystal_id="can-merged", project=project)
+        for c in (c_e, c_merged):
+            rel.insert_crystal(c)
+            graph.add_node(c["id"], c["layer"])
+        rel.merge_provenance(
+            c_merged["id"],
+            {"author_agent": "canary-agent-x", "source": "verified_agent"},
+        )
+
+        # (d) CONFLICTS_WITH: c_f (winner) vs c_g (loser)
+        c_f = _make_crystal(crystal_id="can-f", project=project)
+        c_g = _make_crystal(crystal_id="can-g", project=project)
+        for c in (c_f, c_g):
+            rel.insert_crystal(c)
+            graph.add_node(c["id"], c["layer"])
+        rel.record_conflict(
+            c_f["id"], c_g["id"],
+            winner_tier="T1", loser_tier="T2", similarity=0.9,
+            scope={"project": project},
+        )
+
+        return rel, graph, project
+
+    def test_can_ge1_rich_edges_beat_kuzu_only(self, tmp_path: Path) -> None:
+        """CAN-GE1 oracle: full-synthesis export has strictly more edge types than
+        kuzu-only, with all four types present and 100% source-tagged.
+        """
+        rel, graph, project = self._build_full_fixture(tmp_path)
+        exporter = GraphExporter(relational_store=rel, graph_store=graph)
+        scope = {"project": project, "agent_class_visibility": None, "sensitivity_tag": "none"}
+
+        # ── Arm A: kuzu-only (simulate by disabling derived edge derivation) ──
+        # We use a NullGraphStore surrogate that only returns the real kuzu edges
+        # by querying graph.all_edges() directly.
+        kuzu_edges_raw = graph.all_edges()  # returns list[tuple[str,str,str]]
+        kuzu_only_types = {rel_type for _, _, rel_type in kuzu_edges_raw}
+        # Kuzu-only should have at most LINKS_TO (and possibly CITES/SUPERSEDES from
+        # graph — but our fixture only wrote LINKS_TO to kuzu)
+        assert kuzu_only_types.issubset({"LINKS_TO", "CITES", "SUPERSEDES"}), (
+            f"Kuzu-only should not have derived types, got: {kuzu_only_types}"
+        )
+        # Our fixture only has LINKS_TO in kuzu
+        assert "LINKS_TO" in kuzu_only_types, "Fixture should have LINKS_TO in kuzu"
+
+        # ── Arm B: full synthesis export (with --include-superseded to surface lineage) ──
+        result_full = exporter.export(
+            scope=scope,
+            include_flags=ExportFlags(include_superseded=True),
+        )
+        full_edge_types = {e["type"] for e in result_full["edges"]}
+
+        # Parity oracle: full has strictly more types than kuzu-only
+        assert len(full_edge_types) > len(kuzu_only_types), (
+            f"Full export ({full_edge_types}) should have more types than kuzu-only ({kuzu_only_types})"
+        )
+
+        # All four edge types must be present in the full export
+        assert "LINKS_TO" in full_edge_types, "LINKS_TO missing from full export"
+        assert "SUPERSEDES" in full_edge_types, "SUPERSEDES missing from full export"
+        assert "MERGED_FROM" in full_edge_types, "MERGED_FROM missing from full export"
+        assert "CONFLICTS_WITH" in full_edge_types, "CONFLICTS_WITH missing from full export"
+
+        # At least 3 extra types beyond kuzu-only
+        extra_types = full_edge_types - kuzu_only_types
+        assert len(extra_types) >= 3, (
+            f"Full export should have >=3 extra types beyond kuzu-only. "
+            f"Extra: {extra_types}, kuzu-only: {kuzu_only_types}"
+        )
+
+        # 100% source-tagged
+        for edge in result_full["edges"]:
+            assert "source" in edge, f"Edge missing source: {edge}"
+            assert edge["source"] in ("kuzu", "derived"), (
+                f"Edge source not kuzu/derived: {edge['source']!r}"
+            )
+
+        print(f"CAN-GE1 PASS: kuzu-only={kuzu_only_types}, full={full_edge_types}, extra={extra_types}")
+
+    def test_can_ge1_all_edges_source_tagged(self, tmp_path: Path) -> None:
+        """100% of edges in the full export carry source ∈ {kuzu, derived}."""
+        rel, graph, project = self._build_full_fixture(tmp_path)
+        exporter = GraphExporter(relational_store=rel, graph_store=graph)
+        result = exporter.export(
+            scope={"project": project, "agent_class_visibility": None, "sensitivity_tag": "none"},
+            include_flags=ExportFlags(include_superseded=True),
+        )
+        edges_without_source = [e for e in result["edges"] if "source" not in e]
+        edges_invalid_source = [e for e in result["edges"] if e.get("source") not in ("kuzu", "derived")]
+        assert edges_without_source == [], f"Edges missing source: {edges_without_source}"
+        assert edges_invalid_source == [], f"Edges with invalid source: {edges_invalid_source}"
