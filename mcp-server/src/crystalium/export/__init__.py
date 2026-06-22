@@ -7,4 +7,4 @@ Public surface:
 
 from crystalium.export.graph_export import ExportFlags, GraphExporter
 
-__all__ = ["GraphExporter", "ExportFlags"]
+__all__ = ["ExportFlags", "GraphExporter"]

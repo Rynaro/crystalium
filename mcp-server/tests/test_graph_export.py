@@ -20,9 +20,9 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -30,13 +30,12 @@ from crystalium.export.graph_export import ExportFlags, GraphExporter
 from crystalium.storage.graph import GraphStore
 from crystalium.storage.relational import RelationalStore
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _PROJECT = "test-export-project"
-_NOW = datetime.now(timezone.utc).isoformat()
+_NOW = datetime.now(UTC).isoformat()
 
 
 def _make_scope(project: str = _PROJECT, acv: str | None = None) -> dict:
@@ -125,7 +124,7 @@ class _RichFixture:
         self.c_new = _make_crystal(crystal_id="crystal-new", project=_PROJECT)
         self.rel.insert_crystal(self.c_old)
         self.rel.insert_crystal(self.c_new)
-        self.rel.mark_superseded(self.c_old["id"], self.c_new["id"], datetime.now(timezone.utc))
+        self.rel.mark_superseded(self.c_old["id"], self.c_new["id"], datetime.now(UTC))
 
         # (c) MERGED_FROM: c_merged has corroboration=2 and merged_authors=[author of c_e]
         self.c_e = _make_crystal(crystal_id="crystal-e", project=_PROJECT, author_agent="agent-x")
@@ -207,14 +206,16 @@ class TestGGE2RichEdges:
     def test_g_ge2_links_to_source_is_kuzu(
         self, rich_fixture: _RichFixture, rich_exporter: GraphExporter
     ) -> None:
-        result = rich_exporter.export(scope=_make_scope(), include_flags=ExportFlags(include_superseded=True))
+        flags = ExportFlags(include_superseded=True)
+        result = rich_exporter.export(scope=_make_scope(), include_flags=flags)
         links_to = [e for e in result["edges"] if e["type"] == "LINKS_TO"]
         assert all(e["source"] == "kuzu" for e in links_to)
 
     def test_g_ge2_supersedes_source_is_derived(
         self, rich_fixture: _RichFixture, rich_exporter: GraphExporter
     ) -> None:
-        result = rich_exporter.export(scope=_make_scope(), include_flags=ExportFlags(include_superseded=True))
+        flags = ExportFlags(include_superseded=True)
+        result = rich_exporter.export(scope=_make_scope(), include_flags=flags)
         sups = [e for e in result["edges"] if e["type"] == "SUPERSEDES"]
         assert all(e["source"] == "derived" for e in sups)
 
@@ -222,7 +223,8 @@ class TestGGE2RichEdges:
         self, rich_fixture: _RichFixture, rich_exporter: GraphExporter
     ) -> None:
         """SUPERSEDES edge must point newer→older (§4.3 directionality frozen)."""
-        result = rich_exporter.export(scope=_make_scope(), include_flags=ExportFlags(include_superseded=True))
+        flags = ExportFlags(include_superseded=True)
+        result = rich_exporter.export(scope=_make_scope(), include_flags=flags)
         sups = [e for e in result["edges"] if e["type"] == "SUPERSEDES"]
         assert len(sups) >= 1
         sup = sups[0]
@@ -232,21 +234,24 @@ class TestGGE2RichEdges:
     def test_g_ge2_merged_from_source_is_derived(
         self, rich_fixture: _RichFixture, rich_exporter: GraphExporter
     ) -> None:
-        result = rich_exporter.export(scope=_make_scope(), include_flags=ExportFlags(include_superseded=True))
+        flags = ExportFlags(include_superseded=True)
+        result = rich_exporter.export(scope=_make_scope(), include_flags=flags)
         merged = [e for e in result["edges"] if e["type"] == "MERGED_FROM"]
         assert all(e["source"] == "derived" for e in merged)
 
     def test_g_ge2_conflicts_with_source_is_derived(
         self, rich_fixture: _RichFixture, rich_exporter: GraphExporter
     ) -> None:
-        result = rich_exporter.export(scope=_make_scope(), include_flags=ExportFlags(include_superseded=True))
+        flags = ExportFlags(include_superseded=True)
+        result = rich_exporter.export(scope=_make_scope(), include_flags=flags)
         conflicts = [e for e in result["edges"] if e["type"] == "CONFLICTS_WITH"]
         assert all(e["source"] == "derived" for e in conflicts)
 
     def test_g_ge2_conflicts_with_direction_winner_to_loser(
         self, rich_fixture: _RichFixture, rich_exporter: GraphExporter
     ) -> None:
-        result = rich_exporter.export(scope=_make_scope(), include_flags=ExportFlags(include_superseded=True))
+        flags = ExportFlags(include_superseded=True)
+        result = rich_exporter.export(scope=_make_scope(), include_flags=flags)
         conflicts = [e for e in result["edges"] if e["type"] == "CONFLICTS_WITH"]
         assert len(conflicts) >= 1
         c = conflicts[0]
@@ -289,17 +294,16 @@ class TestGGE4EdgeHygiene:
             graph.add_node(c["id"], c["layer"])
 
         # Supersede node_hidden (default filter will exclude it)
-        rel.mark_superseded(node_hidden["id"], node_new["id"], datetime.now(timezone.utc))
+        rel.mark_superseded(node_hidden["id"], node_new["id"], datetime.now(UTC))
 
         # Kuzu edge: a → hidden (will be dangling after filter)
         graph.add_edge(node_a["id"], node_hidden["id"], "LINKS_TO")
         # Kuzu edge: a → b (will be kept)
         graph.add_edge(node_a["id"], node_b["id"], "LINKS_TO")
         # Duplicate: a → b again (will be deduped; kuzu may allow it)
-        try:
+        import contextlib
+        with contextlib.suppress(Exception):  # kuzu might reject the dup; dedup handles it
             graph.add_edge(node_a["id"], node_b["id"], "LINKS_TO")
-        except Exception:
-            pass  # kuzu might reject the dup; either way dedup logic handles it
 
         # Record a self-loop conflict (a vs a)
         rel.record_conflict(
@@ -310,11 +314,14 @@ class TestGGE4EdgeHygiene:
 
         exporter = self._make_exporter(rel, graph)
         result = exporter.export(
-            scope={"project": "hyg-project", "agent_class_visibility": None, "sensitivity_tag": "none"},
+            scope={
+                "project": "hyg-project",
+                "agent_class_visibility": None,
+                "sensitivity_tag": "none",
+            },
             # Default: superseded excluded, so node_hidden won't be in node_id_set
         )
 
-        edge_types = {e["type"] for e in result["edges"]}
         ids_in_nodes = {n["id"] for n in result["nodes"]}
 
         # HYG-1: the a→hidden edge must be dropped (hidden not in nodes)
@@ -324,7 +331,10 @@ class TestGGE4EdgeHygiene:
             assert e["to"] in ids_in_nodes, f"Dangling to: {e}"
 
         # HYG-2: at most one (a, b, LINKS_TO) edge
-        ab_links = [e for e in result["edges"] if e["from"] == "hyg-a" and e["to"] == "hyg-b" and e["type"] == "LINKS_TO"]
+        ab_links = [
+            e for e in result["edges"]
+            if e["from"] == "hyg-a" and e["to"] == "hyg-b" and e["type"] == "LINKS_TO"
+        ]
         assert len(ab_links) <= 1, f"Duplicate edge not deduped: {ab_links}"
 
         # HYG-3: no self-loops
@@ -357,7 +367,8 @@ class TestGGE4EdgeHygiene:
 
         exporter = GraphExporter(relational_store=rel, graph_store=graph)
         result = exporter.export(
-            scope={"project": "dang-proj", "agent_class_visibility": None, "sensitivity_tag": "none"},
+            scope={"project": "dang-proj", "agent_class_visibility": None,
+                   "sensitivity_tag": "none"},
         )
         assert result["counts"]["edges_dropped_dangling"] >= 1
 
@@ -381,7 +392,8 @@ class TestGGE4EdgeHygiene:
 
         exporter = GraphExporter(relational_store=rel, graph_store=_FakeGraph())
         result = exporter.export(
-            scope={"project": "dedup-proj", "agent_class_visibility": None, "sensitivity_tag": "none"},
+            scope={"project": "dedup-proj", "agent_class_visibility": None,
+                   "sensitivity_tag": "none"},
         )
         # After dedup, only 1 edge
         links = [e for e in result["edges"] if e["type"] == "LINKS_TO"]
@@ -410,7 +422,6 @@ def _find_schemas_dir() -> Path:
 
 def _validate_against_schema(schema: dict, instance: dict) -> None:
     try:
-        import jsonschema
         from jsonschema import Draft202012Validator
     except ImportError:
         pytest.skip("jsonschema not installed")
@@ -475,7 +486,8 @@ class TestGGE1JsonValidates:
         assert isinstance(result["counts"]["edges_deduped"], int)
 
     def test_g_ge1_node_required_fields(self, tmp_path: Path) -> None:
-        """Every node must have id, layer, summary, trust_tier, validation_state, status, importance."""
+        """Every node must have id, layer, summary, trust_tier,
+        validation_state, status, importance."""
         rel = RelationalStore(db_path=tmp_path / "ge1c.sqlite")
 
         class _NullGraph:
@@ -489,8 +501,12 @@ class TestGGE1JsonValidates:
         result = exporter.export(scope=_make_scope("ge1c-project"))
 
         assert len(result["nodes"]) >= 1
+        required_fields = (
+            "id", "layer", "summary", "trust_tier",
+            "validation_state", "status", "importance",
+        )
         for node in result["nodes"]:
-            for req in ("id", "layer", "summary", "trust_tier", "validation_state", "status", "importance"):
+            for req in required_fields:
                 assert req in node, f"Node missing field: {req}"
 
     def test_g_ge1_edge_required_fields(self, tmp_path: Path) -> None:
@@ -624,7 +640,7 @@ class TestGGE3VisibilityDefaults:
         c_new = _make_crystal(crystal_id="ge3-new", project=project)
         rel.insert_crystal(c_old)
         rel.insert_crystal(c_new)
-        rel.mark_superseded(c_old["id"], c_new["id"], datetime.now(timezone.utc))
+        rel.mark_superseded(c_old["id"], c_new["id"], datetime.now(UTC))
 
         # Forge-only crystal (invisible to spectra)
         c_forge = _make_crystal(
@@ -642,7 +658,8 @@ class TestGGE3VisibilityDefaults:
 
         # Default export from spectra's perspective
         result = exporter.export(
-            scope={"project": project, "agent_class_visibility": "spectra", "sensitivity_tag": "none"},
+            scope={"project": project, "agent_class_visibility": "spectra",
+                   "sensitivity_tag": "none"},
         )
         node_ids = {n["id"] for n in result["nodes"]}
 
@@ -690,7 +707,7 @@ class TestGGE3VisibilityDefaults:
         c_new = _make_crystal(crystal_id="ge3b-new", project=project)
         rel.insert_crystal(c_old)
         rel.insert_crystal(c_new)
-        rel.mark_superseded(c_old["id"], c_new["id"], datetime.now(timezone.utc))
+        rel.mark_superseded(c_old["id"], c_new["id"], datetime.now(UTC))
 
         exporter = GraphExporter(relational_store=rel, graph_store=_NullGraph())
         result = exporter.export(
@@ -937,7 +954,7 @@ class TestGGE8AdapterCounts:
     """
 
     # A minimal canonical fixture with m=3 nodes and n=4 edges of mixed types.
-    _CANONICAL: dict = {
+    _CANONICAL: ClassVar[dict] = {
         "schema_version": "graph-export.v1",
         "generated_from": {"project": "ge8-project"},
         "counts": {"nodes": 3, "edges": 4, "nodes_total_estimate": 3,
@@ -952,17 +969,22 @@ class TestGGE8AdapterCounts:
              "validation_state": "validated", "status": "active", "importance": 0.3},
         ],
         "edges": [
-            {"from": "ge8-a", "to": "ge8-b", "type": "LINKS_TO",       "source": "kuzu",    "weight": 1.0, "metadata": {}},
-            {"from": "ge8-b", "to": "ge8-c", "type": "SUPERSEDES",     "source": "derived", "weight": 1.0, "metadata": {}},
-            {"from": "ge8-a", "to": "ge8-c", "type": "MERGED_FROM",    "source": "derived", "weight": 2.0, "metadata": {}},
-            {"from": "ge8-b", "to": "ge8-a", "type": "CONFLICTS_WITH", "source": "derived", "weight": 0.9, "metadata": {}},
+            {"from": "ge8-a", "to": "ge8-b", "type": "LINKS_TO",
+             "source": "kuzu", "weight": 1.0, "metadata": {}},
+            {"from": "ge8-b", "to": "ge8-c", "type": "SUPERSEDES",
+             "source": "derived", "weight": 1.0, "metadata": {}},
+            {"from": "ge8-a", "to": "ge8-c", "type": "MERGED_FROM",
+             "source": "derived", "weight": 2.0, "metadata": {}},
+            {"from": "ge8-b", "to": "ge8-a", "type": "CONFLICTS_WITH",
+             "source": "derived", "weight": 0.9, "metadata": {}},
         ],
     }
 
     def test_g_ge8_adapter_counts(self) -> None:
         """G-GE8 anchor: GraphML and Cytoscape both preserve m+n counts and edge type/source."""
-        from crystalium.export.adapters import to_graphml, to_cytoscape
         import xml.etree.ElementTree as ET
+
+        from crystalium.export.adapters import to_cytoscape, to_graphml
 
         canonical = self._CANONICAL
         m = len(canonical["nodes"])   # 3
@@ -983,8 +1005,12 @@ class TestGGE8AdapterCounts:
         # Every edge must carry <data key="type"> and <data key="source">
         for edge_el in edge_els:
             data_map = {d.attrib["key"]: d.text for d in edge_el.findall("g:data", ns)}
-            assert "type" in data_map, f"GraphML edge missing <data key='type'>: {ET.tostring(edge_el)}"
-            assert "source" in data_map, f"GraphML edge missing <data key='source'>: {ET.tostring(edge_el)}"
+            assert "type" in data_map, (
+                f"GraphML edge missing <data key='type'>: {ET.tostring(edge_el)}"
+            )
+            assert "source" in data_map, (
+                f"GraphML edge missing <data key='source'>: {ET.tostring(edge_el)}"
+            )
             assert data_map["source"] in ("kuzu", "derived"), (
                 f"GraphML edge source invalid: {data_map['source']!r}"
             )
@@ -1013,8 +1039,9 @@ class TestGGE8AdapterCounts:
 
     def test_g_ge8_graphml_node_count(self) -> None:
         """to_graphml emits exactly m <node> elements (count-preserving, G-GE8)."""
-        from crystalium.export.adapters import to_graphml
         import xml.etree.ElementTree as ET
+
+        from crystalium.export.adapters import to_graphml
 
         canonical = self._CANONICAL
         gml_str = to_graphml(canonical)
@@ -1042,8 +1069,9 @@ class TestGGE8AdapterCounts:
         """In GraphML, the CRYSTALIUM source tag is in <data key='source'>, NOT
         in the <edge source='...'> XML attribute (which holds the endpoint id).
         """
-        from crystalium.export.adapters import to_graphml
         import xml.etree.ElementTree as ET
+
+        from crystalium.export.adapters import to_graphml
 
         gml_str = to_graphml(self._CANONICAL)
         root = ET.fromstring(gml_str)
@@ -1063,8 +1091,9 @@ class TestGGE8AdapterCounts:
 
     def test_g_ge8_empty_graph_adapters(self) -> None:
         """Both adapters handle empty nodes/edges gracefully (count-preserving at 0+0)."""
-        from crystalium.export.adapters import to_graphml, to_cytoscape
         import xml.etree.ElementTree as ET
+
+        from crystalium.export.adapters import to_cytoscape, to_graphml
 
         empty = {
             "schema_version": "graph-export.v1",
@@ -1122,7 +1151,7 @@ class TestCanGE1RichEdgesBeatKuzuOnly:
         for c in (c_old, c_new):
             rel.insert_crystal(c)
             graph.add_node(c["id"], c["layer"])
-        rel.mark_superseded(c_old["id"], c_new["id"], datetime.now(timezone.utc))
+        rel.mark_superseded(c_old["id"], c_new["id"], datetime.now(UTC))
 
         # (c) MERGED_FROM: c_merged absorbed agent-x's contribution (c_e)
         c_e = _make_crystal(crystal_id="can-e", project=project, author_agent="canary-agent-x")
@@ -1179,7 +1208,8 @@ class TestCanGE1RichEdgesBeatKuzuOnly:
 
         # Parity oracle: full has strictly more types than kuzu-only
         assert len(full_edge_types) > len(kuzu_only_types), (
-            f"Full export ({full_edge_types}) should have more types than kuzu-only ({kuzu_only_types})"
+            f"Full export ({full_edge_types}) should have more types than "
+            f"kuzu-only ({kuzu_only_types})"
         )
 
         # All four edge types must be present in the full export
@@ -1202,7 +1232,10 @@ class TestCanGE1RichEdgesBeatKuzuOnly:
                 f"Edge source not kuzu/derived: {edge['source']!r}"
             )
 
-        print(f"CAN-GE1 PASS: kuzu-only={kuzu_only_types}, full={full_edge_types}, extra={extra_types}")
+        print(
+            f"CAN-GE1 PASS: kuzu-only={kuzu_only_types}, "
+            f"full={full_edge_types}, extra={extra_types}"
+        )
 
     def test_can_ge1_all_edges_source_tagged(self, tmp_path: Path) -> None:
         """100% of edges in the full export carry source ∈ {kuzu, derived}."""
@@ -1213,6 +1246,9 @@ class TestCanGE1RichEdgesBeatKuzuOnly:
             include_flags=ExportFlags(include_superseded=True),
         )
         edges_without_source = [e for e in result["edges"] if "source" not in e]
-        edges_invalid_source = [e for e in result["edges"] if e.get("source") not in ("kuzu", "derived")]
+        edges_invalid_source = [
+            e for e in result["edges"]
+            if e.get("source") not in ("kuzu", "derived")
+        ]
         assert edges_without_source == [], f"Edges missing source: {edges_without_source}"
         assert edges_invalid_source == [], f"Edges with invalid source: {edges_invalid_source}"

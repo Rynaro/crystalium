@@ -5,7 +5,8 @@ The four edge types (§5.1):
   LINKS_TO    — read from KuzuDB via GraphStore.all_edges; source:"kuzu"
   CITES       — pass-through from KuzuDB; source:"kuzu"
   SUPERSEDES  — derived from temporal.superseded_by; source:"derived"
-  MERGED_FROM — derived from provenance.corroboration/merged_authors/merged_sources; source:"derived"
+  MERGED_FROM — derived from provenance.corroboration/merged_authors/merged_sources;
+               source:"derived"
   CONFLICTS_WITH — derived from conflicts ledger; source:"derived"
 
 Global hygiene (§5.5):
@@ -17,8 +18,8 @@ Global hygiene (§5.5):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -135,7 +136,9 @@ class GraphExporter:
         nodes: list[dict[str, Any]] = []
         for row in node_rows:
             node_id_set.add(row["id"])
-            node = self._project_node(row, flags=flags, sensitivity_tag=sensitivity_tag, redactor=redactor)
+            node = self._project_node(
+                row, flags=flags, sensitivity_tag=sensitivity_tag, redactor=redactor
+            )
             nodes.append(node)
 
         # Sort by id ascending (HYG-4)
@@ -172,7 +175,7 @@ class GraphExporter:
                 "project": project,
                 "agent_class_visibility": scope.get("agent_class_visibility"),
                 "layers": layers,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
                 "caller_tier": None,
             },
             "counts": {
