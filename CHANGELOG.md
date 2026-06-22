@@ -6,6 +6,52 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-06-22
+
+### Added
+
+- **`crystalium.graph_export` — export the scoped memory lattice as a portable
+  node-graph (nodes = crystals, edges = typed relationships).** Ships on two
+  surfaces sharing one `GraphExporter.export()` core, so their output is
+  byte-identical: a new `crystalium export` CLI subcommand (mirrors `recall`)
+  and a new `crystalium.graph_export` MCP tool (read-op; auto-inherits the
+  ECL v2.0 envelope with SHA-256 integrity and rate-limit enforcement).
+- **Rich edge synthesis.** The kuzu graph is near-edgeless by default
+  (`LINKS_TO` co-occurrence only), so meaningful edges are synthesized from
+  relational state, each tagged with its provenance (`source: kuzu|derived`):
+  `LINKS_TO` (kuzu) + derived `SUPERSEDES` (from `temporal.superseded_by`),
+  `MERGED_FROM` (from `provenance.merged_authors/merged_sources/corroboration`),
+  and `CONFLICTS_WITH` (from the `conflicts` ledger; opt-in `drift_audit`).
+  `CITES` is passed through from kuzu when present. The `CAN-GE1` canary proves
+  rich-synthesis beats kuzu-only (4 edge types vs 1).
+- **Formats.** Canonical JSON `{nodes[], edges[]}` validated against the new
+  `schemas/graph-export.v1.json`, plus pure, count-preserving **GraphML** and
+  **Cytoscape** adapters (`--format json|graphml|cytoscape`). Obsidian-markdown
+  is intentionally out of scope.
+- **Safety & bounds.** Visibility/redaction defaults emit **summary-only —
+  never raw blob content** (hard invariant), exclude quarantined/deprecated/
+  superseded crystals, and respect `agent_class_visibility`; each default is
+  overridable by an explicit flag. A 10K-node guard keeps the exporter
+  bounded/paginated with a `truncated` flag + `nodes_total_estimate`. Edge
+  hygiene drops dangling-endpoint edges, de-dups, drops self-loops, and applies
+  deterministic ordering (guarantees CLI⇆MCP parity).
+- **New bounded read APIs** backing the exporter: `RelationalStore.list_for_export`
+  / `count_for_export` and `GraphStore.all_edges` (with a `_NullGraphStore` stub).
+- **Runnable demo** at `examples/graph_export_demo.py` (seeds a small project
+  exhibiting all four edge types; `--save-json`/`--save-graphml`/`--save-cytoscape`/
+  `--out-dir`), and the decision-ready spec at
+  `.spectra/graph-export-v0.1.0-spec.md`. Covered by 8 feature gates
+  (`G-GE1`…`G-GE8`) + the `CAN-GE1` canary, with zero regression on the house
+  G1–G8 suite.
+
+### Notes
+
+- `MERGED_FROM` currently resolves by author name → every in-scope crystal by
+  that author, which can over-connect in dense single-author projects
+  (`[GAP-MERGE-RESOLUTION]`, spec §13). This v0.1 behavior is intentional and
+  faithful to the spec; a tighter resolution (specific contributing crystal or
+  author-proxy nodes) is deferred to a future release.
+
 ## [1.4.0] — 2026-06-11
 
 ### Fixed
