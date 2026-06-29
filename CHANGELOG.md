@@ -6,6 +6,8 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-06-29
+
 ### Fixed
 
 - **`crystalium.commit` no longer hard-fails on a descriptive `provenance.source`.**
