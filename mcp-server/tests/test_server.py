@@ -324,3 +324,257 @@ def test_build_tool_manifest_each_has_input_schema() -> None:
     for tool in build_tool_manifest():
         assert "inputSchema" in tool, f"Tool {tool['name']} missing inputSchema"
         assert tool["inputSchema"].get("type") == "object"
+
+
+# ---------------------------------------------------------------------------
+# S4 — harness-agnostic provenance coercion tests
+# Covers: G-SOURCE-COERCE-DESCRIPTIVE, G-SOURCE-IDENTITY,
+#         G-SOURCE-NEVER-HUMAN-NON-T0, G-CREATEDAT-TOLERANT, G-ADVISORY-OBSERVABLE
+# (change: harness-agnostic-provenance-source-coercion)
+# ---------------------------------------------------------------------------
+
+
+def _stub_commit_result() -> dict:
+    """Canonical stub return for a mocked layer.commit() call."""
+    return {
+        "status": "committed",
+        "id": "stub-id",
+        "layer": "episodic",
+        "validation_state": "validated",
+        "importance": 0.0,
+        "content_ref": None,
+    }
+
+
+def _call_handle_commit(args: dict, caller_tier) -> "tuple[dict, dict]":
+    """Drive _handle_commit with a mocked episodic layer; return (result, captured).
+
+    captured["provenance"] holds the Provenance object passed to layer.commit().
+    """
+    from crystalium.server import _handle_commit
+    from unittest.mock import MagicMock
+
+    captured: dict = {}
+
+    mock_episodic = MagicMock()
+
+    def _capture(payload, provenance, caller_tier):  # noqa: ARG001
+        captured["provenance"] = provenance
+        return _stub_commit_result()
+
+    mock_episodic.commit.side_effect = _capture
+
+    result = _handle_commit(
+        args,
+        mock_episodic,
+        MagicMock(),  # semantic
+        MagicMock(),  # procedural
+        MagicMock(),  # execution
+        caller_tier=caller_tier,
+    )
+    return result, captured
+
+
+class TestProvenanceSourceCoercion:
+    """G-SOURCE-COERCE-DESCRIPTIVE, G-SOURCE-IDENTITY, G-SOURCE-NEVER-HUMAN-NON-T0."""
+
+    def test_descriptive_source_coerced_to_verified_agent(self) -> None:
+        """G-SOURCE-COERCE-DESCRIPTIVE: T1 caller with descriptive source gets verified_agent."""
+        from crystalium.trust import Tier
+
+        result, captured = _call_handle_commit(
+            {
+                "layer": "episodic",
+                "payload": {"summary": "spectra handoff", "scope": {
+                    "project": "p", "agent_class_visibility": "all",
+                }},
+                "provenance": {
+                    "source": "spectra-planning-session",
+                    "author_agent": "spectra-v1",
+                },
+            },
+            caller_tier=Tier.T1,
+        )
+
+        assert result["status"] == "committed"
+        # S1: coercion happened — source is now the trust-class enum value
+        assert captured["provenance"].source == "verified_agent"
+        # author_agent must be preserved verbatim (the human-meaningful label)
+        assert captured["provenance"].author_agent == "spectra-v1"
+        # S3: advisory is present because coercion fired
+        assert "provenance_coercion" in result, "Advisory must be present when coercion fires"
+        adv = result["provenance_coercion"]
+        assert adv["field"] == "source"
+        assert adv["from"] == "spectra-planning-session"
+        assert adv["to"] == "verified_agent"
+
+    @pytest.mark.parametrize("source", ["human", "verified_agent", "unverified_agent", "environment"])
+    def test_valid_source_identity_passthrough_coerce_helper(self, source: str) -> None:
+        """G-SOURCE-IDENTITY: each of the 4 valid source values is returned unchanged by the helper."""
+        from crystalium.server import _coerce_provenance_source
+        from crystalium.trust import Tier
+
+        final, coerced = _coerce_provenance_source(source, Tier.T1)
+        assert final == source, f"IDENTITY violation: {source!r} was rewritten to {final!r}"
+        assert coerced is False
+
+    def test_valid_source_no_advisory_on_commit(self) -> None:
+        """G-SOURCE-IDENTITY: clean path (valid source) attaches no provenance_coercion field."""
+        from crystalium.trust import Tier
+
+        result, captured = _call_handle_commit(
+            {
+                "layer": "episodic",
+                "payload": {"summary": "clean commit", "scope": {
+                    "project": "p", "agent_class_visibility": "all",
+                }},
+                "provenance": {"source": "verified_agent"},
+            },
+            caller_tier=Tier.T1,
+        )
+
+        assert result["status"] == "committed"
+        assert captured["provenance"].source == "verified_agent"
+        assert "provenance_coercion" not in result, (
+            "Advisory must be ABSENT on the identity path — "
+            "result must be byte-identical to the pre-fix behaviour"
+        )
+
+    @pytest.mark.parametrize("tier_name,raw_source", [
+        ("T1", "spectra-planning-session"),
+        ("T1", ""),
+        ("T1", None),
+        ("T2", "some-tool-description"),
+        ("T2", None),
+        ("T3", "environment-output"),
+        ("T3", ""),
+    ])
+    def test_non_t0_never_coerces_to_human(self, tier_name: str, raw_source) -> None:
+        """G-SOURCE-NEVER-HUMAN-NON-T0: non-T0 coercion never yields source='human'."""
+        from crystalium.server import _coerce_provenance_source
+        from crystalium.trust import Tier
+
+        tier = getattr(Tier, tier_name)
+        final, _ = _coerce_provenance_source(raw_source, tier)
+        assert final != "human", (
+            f"_coerce_provenance_source({raw_source!r}, {tier_name}) yielded 'human' — "
+            "this would set permanent forgetting-protection (protection.py:54-58) "
+            "for a non-T0 caller (W4 breach / RISK-2)"
+        )
+
+
+class TestCreatedAtTolerance:
+    """G-CREATEDAT-TOLERANT: Z-suffix, epoch int, garbage — no crash."""
+
+    def _commit_args(self, created_at_value) -> dict:
+        return {
+            "layer": "episodic",
+            "payload": {"summary": "ts-test", "scope": {
+                "project": "p", "agent_class_visibility": "all",
+            }},
+            "provenance": {"source": "verified_agent", "created_at": created_at_value},
+        }
+
+    def test_z_suffix_iso_parses_without_crash(self) -> None:
+        """G-CREATEDAT-TOLERANT: Z-suffixed ISO string is handled (replace + fromisoformat)."""
+        from crystalium.trust import Tier
+
+        result, _ = _call_handle_commit(self._commit_args("2026-01-01T00:00:00Z"), Tier.T1)
+
+        assert result["status"] == "committed"
+        # Z suffix is correctly normalised — not a fallback, so no advisory for created_at
+        assert "provenance_coercion" not in result
+
+    def test_epoch_int_parses_without_crash(self) -> None:
+        """G-CREATEDAT-TOLERANT: epoch int is parsed via datetime.fromtimestamp."""
+        from crystalium.trust import Tier
+
+        result, _ = _call_handle_commit(self._commit_args(1_700_000_000), Tier.T1)
+
+        assert result["status"] == "committed"
+        # Successful epoch parse: no fallback, no advisory
+        assert "provenance_coercion" not in result
+
+    def test_garbage_timestamp_falls_back_no_crash(self) -> None:
+        """G-CREATEDAT-TOLERANT: non-ISO garbage string falls back to server_now without crash."""
+        from crystalium.trust import Tier
+
+        result, _ = _call_handle_commit(self._commit_args("absolutely-not-a-timestamp"), Tier.T1)
+
+        assert result["status"] == "committed"
+        # Fallback fires → advisory attached for created_at
+        assert "provenance_coercion" in result
+        adv = result["provenance_coercion"]
+        assert adv["field"] == "created_at"
+        assert adv["from"] == "absolutely-not-a-timestamp"
+        assert adv["to"] == "server_now"
+
+
+class TestAdvisoryObservable:
+    """G-ADVISORY-OBSERVABLE: advisory present only when coercion fires."""
+
+    def test_advisory_present_on_source_coercion(self) -> None:
+        """G-ADVISORY-OBSERVABLE: non-fatal advisory attached when source is coerced."""
+        from crystalium.trust import Tier
+
+        result, _ = _call_handle_commit(
+            {
+                "layer": "episodic",
+                "payload": {"summary": "x", "scope": {
+                    "project": "p", "agent_class_visibility": "all",
+                }},
+                "provenance": {"source": "custom-agent-session"},
+            },
+            caller_tier=Tier.T1,
+        )
+
+        assert "provenance_coercion" in result
+        adv = result["provenance_coercion"]
+        assert adv["field"] == "source"
+        assert adv["from"] == "custom-agent-session"
+        assert adv["to"] == "verified_agent"
+
+    def test_advisory_absent_on_clean_path(self) -> None:
+        """G-ADVISORY-OBSERVABLE: no advisory when source is valid AND created_at is valid."""
+        from crystalium.trust import Tier
+
+        result, _ = _call_handle_commit(
+            {
+                "layer": "episodic",
+                "payload": {"summary": "x", "scope": {
+                    "project": "p", "agent_class_visibility": "all",
+                }},
+                "provenance": {
+                    "source": "environment",
+                    "created_at": "2026-06-01T00:00:00+00:00",
+                },
+            },
+            caller_tier=Tier.T1,
+        )
+
+        assert "provenance_coercion" not in result
+
+    def test_advisory_is_list_when_both_source_and_created_at_coerce(self) -> None:
+        """G-ADVISORY-OBSERVABLE: advisory is a list when both source and created_at fire."""
+        from crystalium.trust import Tier
+
+        result, _ = _call_handle_commit(
+            {
+                "layer": "episodic",
+                "payload": {"summary": "x", "scope": {
+                    "project": "p", "agent_class_visibility": "all",
+                }},
+                "provenance": {
+                    "source": "bad-descriptive-source",
+                    "created_at": "not-a-date-at-all",
+                },
+            },
+            caller_tier=Tier.T1,
+        )
+
+        assert "provenance_coercion" in result
+        adv = result["provenance_coercion"]
+        assert isinstance(adv, list), "Both coercions fired → advisory must be a list"
+        assert len(adv) == 2
+        fields = {item["field"] for item in adv}
+        assert fields == {"source", "created_at"}

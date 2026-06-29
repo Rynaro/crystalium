@@ -1,0 +1,62 @@
+{
+  "esl_version": "1.0",
+  "change_id": "harness-agnostic-provenance-source-coercion",
+  "status": "verified",
+  "tier": "full",
+  "maker": "vivi",
+  "checker": "vigil",
+  "acceptance_checks": [
+    {
+      "id": "G-SOURCE-COERCE-DESCRIPTIVE",
+      "given": "a T1 caller",
+      "when": "commit is called with provenance.source=\"spectra-planning-session\" and a valid author_agent",
+      "then": "status==committed, stored provenance.source==verified_agent, author_agent preserved verbatim, no ValidationError",
+      "verify_method": "pytest new test in test_server.py (make test-file)"
+    },
+    {
+      "id": "G-SOURCE-IDENTITY",
+      "given": "any of {human, verified_agent, unverified_agent, environment} as source",
+      "when": "commit is called",
+      "then": "stored source is byte-for-byte identical AND no provenance_coercion advisory attached",
+      "verify_method": "pytest new test (make test-file)"
+    },
+    {
+      "id": "G-SOURCE-NEVER-HUMAN-NON-T0",
+      "given": "a non-T0 caller (T1/T2/T3)",
+      "when": "source is absent, empty, or descriptive",
+      "then": "coerced source is never human (verified_agent for T1, unverified_agent for T2/T3); no spurious permanent protection",
+      "verify_method": "pytest new guard test near test_protected.py"
+    },
+    {
+      "id": "G-CREATEDAT-TOLERANT",
+      "given": "created_at as epoch int, Z-suffixed ISO, or non-ISO garbage",
+      "when": "commit is called",
+      "then": "parses where possible (epoch/Z) or safely falls back to server-now (garbage); never crashes",
+      "verify_method": "pytest new test (make test-file)"
+    },
+    {
+      "id": "G-ADVISORY-OBSERVABLE",
+      "given": "a coercion fires (source and/or created_at)",
+      "when": "commit succeeds",
+      "then": "result carries non-fatal provenance_coercion {field,from,to}; with no coercion, no advisory field present",
+      "verify_method": "pytest new test + test_ecl_envelope.py"
+    },
+    {
+      "id": "G-NO-SCHEMA-DRIFT",
+      "given": "the fix is applied",
+      "when": "the tree is inspected",
+      "then": "no schemas/*.v1.json, no ECL envelope schema, no install.manifest.json modified; install.sh second-run-no-diff green",
+      "verify_method": "git diff --stat schemas/ install.manifest.json empty; install idempotency CI"
+    },
+    {
+      "id": "G-EXISTING-TESTS-GREEN",
+      "given": "the full suite",
+      "when": "make test runs in-container",
+      "then": "all 8 gates pass; test_promotion_gate.py:215-255, test_protected.py, test_trust_propagation.py, test_ecl_envelope.py unchanged and green",
+      "verify_method": "make test"
+    }
+  ],
+  "spec_ref": ".spectra/changes/harness-agnostic-provenance-source-coercion/spec.md",
+  "created_at": "2026-06-29",
+  "has_code": true
+}

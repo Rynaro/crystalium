@@ -47,7 +47,7 @@ from crystalium.export.graph_export import ExportFlags, GraphExporter
 from crystalium.gate import PromotionGate
 from crystalium.evb import make_evb_scorer
 from crystalium.importance import importance_score
-from crystalium.ingest_adapter import _HOST_EIDOLONS, _ROSTER_EIDOLONS
+from crystalium.ingest_adapter import _HOST_EIDOLONS, _ROSTER_EIDOLONS, source_for_tier
 from crystalium.layers.episodic import EpisodicLayer
 from crystalium.layers.execution import ExecutionLayer
 from crystalium.layers.procedural import ProceduralLayer
@@ -938,6 +938,33 @@ def _handle_recall(
     return result.model_dump() if hasattr(result, "model_dump") else result
 
 
+# ---------------------------------------------------------------------------
+# S1: provenance.source coercion helper
+# ---------------------------------------------------------------------------
+
+_VALID_PROVENANCE_SOURCES: frozenset[str] = frozenset(
+    {"human", "verified_agent", "unverified_agent", "environment"}
+)
+
+
+def _coerce_provenance_source(
+    raw: Any, caller_tier: "Tier"
+) -> "tuple[str, bool]":
+    """Coerce a raw provenance.source value to a valid trust-class enum string.
+
+    Contract (total, deterministic):
+      (a) IDENTITY  — if raw is a str and raw in VALID_SOURCES → return (raw, False)
+          Byte-for-byte passthrough; no advisory attached (C-3 witness-independence).
+      (b) FALLBACK  — else (None | '' | any other str | non-str) →
+          return (source_for_tier(caller_tier), True)
+      (c) INVARIANT — source_for_tier yields 'human' ONLY for Tier.T0, so a non-T0
+          caller can never be coerced to 'human' (C-2 / RISK-2 / protection.py:54-58).
+    """
+    if isinstance(raw, str) and raw in _VALID_PROVENANCE_SOURCES:
+        return (raw, False)
+    return (source_for_tier(caller_tier), True)
+
+
 def _handle_commit(
     args: dict[str, Any],
     episodic: EpisodicLayer,
@@ -952,15 +979,41 @@ def _handle_commit(
     layer = args.get("layer", "episodic")
     payload = args.get("payload", {})
     raw_prov = args.get("provenance", {})
-    now_iso = _dt.datetime.now(_dt.timezone.utc)
-    created_at_raw = raw_prov.get("created_at", now_iso)
-    if isinstance(created_at_raw, str):
-        created_at_raw = _dt.datetime.fromisoformat(created_at_raw)
+    now_utc = _dt.datetime.now(_dt.timezone.utc)
+
+    # S2 (GAP-1): tolerant created_at parse — mirrors the ingest path (server.py:1055-1061).
+    # Handles: Z-suffixed ISO, epoch int/float, non-ISO garbage. Never crashes.
+    created_at_raw = raw_prov.get("created_at")
+    created_at_coerced = False
+    if created_at_raw is None:
+        created_at: _dt.datetime = now_utc
+    elif isinstance(created_at_raw, (int, float)):
+        try:
+            created_at = _dt.datetime.fromtimestamp(created_at_raw, tz=_dt.timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            created_at = now_utc
+            created_at_coerced = True
+    elif isinstance(created_at_raw, str):
+        try:
+            created_at = _dt.datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
+        except ValueError:
+            created_at = now_utc
+            created_at_coerced = True
+    else:
+        created_at = now_utc
+        created_at_coerced = True
+
+    # S1: coerce provenance.source to a valid trust-class enum value.
+    # IDENTITY passthrough for already-valid values preserves byte-equality (C-3).
+    # FALLBACK via source_for_tier ensures non-T0 callers never get 'human' (C-2).
+    raw_source = raw_prov.get("source")
+    final_source, source_coerced = _coerce_provenance_source(raw_source, caller_tier)
+
     provenance = Provenance(
-        source=raw_prov.get("source", "unverified_agent"),
+        source=final_source,
         author_agent=raw_prov.get("author_agent"),
         task_id=raw_prov.get("task_id"),
-        created_at=created_at_raw,
+        created_at=created_at,
     )
 
     # W5: a write into a project invalidates that project's cached recalls
@@ -971,11 +1024,11 @@ def _handle_commit(
             recall_cache.invalidate_project(project)
 
     if layer == "episodic":
-        return episodic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
+        result = episodic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
     elif layer == "semantic":
-        return semantic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
+        result = semantic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
     elif layer == "procedural":
-        return procedural.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
+        result = procedural.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
     elif layer == "execution":
         return execution.checkpoint(state=payload, caller_tier=caller_tier)
     else:
@@ -984,6 +1037,19 @@ def _handle_commit(
             f"Unknown layer {layer!r}. Must be one of: episodic, semantic, procedural, execution.",
             reason_code="UNKNOWN_LAYER",
         )
+
+    # S3 (DECISION-1 / G-ADVISORY-OBSERVABLE): attach provenance_coercion advisory
+    # to the SUCCESS result ONLY when coercion actually fired. On the clean/IDENTITY
+    # path no field is added — the result dict is byte-identical to today (RISK-5).
+    coercions = []
+    if source_coerced:
+        coercions.append({"field": "source", "from": raw_source, "to": final_source})
+    if created_at_coerced:
+        coercions.append({"field": "created_at", "from": created_at_raw, "to": "server_now"})
+    if coercions:
+        result = dict(result)  # shallow copy — do not mutate the layer's return value
+        result["provenance_coercion"] = coercions[0] if len(coercions) == 1 else coercions
+    return result
 
 
 def _handle_ingest(
