@@ -6,6 +6,28 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`crystalium.commit` no longer hard-fails on a descriptive `provenance.source`.**
+  Any harness/LLM that supplied a non-enum source (e.g. `"spectra-planning-session"`)
+  previously raised a pydantic `literal_error`, forcing a manual retry. The commit
+  handler now coerces an absent/empty/non-enum source to the caller's trust class via
+  `source_for_tier(caller_tier)` (T1→`verified_agent`, T2/T3→`unverified_agent`).
+  Valid sources pass through byte-for-byte, and a non-T0 caller is **never** coerced to
+  `"human"` (preserving forgetting-protection semantics). The descriptive label is
+  retained in `author_agent`. Pure server-side coercion — no schema, ECL envelope,
+  manifest, or hash change.
+
+### Added
+
+- **Observable coercion advisory.** When `commit` coerces a non-enum `provenance.source`
+  or a non-ISO/epoch `created_at`, the success result carries a non-fatal
+  `provenance_coercion` advisory (`{field, from, to}`). The clean/identity path attaches
+  nothing, so result bytes — and the ECL SHA-256 — stay byte-identical to before.
+- **Timestamp tolerance in `commit`.** `provenance.created_at` now accepts epoch
+  ints/floats and `Z`-suffixed ISO strings, and safely falls back to server-now on
+  malformed input instead of raising — mirroring the existing ingest path.
+
 ## [1.5.0] — 2026-06-22
 
 ### Added
