@@ -6,6 +6,21 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`install.sh` reported v1.0.0 through five releases.** `CRYSTALIUM_VERSION`
+  was a hardcoded constant, so `bash install.sh --version`, the install banner,
+  and the `version` field in every written `install.manifest.json` all lagged
+  the actual package version. The installer now derives the version from
+  `mcp-server/pyproject.toml` (the single source of truth) at runtime, with a
+  literal fallback only for a stripped checkout without `mcp-server/`.
+- **`.mcp.json` was pinned to the author's machine.** The `atlas-aci` and
+  `crystalium` server entries hardcoded `/Users/henrique/...` absolute paths
+  (plus a macOS-specific `-u 501:20` uid mapping), so the checked-in host
+  config could not launch on any other checkout. Paths now use `${PWD}` env
+  expansion (Claude Code expands `${VAR}` in `.mcp.json` args) and a relative
+  `docker-compose.yml`, matching the nexus's canonical MCP templates.
+
 ## [1.5.1] — 2026-06-29
 
 ### Fixed

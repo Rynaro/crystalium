@@ -40,7 +40,16 @@ set -euo pipefail
 
 EIIS_VERSION_VALUE="1.4"
 ECL_VERSION_VALUE="2.0"
-CRYSTALIUM_VERSION="1.0.0"
+
+# CRYSTALIUM_VERSION derives from mcp-server/pyproject.toml — the single
+# source of truth — so the installer banner and install.manifest.json can
+# never lag a release again (they reported 1.0.0 through five releases).
+# The literal fallback covers a stripped checkout without mcp-server/.
+_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+CRYSTALIUM_VERSION="$(sed -n 's/^version = "\([^"]*\)".*/\1/p' "${_SELF_DIR}/mcp-server/pyproject.toml" 2>/dev/null | head -n 1)"
+if [ -z "${CRYSTALIUM_VERSION}" ]; then
+    CRYSTALIUM_VERSION="1.5.1"
+fi
 
 # ---------------------------------------------------------------------------
 # Defaults
