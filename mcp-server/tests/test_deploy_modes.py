@@ -43,15 +43,21 @@ def _envelope(payload: str, *, eidolon: str, kind: str, thread: str, objective: 
 # ---- runtime: standalone works (zero teammates; other layers unused) -------
 
 def test_standalone_ingest_recall(tmp_path: Path) -> None:
+    from crystalium.scope import canonical_project_key
+
     cfg = Config(data_dir=tmp_path / "solo", rate_limit_per_minute=1_000_000)
     (_e, aetheryte, ep, se, pr, ex, _g, _s, relational) = _build_components(cfg)
     payload = json.dumps({"note": "self-authored standalone fact about caching"})
     env = _envelope(payload, eidolon="crystalium", kind="note",
                     thread="solo-proj", objective="caching policy notes")
     receipt = _handle_ingest({"envelope": env, "payload": payload,
-                              "payload_encoding": "json"}, ep, se, pr, ex)
+                              "payload_encoding": "json"}, ep, se, pr, ex, cfg)
     assert receipt["status"] == "ingested" and receipt["layer"] == "episodic"
-    out = aetheryte.recall(Scope(project="solo-proj"), "caching policy notes", 10, None, Tier.T1)
+    # v1.6: scope.project is normalized to the canonical (data-dir-derived) key;
+    # thread_id="solo-proj" is preserved verbatim in scope.project_raw instead.
+    assert receipt["scope_normalized"] is True
+    canonical = canonical_project_key(cfg.data_dir)
+    out = aetheryte.recall(Scope(project=canonical), "caching policy notes", 10, None, Tier.T1)
     assert any(r.id == receipt["id"] for r in out.records)
     # the other three layers are simply unused — no rows, no error
     layers = {c["layer"] for c in relational.list_crystals_with_dynamics()}

@@ -808,10 +808,12 @@ class DreamWorker:
 
             try:
                 # Fetch active records for this layer (W4 also reads memory_dynamics
-                # + protected so eviction can see R/stability and the protected flag).
+                # + protected so eviction can see R/stability and the protected flag;
+                # v1.6 also reads scope so the execution-layer last-checkpoint guard
+                # below can group by scope.plan / scope.project).
                 with self.relational._connect() as conn:
                     rows = conn.execute(
-                        "SELECT id, utility, status, memory_dynamics, protected "
+                        "SELECT id, utility, status, memory_dynamics, protected, scope "
                         "FROM crystals WHERE layer=? AND status='active'",
                         (layer,),
                     ).fetchall()
@@ -824,6 +826,8 @@ class DreamWorker:
                     md_raw = row[3]
                     md = json.loads(md_raw) if isinstance(md_raw, str) else (md_raw or {})
                     protected = bool(row[4])
+                    scope_raw = row[5]
+                    scope = json.loads(scope_raw) if isinstance(scope_raw, str) else (scope_raw or {})
 
                     # W4 Ricoeur-protected class: never evicted (any mode).
                     if protected:
@@ -859,11 +863,42 @@ class DreamWorker:
                             evb is not None and evb_cutoff is not None and evb < evb_cutoff
                         )
                         if r < self.r_floor and value_below:
-                            to_deprecate.append(cid)
+                            to_deprecate.append((cid, scope))
                     elif score < threshold:
-                        to_deprecate.append(cid)
+                        to_deprecate.append((cid, scope))
 
-                for cid in to_deprecate:
+                for cid, cand_scope in to_deprecate:
+                    # v1.6 never-deprecate-last-checkpoint guard (execution layer
+                    # only): a plan's sole recallable checkpoint must never be
+                    # auto-deprecated by this threshold heuristic — that was the
+                    # MOTIVATING INCIDENT's actual root cause (CHANGELOG v1.6.0):
+                    # the only plan checkpoint was status=deprecated, and
+                    # recall_active_only (default ON) filtered it, so a 9-crystal
+                    # store answered every recall with 0 records.
+                    if layer == "execution" and self._is_last_active_checkpoint(
+                        cid, cand_scope
+                    ):
+                        log.info(
+                            "dream_prune_guard_last_checkpoint",
+                            crystal_id=cid,
+                            layer=layer,
+                            plan=cand_scope.get("plan") if isinstance(cand_scope, dict) else None,
+                            project=cand_scope.get("project") if isinstance(cand_scope, dict) else None,
+                        )
+                        record_call(
+                            tool="dream.prune",
+                            layer=layer,
+                            tier=str(_DREAM_TIER),
+                            op="prune_guard",
+                            result="skipped",
+                            latency_ms=now_ms() - t0_prune,
+                            extra={
+                                "crystal_id": cid,
+                                "reason": "last_checkpoint_for_plan",
+                            },
+                        )
+                        continue
+
                     # Assert Dream's T0 identity before each deprecation
                     self.enforcement.assert_tier_allowed(
                         "dream.prune", layer, _DREAM_TIER, "commit"
@@ -894,6 +929,33 @@ class DreamWorker:
                 log.warning("dream_prune_error", layer=layer, error=str(exc))
 
         return f"deprecated={deprecated_count} records across {len(layers)} layers"
+
+    def _is_last_active_checkpoint(self, cid: str, scope: dict[str, Any]) -> bool:
+        """v1.6 never-deprecate-last-checkpoint guard (execution layer only).
+
+        True when *cid* is the ONLY active execution-layer crystal for its
+        scope.plan (or scope.project when plan is absent) — i.e. deprecating it
+        would leave that plan with zero recallable checkpoints. Grouped by
+        scope.plan when present (a project may run several concurrent plans);
+        falls back to scope.project. When NEITHER key is resolvable, this is
+        conservative and treats the candidate as "last" (protect it) rather
+        than risk silently orphaning an ungrouped checkpoint.
+        """
+        if not isinstance(scope, dict):
+            return True
+        plan_key = scope.get("plan")
+        project_key = scope.get("project")
+        if plan_key:
+            remaining = self.relational.count_active_by_scope_key(
+                "execution", "plan", plan_key, exclude_id=cid
+            )
+        elif project_key:
+            remaining = self.relational.count_active_by_scope_key(
+                "execution", "project", project_key, exclude_id=cid
+            )
+        else:
+            return True
+        return remaining == 0
 
     # ------------------------------------------------------------------
     # Internal helpers

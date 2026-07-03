@@ -239,6 +239,17 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
     help="Output format: json = RecallResult JSON; text = compact per-record lines.",
 )
 @click.option(
+    "--explain",
+    "explain",
+    is_flag=True,
+    default=False,
+    help=(
+        "v1.6: attach a diagnostic `explain` object (candidate/filter counts, "
+        "arm status, store totals, distinct project keys present). Bypasses "
+        "the recall cache."
+    ),
+)
+@click.option(
     "--config",
     "config_path",
     type=click.Path(exists=False, path_type=Path),
@@ -253,6 +264,7 @@ def recall(
     layers_csv: Optional[str],
     full: bool,
     fmt: str,
+    explain: bool,
     config_path: Optional[Path],
 ) -> None:
     """Read-only hybrid recall from CRYSTALIUM memory (one-shot; out-of-MCP-session).
@@ -350,13 +362,16 @@ def recall(
 
     try:
         result = aetheryte.recall(
-            scope=scope, query=query, k=k_clamped, layers=layers, caller_tier=caller_tier
+            scope=scope, query=query, k=k_clamped, layers=layers, caller_tier=caller_tier,
+            explain=explain,
         )
     except Exception as exc:  # enforcement error or store error → exit 1
         raise click.ClickException(f"recall failed: {exc}") from exc
 
     if fmt == "json":
-        click.echo(json.dumps(result.model_dump(), default=str))
+        # exclude_none: `explain` is the only Optional field on RecallResult, so
+        # a non-explain call's JSON shape is byte-identical to pre-v1.6.
+        click.echo(json.dumps(result.model_dump(exclude_none=True), default=str))
     else:
         for r in result.records:
             d = r.model_dump() if hasattr(r, "model_dump") else r
@@ -831,6 +846,58 @@ def doctor(config_path: Optional[Path]) -> None:
     _optional("apscheduler", lambda: __import__("apscheduler"))
     _optional("lancedb", lambda: __import__("lancedb"))
     _optional("kuzu", lambda: __import__("kuzu"))
+
+    # v1.6 memory diagnostics — informational only; never affects the P0 exit
+    # code. See MOTIVATING INCIDENT (CHANGELOG v1.6.0): a 9-crystal store
+    # answering every recall with 0 records was undiagnosable pre-v1.6.
+    click.echo("\nMemory diagnostics (v1.6):")
+
+    def _memory_diagnostics() -> None:
+        from crystalium.config import Config
+        from crystalium.storage.relational import RelationalStore
+
+        cfg = (
+            Config.from_yaml(Path(config_path))
+            if (config_path and Path(config_path).exists())
+            else Config.from_env()
+        )
+        relational = RelationalStore(db_path=cfg.sqlite_path)
+        stats = relational.diagnostics_summary()
+        click.echo(
+            f"  crystals: total={stats['total_crystals']} "
+            f"active={stats['active']} embedded={stats['embedded']}"
+        )
+        click.echo(f"  by status: {stats['by_status']}")
+        click.echo(f"  by project key: {stats['by_project']}")
+        if len(stats["by_project"]) > 1:
+            click.echo(
+                "  [WARN] multiple distinct project keys present in one store — "
+                "scoped recall silently partitions across them (v1.6 normalizes "
+                "NEW writes to one canonical key; existing rows are not migrated)."
+            )
+
+        # Dense arm (embedding/vector store)
+        try:
+            from crystalium.storage.vector import VectorStore
+
+            VectorStore(lance_dir=cfg.lance_path)
+            click.echo("  dense arm: active")
+        except Exception as exc:  # noqa: BLE001 — reporting, not raising
+            click.echo(f"  dense arm: inactive (reason: {exc})")
+
+        # Graph arm (kuzu store)
+        try:
+            from crystalium.storage.graph import GraphStore
+
+            GraphStore(kuzu_dir=cfg.kuzu_path)
+            click.echo("  graph arm: active")
+        except Exception as exc:  # noqa: BLE001 — reporting, not raising
+            click.echo(f"  graph arm: inactive (reason: {exc})")
+
+    try:
+        _memory_diagnostics()
+    except Exception as exc:  # noqa: BLE001 — doctor must never crash on diagnostics
+        click.echo(f"  [WARN] memory diagnostics unavailable: {exc}")
 
     click.echo()
     if p0_ok:

@@ -92,7 +92,12 @@
       "properties": {
         "project": {
           "type": "string",
-          "description": "Project identifier scoping this crystal.",
+          "description": "Project identifier scoping this crystal. v1.6: canonical (data-dir-derived) key on write paths.",
+          "minLength": 1
+        },
+        "project_raw": {
+          "type": "string",
+          "description": "v1.6: caller-supplied project label, preserved verbatim when it differed from the canonical key and was normalized into `project`. Absent when no normalization occurred.",
           "minLength": 1
         },
         "agent_class_visibility": {

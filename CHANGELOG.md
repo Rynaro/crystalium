@@ -6,6 +6,128 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-07-03
+
+Wave 4 — memory diagnosability + guards. MOTIVATING INCIDENT: a live project
+store held 9 crystals yet answered EVERY recall with 0 records. Forensic root
+causes: (1) the plan's only checkpoint was `status=deprecated` and
+`recall_active_only` (default ON) filtered it; (2) writers used 3 different
+free-typed `scope.project` keys for the same project, so scoped recall
+silently partitioned; (3) summaries were terse machine labels (`plan_checkpoint:
+08234787`) — the only FTS-indexed text; (4) `embedding_ref` was null on every
+crystal (heavy deps absent → Null vector store) so the dense arm was silently
+inactive. Nothing surfaced any of this. This release makes all four
+impossible-silently: diagnosability and mechanical guards, not new faculties —
+none of it is gated behind an ablation flag.
+
+### Added
+
+- **Canonical project-key derivation + write-time scope normalization
+  (`scope.py`, new module).** `scope.canonical_project_key(data_dir)` derives
+  the canonical `scope.project` from the basename of `CRYSTALIUM_DATA_DIR` —
+  the store IS the project. Every write path (`crystalium.commit`,
+  `crystalium.ingest`, `crystalium.plan_checkpoint`, `crystalium.plan_replan`)
+  now normalizes `scope.project` to that canonical key: a differing
+  caller-supplied value is preserved verbatim in a new optional
+  `scope.project_raw` field, and the tool result carries a
+  `scope_normalized: true` advisory. `recall` does the opposite: an *explicit*
+  `scope.project` passes through unrewritten (it's a read filter, not a write
+  of record — legacy/fragmented keys must stay queryable for diagnosis), and
+  only an *omitted* `scope.project` defaults to the canonical key instead of
+  the literal string `"default"`. No migration of existing rows (out of
+  scope) — `doctor` and `recall --explain` surface pre-existing fragmentation
+  instead of papering over it. `crystal.v1.json`'s `scope` object gains the
+  matching optional `project_raw` property.
+
+- **Summary-quality gate at write (`quality.py`, new module; soft in 1.6).**
+  `crystalium.commit` and `crystalium.plan_checkpoint` mechanically check the
+  summary: ≥ 24 chars, ≥ 3 alphabetic words, and not shaped like a bare
+  machine label (`^[a-z_]+:[0-9a-f-]+$`). A failing summary is still
+  **accepted** — this never breaks a writer in a minor — but the result
+  carries `summary_quality: "poor"` plus a one-line `advisory`.
+  `plan_checkpoint` additionally auto-enriches its own server-composed
+  default label: where it used to fall back to the bare
+  `f"plan_checkpoint:{id[:8]}"`, it now composes plan name + project + phase
+  words (e.g. `"plan checkpoint for Wave 4 rollout (project=eidolons)
+  phase=verify [08234787]"`) — an *explicit* caller-supplied summary,
+  however poor, is never silently rewritten, only flagged.
+
+- **`recall --explain`** (CLI flag on `crystalium recall`, and MCP
+  `crystalium.recall` param `explain: bool`). The result gains an `explain`
+  object: `{candidates_prefilter, filtered_by_status, filtered_by_scope,
+  arms: {bm25: on|off, dense: active|inactive(reason), graph: on|off}, store:
+  {total_crystals, active, embedded}, project_keys_present: [...]}`. A
+  zero-record recall against a non-empty store is now diagnosable from the
+  result alone — this is the MOTIVATING INCIDENT test. `explain=true` always
+  bypasses the recall cache (both read and write), so a diagnostic call is
+  always fresh and never leaks a stale `explain` object into a normal
+  caller's cached response. `RecallResult` gains an optional `explain` field
+  (default `None`, dumped with `exclude_none=True`), so a non-explain call's
+  JSON shape is byte-identical to pre-1.6.
+
+- **`RelationalStore.diagnostics_summary()`** — aggregate, unscoped store
+  counts (`total_crystals`, `active`, `embedded`, `by_status`, `by_project`).
+  Backs both `recall --explain`'s `store`/`project_keys_present` and the
+  `doctor` upgrade below.
+
+- **`doctor` upgrades.** The `crystalium doctor` CLI subcommand now also
+  reports embedded-vs-total crystal counts, crystal counts by status and by
+  project key (with a `[WARN]` when more than one distinct project key is
+  present in a single store — the fragmentation the MOTIVATING INCIDENT
+  hinged on), and dense/graph arm status with a reason when inactive. Purely
+  informational — never affects the P0 exit code, and any diagnostics error
+  degrades to a `[WARN]` line rather than crashing `doctor`.
+
+- **Never-deprecate-last-checkpoint guard (`dream/worker.py::DreamWorker._prune`).**
+  Before auto-deprecating a below-threshold Execution-layer crystal, the
+  prune phase now checks whether it is the ONLY active checkpoint for its
+  `scope.plan` (falling back to `scope.project` when `plan` is absent, and
+  conservatively protecting the crystal when neither is resolvable). If so,
+  the deprecation is skipped and the reason is recorded via `record_call(...,
+  op="prune_guard", result="skipped")` instead. This is the MOTIVATING
+  INCIDENT's actual root cause: `dream.prune`'s threshold heuristic — the
+  ONLY code path that sets a crystal's `status` to `deprecated` besides the
+  T0-operator-gated quarantine reject (which never reaches Execution-layer
+  crystals, since those are never quarantined) — had no concept of "this is
+  the last one." A new `RelationalStore.count_active_by_scope_key()` backs
+  the guard (parameterized `json_extract` query; scope-key path is a
+  whitelisted constant, never string-interpolated).
+
+### Fixed
+
+- **`mcp.server.lowlevel.Server` was never told its own version.**
+  `server._build_server()` constructed `Server("crystalium")` without a
+  `version=` argument, so `create_initialization_options()` fell back to the
+  *installed `mcp` SDK package's* version for `serverInfo` — not even the
+  stale `crystalium.__version__` literal, a different component's version
+  entirely. Now passes `version=__version__` explicitly.
+- **`crystalium.__version__` was a stale `"1.0.0"` literal** untouched since
+  the earliest releases. Now single-sourced via
+  `importlib.metadata.version("crystalium")`, falling back to a literal kept
+  in sync with `pyproject.toml` when the package isn't installed with
+  metadata (e.g. a raw `PYTHONPATH=src` dev checkout).
+- **Tool-count claims corrected from 7 to 9** in `SPEC.md`, `server.py`
+  docstrings, and the `README.md` tool-surface table (which was also missing
+  the `graph_export` row entirely, added in 1.5.0). The count grew via
+  `ingest` (v0.7/W7, the 8th tool) and `graph_export` (1.5.0/W-GE5, the 9th);
+  `SPEC.md`'s "(7 tools)" line predates both.
+- **G1.2 / G1.3 (`ROADMAP-POST-1.0.md`)** — confirmed already resolved
+  (FTS5 sanitization landed pre-1.0; `tool_calls` audit wiring landed in
+  1.3.0) and marked `RESOLVED` in the gap ledger, which had never been
+  updated after the CHANGELOG 1.3.0 fix. v1.6 adds an end-to-end FTS5-
+  injection regression through the full `recall(explain=True)` path (not
+  just the low-level `bm25_search` unit that already covered it).
+
+### Notes
+
+- Six new `TestNeverDeprecateLastCheckpoint` / `TestRecallExplain` /
+  `TestWriteScopeNormalization` / `TestSummaryQualityGate` /
+  `TestCanonicalProjectKey` / `TestFts5InjectionRegression` classes land in
+  the new `tests/test_diagnosability.py` (43 tests), including a direct
+  reproduction of the MOTIVATING INCIDENT (a deprecated sole checkpoint +
+  fragmented project keys in one store → `recall --explain` surfaces both
+  from the result alone).
+
 ## [1.5.1] — 2026-06-29
 
 ### Fixed

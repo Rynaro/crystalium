@@ -20,7 +20,9 @@ from typing import Any, Callable
 import structlog
 
 from crystalium.enforcement import Enforcement
+from crystalium.quality import POOR_SUMMARY_ADVICE, is_poor_summary
 from crystalium.schemas import Provenance
+from crystalium.scope import canonical_project_key, normalize_write_scope
 from crystalium.telemetry import now_ms
 from crystalium.trust import Tier
 
@@ -30,6 +32,42 @@ CommitResult = dict[str, Any]
 
 # Default TTL for execution-layer entries (config will expose this in W4/W6)
 _DEFAULT_TTL_HOURS = 24
+
+#: Sentinel distinguishing "state has no 'summary' key" from any other value.
+#: dict.get(key, default) applies the default ONLY on key absence — the
+#: pre-v1.6 fallback (f"plan_checkpoint:{crystal_id[:8]}") relied on that, and
+#: the v1.6 enrichment preserves the same semantic: an explicit caller-supplied
+#: summary (even a poor one) is flagged via summary_quality but never rewritten;
+#: only a fully-omitted summary is auto-composed.
+_MISSING = object()
+
+
+def _default_checkpoint_summary(
+    crystal_id: str, state: dict[str, Any], scope: dict[str, Any]
+) -> str:
+    """Compose a diagnosable default checkpoint summary (v1.6 item 2).
+
+    MOTIVATING INCIDENT (CHANGELOG v1.6.0): the bare 'plan_checkpoint:<id>'
+    label was the ONLY FTS-indexed text on the sole surviving checkpoint of a
+    9-crystal store, so BM25/FTS5 recall could never surface it by any query a
+    human would actually type. This composes plan name + scope + phase words
+    instead — only used when the caller omitted 'summary' entirely (an
+    explicit caller-supplied summary, however poor, is never rewritten; see
+    quality.is_poor_summary / the summary_quality advisory).
+    """
+    plan_name = state.get("plan_name") or state.get("plan") or scope.get("plan")
+    phase = state.get("phase") or state.get("current_phase") or state.get("step")
+    project = scope.get("project")
+
+    parts = ["plan checkpoint"]
+    if plan_name:
+        parts.append(f"for {plan_name}")
+    if project:
+        parts.append(f"(project={project})")
+    if phase:
+        parts.append(f"phase={phase}")
+    parts.append(f"[{crystal_id[:8]}]")
+    return " ".join(str(p) for p in parts)
 
 
 class ExecutionLayer:
@@ -162,8 +200,24 @@ class ExecutionLayer:
             payload_bytes = json.dumps(state, default=str).encode()
             content_ref = self.blob_store.put(payload_bytes)
 
-            scope = state.get("scope", {})
-            summary = state.get("summary", f"plan_checkpoint:{crystal_id[:8]}")
+            # v1.6 item 1: canonical project-key normalization (write path). Also
+            # reached indirectly via crystalium.commit(layer='execution') ->
+            # server._handle_commit, which already normalized — this pass is then
+            # a no-op (idempotent) and scope_normalized reflects the earlier one.
+            canonical_project = canonical_project_key(self.enforcement.config.data_dir)
+            scope, scope_normalized = normalize_write_scope(
+                state.get("scope"), canonical_project
+            )
+
+            # v1.6 item 2: auto-enrich ONLY the server-composed default label (the
+            # caller omitted 'summary' entirely) — an explicit caller summary is
+            # never rewritten, however poor (find-where-composed target: the old
+            # f"plan_checkpoint:{crystal_id[:8]}" fallback below).
+            raw_summary = state.get("summary", _MISSING)
+            if raw_summary is _MISSING:
+                summary = _default_checkpoint_summary(crystal_id, state, scope)
+            else:
+                summary = raw_summary
 
             utility = {
                 "access_count": 0,
@@ -213,7 +267,7 @@ class ExecutionLayer:
                 caller_tier=str(caller_tier),
             )
 
-            return {
+            result: CommitResult = {
                 "status": "committed",
                 "id": crystal_id,
                 "layer": "execution",
@@ -221,6 +275,14 @@ class ExecutionLayer:
                 "expires_at": ttl_expires.isoformat(),
                 "content_ref": content_ref,
             }
+            # v1.6 items 1 + 2: additive advisories, byte-identical result on the
+            # clean path (no scope rewrite, non-poor summary).
+            if scope_normalized:
+                result["scope_normalized"] = True
+            if is_poor_summary(crystal_record["summary"]):
+                result["summary_quality"] = "poor"
+                result["advisory"] = POOR_SUMMARY_ADVICE
+            return result
 
         except Exception as exc:
             outcome = "error" if not hasattr(exc, "reason_code") else "rejected"
@@ -294,7 +356,9 @@ class ExecutionLayer:
             payload_bytes = json.dumps(diff, default=str).encode()
             content_ref = self.blob_store.put(payload_bytes)
 
-            scope = diff.get("scope", {})
+            # v1.6 item 1: canonical project-key normalization (write path).
+            canonical_project = canonical_project_key(self.enforcement.config.data_dir)
+            scope, scope_normalized = normalize_write_scope(diff.get("scope"), canonical_project)
             summary = diff.get("summary", f"plan_replan:{crystal_id[:8]}")
 
             utility = {
@@ -338,7 +402,7 @@ class ExecutionLayer:
                 caller_tier=str(caller_tier),
             )
 
-            return {
+            result: CommitResult = {
                 "status": "committed",
                 "id": crystal_id,
                 "layer": "execution",
@@ -347,6 +411,10 @@ class ExecutionLayer:
                 "supersedes": supersedes_id,
                 "content_ref": content_ref,
             }
+            # v1.6 item 1: additive advisory, byte-identical result on the clean path.
+            if scope_normalized:
+                result["scope_normalized"] = True
+            return result
 
         except Exception as exc:
             outcome = "error" if not hasattr(exc, "reason_code") else "rejected"

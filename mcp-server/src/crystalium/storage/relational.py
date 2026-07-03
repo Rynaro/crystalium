@@ -37,6 +37,11 @@ from typing import Any
 #: Hard cap on export node scans (FINDING-010, graph.py:27 mirrors _NODE_WARN_THRESHOLD).
 MAX_EXPORT_NODES: int = 10_000
 
+#: v1.6 — whitelisted `scope` JSON-path keys for count_active_by_scope_key. The
+#: path is still passed as a bound parameter (never string-interpolated into
+#: SQL); this whitelist just rejects unsupported callers early.
+_SCOPE_KEY_PATHS: dict[str, str] = {"plan": "$.plan", "project": "$.project"}
+
 # ---------------------------------------------------------------------------
 # DDL
 # ---------------------------------------------------------------------------
@@ -972,6 +977,65 @@ class RelationalStore:
         sql = f"SELECT count(*) FROM crystals WHERE {where_sql}"
         with self._connect() as conn:
             row = conn.execute(sql, tuple(params)).fetchone()
+        return int(row[0]) if row else 0
+
+    # ------------------------------------------------------------------
+    # v1.6 diagnosability — aggregate store stats + never-deprecate-last guard
+    # ------------------------------------------------------------------
+
+    def diagnostics_summary(self) -> dict[str, Any]:
+        """Aggregate diagnosability counts across the WHOLE store (unscoped).
+
+        Powers `recall --explain`'s `store` object + `project_keys_present`,
+        and `crystalium doctor`'s embedded-vs-total / by-status / by-project
+        report. See MOTIVATING INCIDENT (CHANGELOG v1.6.0): none of these
+        counts were surfaced anywhere before v1.6, so a 9-crystal store
+        answering every recall with 0 records was undiagnosable in-band.
+        """
+        with self._connect() as conn:
+            total = conn.execute("SELECT count(*) FROM crystals").fetchone()[0]
+            active = conn.execute(
+                "SELECT count(*) FROM crystals WHERE status = 'active'"
+            ).fetchone()[0]
+            embedded = conn.execute(
+                "SELECT count(*) FROM crystals WHERE embedding_ref IS NOT NULL "
+                "AND embedding_ref != ''"
+            ).fetchone()[0]
+            status_rows = conn.execute(
+                "SELECT status, count(*) FROM crystals GROUP BY status"
+            ).fetchall()
+            project_rows = conn.execute(
+                "SELECT json_extract(scope, '$.project') AS project, count(*) "
+                "FROM crystals GROUP BY project"
+            ).fetchall()
+        return {
+            "total_crystals": int(total),
+            "active": int(active),
+            "embedded": int(embedded),
+            "by_status": {r[0]: int(r[1]) for r in status_rows},
+            "by_project": {(r[0] or "(none)"): int(r[1]) for r in project_rows},
+        }
+
+    def count_active_by_scope_key(
+        self, layer: str, key_field: str, key_value: str, *, exclude_id: str
+    ) -> int:
+        """Count ACTIVE crystals in *layer* whose scope[key_field] == key_value.
+
+        Excludes *exclude_id*. Backs the v1.6 never-deprecate-last-checkpoint
+        guard (dream/worker.py::_prune): before deprecating an execution-layer
+        checkpoint, the caller checks whether any OTHER active checkpoint
+        shares its scope.plan (or scope.project) — a zero count means the
+        candidate is the plan's last recallable checkpoint.
+        """
+        path = _SCOPE_KEY_PATHS.get(key_field)
+        if path is None:
+            raise ValueError(f"Unsupported scope key field: {key_field!r}")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM crystals WHERE layer = ? AND status = 'active' "
+                "AND json_extract(scope, ?) = ? AND id != ?",
+                (layer, path, key_value, exclude_id),
+            ).fetchone()
         return int(row[0]) if row else 0
 
     # ------------------------------------------------------------------

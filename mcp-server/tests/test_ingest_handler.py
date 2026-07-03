@@ -44,9 +44,9 @@ def _envelope(payload_str: str, *, eidolon="atlas", tier="T1", kind="scout-repor
 
 
 def _ingest(comps, envelope, payload):
-    (_e, _a, ep, se, pr, ex, _g, _s, _r) = comps
+    (enforcement, _a, ep, se, pr, ex, _g, _s, _r) = comps
     return _handle_ingest({"envelope": envelope, "payload": payload,
-                           "payload_encoding": "json"}, ep, se, pr, ex)
+                           "payload_encoding": "json"}, ep, se, pr, ex, enforcement.config)
 
 
 def test_ingest_rejects_payload_not_matching_declared_hash(tmp_path: Path) -> None:
@@ -77,13 +77,19 @@ def test_t1_roster_artifact_lands_episodic_unverified(tmp_path: Path) -> None:
 
 
 def test_recall_preserves_provenance_and_tier(tmp_path: Path) -> None:
+    from crystalium.scope import canonical_project_key
+
     comps = _components(tmp_path)
-    (_e, aetheryte, _ep, _se, _pr, _ex, _g, _s, _r) = comps
+    (enforcement, aetheryte, _ep, _se, _pr, _ex, _g, _s, _r) = comps
     artifact = {"findings": ["auth uses argon2"]}
     payload = json.dumps(artifact)
     res = _ingest(comps, _envelope(payload, eidolon="atlas", tier="T1",
                                    thread="proj-x", objective="auth subsystem map"), payload)
-    out = aetheryte.recall(Scope(project="proj-x"), "auth subsystem map", 10, None, Tier.T1)
+    # v1.6: ingest normalizes scope.project to the canonical (data-dir-derived)
+    # key — thread_id="proj-x" is preserved verbatim in scope.project_raw, but
+    # recall by the canonical key is what actually finds it now.
+    canonical = canonical_project_key(enforcement.config.data_dir)
+    out = aetheryte.recall(Scope(project=canonical), "auth subsystem map", 10, None, Tier.T1)
     rec = next((r for r in out.records if r.id == res["id"]), None)
     assert rec is not None
     assert rec.trust_tier == "T1"                    # MIN-trust intact, not laundered
@@ -130,7 +136,7 @@ def test_integrity_mismatch_rejected(tmp_path: Path) -> None:
 
 
 def test_missing_envelope_rejected(tmp_path: Path) -> None:
-    (_e, _a, ep, se, pr, ex, _g, _s, _r) = _components(tmp_path)
+    (enforcement, _a, ep, se, pr, ex, _g, _s, _r) = _components(tmp_path)
     with pytest.raises(CrystaliumEnforcementError) as exc:
-        _handle_ingest({"payload": "{}"}, ep, se, pr, ex)
+        _handle_ingest({"payload": "{}"}, ep, se, pr, ex, enforcement.config)
     assert exc.value.reason_code == "INGEST_BAD_ENVELOPE"
