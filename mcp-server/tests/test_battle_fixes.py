@@ -125,10 +125,10 @@ def test_recall_negative_k_clamped(tmp_path: Path) -> None:
               caller_tier=Tier.T1)
     # negative k must not crash or tail-slice
     res = _handle_recall({"scope": {"project": "p"}, "query": "findable fact", "k": -5},
-                         aetheryte, scheduler, Tier.T1)
+                         aetheryte, scheduler, Tier.T1, cfg)
     assert res is not None
     res2 = _handle_recall({"scope": {"project": "p"}, "query": "findable fact", "k": "garbage"},
-                          aetheryte, scheduler, Tier.T1)
+                          aetheryte, scheduler, Tier.T1, cfg)
     assert res2 is not None
 
 

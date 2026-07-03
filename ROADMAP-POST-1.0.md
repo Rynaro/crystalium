@@ -52,6 +52,14 @@ here is shipped green by lowering a bar.
   operators) before `MATCH`; this is also a minor injection-surface hardening.
 - **Exit:** a recall with arbitrary punctuation returns results (or empty) without error;
   a fuzz test over special-char queries passes.
+- **RESOLVED (T1 pass, confirmed at v1.6).** `_fts5_query()` (storage/relational.py)
+  already tokenizes on `\w+` and quotes each token as a literal FTS5 term — special
+  characters are never handed to `MATCH` raw. Was already in place when this ledger
+  entry was written; closed in CHANGELOG 1.3.0 by confirming `test_bm25_special_chars_no_crash`
+  (7 punctuation/operator cases) passes. v1.6 adds an end-to-end regression
+  (`TestFts5InjectionRegression` in `tests/test_diagnosability.py`) exercising the
+  same hostile queries through the full `recall(explain=True)` path, not just the
+  low-level `bm25_search` unit.
 
 ### G1.3 — `tool_calls` audit table is DDL-only / unpopulated
 - **Symptom:** `record_tool_call` has zero callers; `DreamWorker._orient` queries a table
@@ -60,6 +68,12 @@ here is shipped green by lowering a bar.
   trail, useful for the drift detector and ops) **or** drop the dead table + the
   `_orient` query. Decide based on whether a queryable call-audit is wanted at 1.x.
 - **Exit:** no DDL table without a writer; `_orient` reads only populated tables.
+- **RESOLVED (T1 pass, confirmed at v1.6).** `telemetry.record_call()` is wired to
+  `RelationalStore.record_tool_call()` via `register_relational_store()` (called from
+  `server._build_server()`); every MCP tool call now writes a `tool_calls` row and
+  `DreamWorker._orient()` reads real counts. Closed in CHANGELOG 1.3.0
+  (`test_tool_calls_populated_via_telemetry`, `test_tool_calls_readable_by_orient`).
+  No further action at v1.6.
 
 ---
 

@@ -346,13 +346,20 @@ def _stub_commit_result() -> dict:
     }
 
 
-def _call_handle_commit(args: dict, caller_tier) -> "tuple[dict, dict]":
+def _call_handle_commit(args: dict, caller_tier, config: "Config | None" = None) -> "tuple[dict, dict]":
     """Drive _handle_commit with a mocked episodic layer; return (result, captured).
 
     captured["provenance"] holds the Provenance object passed to layer.commit().
+    config defaults to a throwaway Config (v1.6 canonicalization needs
+    config.data_dir; these tests don't care what the canonical key resolves to).
     """
     from crystalium.server import _handle_commit
     from unittest.mock import MagicMock
+    import tempfile
+    from pathlib import Path as _Path
+
+    if config is None:
+        config = Config(data_dir=_Path(tempfile.mkdtemp()) / "chc-data", rate_limit_per_minute=1000)
 
     captured: dict = {}
 
@@ -371,6 +378,7 @@ def _call_handle_commit(args: dict, caller_tier) -> "tuple[dict, dict]":
         MagicMock(),  # procedural
         MagicMock(),  # execution
         caller_tier=caller_tier,
+        config=config,
     )
     return result, captured
 

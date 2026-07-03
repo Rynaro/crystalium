@@ -39,6 +39,11 @@ class Scope(BaseModel):
     project: str = Field(min_length=1)
     agent_class_visibility: Optional[str] = None
     sensitivity_tag: Optional[str] = None
+    # v1.6 (canonical project-key normalization, scope.py): populated on a WRITE
+    # path only when the caller-supplied project differed from the canonical
+    # (data-dir-derived) key. Preserves the original label for provenance;
+    # never populated by recall (a read filter, not a write of record).
+    project_raw: Optional[str] = None
 
 
 class Temporal(BaseModel):
@@ -239,6 +244,12 @@ class RecallResult(BaseModel):
     slot_breakdown: SlotBreakdown
     total_tokens: int = Field(ge=0, le=3500)
     evicted_count: int = Field(ge=0)
+    # v1.6 `recall --explain` (diagnosability). Populated only when the caller
+    # opts in (explain=True); absent (None) otherwise, and callers should dump
+    # with exclude_none=True so a normal recall's JSON shape is unchanged.
+    # Free-form dict (not schema-pinned) — see aetheryte/retrieve.py::recall()
+    # docstring for the exact shape.
+    explain: Optional[dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------

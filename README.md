@@ -115,11 +115,11 @@ docker build --build-arg TORCH_VARIANT=gpu -t crystalium:gpu .
 
 ---
 
-## Tool surface (8 MCP tools)
+## Tool surface (9 MCP tools)
 
 | Tool | Purpose | Gated by |
 |---|---|---|
-| `recall(scope, query, k, layers)` | Hybrid BM25+vector+graph retrieval with reranking; active-only by default | Rate limit only |
+| `recall(scope, query, k, layers, explain)` | Hybrid BM25+vector+graph retrieval with reranking; active-only by default; `explain=true` (v1.6) attaches a diagnostic object | Rate limit only |
 | `commit(layer, payload, provenance)` | Write with tier enforcement + bi-temporal tracking | Tier matrix (G1–G4) |
 | `ingest(envelope, payload)` | Ingest a roster ECL handoff (v1.x/v2.x) → `crystal.v1`; native artifact preserved verbatim in `encoding_context`; commits through the chokepoint (MIN trust tier; T3 → episodic-quarantine) | Tier matrix (G1) |
 | `update(id, patch, reason)` | Field edits with invalidate-old; never hard-delete | Tier matrix (G1, G4) |
@@ -127,6 +127,7 @@ docker build --build-arg TORCH_VARIANT=gpu -t crystalium:gpu .
 | `plan_checkpoint(state)` | Execution layer checkpoint (TTL-bound) | Tier matrix (G1) |
 | `plan_replan(diff)` | Execution layer replan diff | Tier matrix (G1) |
 | `session_end(reason)` | Enqueue Dream immediately (else idle-polled every 60s) | Rate limit only |
+| `graph_export(scope, format, layers, limit, include)` | Export the scoped memory graph as `nodes[]+edges[]` (JSON/GraphML/Cytoscape); redacted summaries, never raw blob | Rate limit only |
 
 All results emit ECL v2.0 envelope sidecars with 11 required fields and SHA-256 integrity.
 
