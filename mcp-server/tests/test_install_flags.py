@@ -39,11 +39,18 @@ def _pkg_version(root: Path) -> str:
     (it was stale at "1.0.0" since v1.0) — it now greps [project].version from
     pyproject.toml at runtime. Mirror that here so this test never goes stale
     against a release bump again.
+
+    Same two candidate locations install.sh probes: mcp-server/pyproject.toml
+    (git checkout layout) then pyproject.toml (container /app layout — the
+    Dockerfile COPYs it to the image root, where this suite runs in CI).
     """
-    for line in (root / "mcp-server" / "pyproject.toml").read_text().splitlines():
-        if line.startswith("version"):
-            return line.split('"')[1]
-    raise AssertionError("version not found in mcp-server/pyproject.toml")
+    for candidate in (root / "mcp-server" / "pyproject.toml", root / "pyproject.toml"):
+        if not candidate.exists():
+            continue
+        for line in candidate.read_text().splitlines():
+            if line.startswith("version"):
+                return line.split('"')[1]
+    raise AssertionError("version not found in any candidate pyproject.toml")
 
 
 def test_version_flag_prints_and_exits():
