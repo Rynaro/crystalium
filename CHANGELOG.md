@@ -6,6 +6,63 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-07-04
+
+### Added
+
+- **`commit` CLI verb (`crystalium commit`) — the one-shot WRITE counterpart
+  to `recall`.** `recall` (v1.6/GAP-2) covers the read half of the
+  out-of-MCP-session pairing; `commit` covers the write half, unblocking the
+  Eidolons nexus round-trip memory canary (bash-reachable write path with no
+  MCP session in the loop). Mirrors `recall`'s and `index`'s construction
+  discipline exactly: lazy imports inside the function body (`commit --help`
+  never pulls torch/lance/kuzu), structlog routed to the real stderr
+  (`sys.__stderr__`) so stdout carries exactly one JSON document, and a
+  `BlobStore` + `RelationalStore` + `Enforcement` + `Redactor` +
+  `EpisodicLayer(vector_store=None, graph_store=None)` stack built from
+  `Config.from_env()`/`--config`. Options: `--summary` (required),
+  `--content` (defaults to `--summary`), `--scope-project` (required),
+  `--scope-visibility`, `--source` (`human|verified_agent|unverified_agent|
+  environment`, default `environment`), `--author-agent` (default
+  `crystalium-cli`), `--task-id`, `--format json|text` (default `json`).
+  `--format text` prints just the new crystal id. Caller tier defaults to
+  `Tier.T0` via `CRYSTALIUM_CALLER_TIER` (asymmetric vs. `recall`'s `T1`
+  default — see the option's inline comment in `__main__.py`); since
+  `commit` only ever targets the Episodic layer (ceiling `T3`, universally
+  writable) this mainly affects the `trust_tier` stamped on the crystal, not
+  whether the write is admitted.
+  **The v1.6 summary-quality gate (`quality.is_poor_summary` — `quality.py`)
+  is a HARD gate here**, unlike the MCP `crystalium.commit` tool where a
+  failing summary is accepted with an advisory `summary_quality: "poor"`
+  result field: that soft behavior only makes sense when an agent is
+  in-session to read the advisory back and fix it, and this one-shot CLI
+  writer has no such reader. A failing summary now exits 1 with no stdout
+  JSON instead of silently landing a crystal no BM25/FTS5 query could ever
+  find.
+
+### Fixed
+
+- **`install.sh`'s `CRYSTALIUM_VERSION` was a stale `"1.0.0"` literal**,
+  untouched since the earliest releases while the package moved on to
+  1.6.0 (the same class of staleness `crystalium.__version__` fixed in
+  v1.6). Now single-sourced at install time from
+  `mcp-server/pyproject.toml`'s `[project].version`, with a hard-coded
+  fallback (kept in sync with the package version) if the file is
+  missing/unreadable. `SCRIPT_DIR` — previously resolved after argument
+  parsing — is now resolved earlier in the script so the `--version` flag
+  (parsed inside the argument loop) can rely on it under `set -u`.
+
+### Deferred
+
+- **The `consolidate` batch verb (episode→skill promotion) is deferred to
+  1.8.** Scoped alongside `commit` for 1.7 but intentionally cut to keep
+  this release to exactly the two features above: a k-occurrence trigger +
+  held-out validation gate for promoting clustered Episodic crystals to
+  Semantic skills, exposed as its own CLI/MCP surface distinct from the
+  existing `dream` consolidation path. `dream` remains the sole
+  consolidation entry point until `consolidate` lands. See
+  `ROADMAP-POST-1.0.md` for the ledger entry.
+
 ## [1.6.0] — 2026-07-03
 
 Wave 4 — memory diagnosability + guards. MOTIVATING INCIDENT: a live project

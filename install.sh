@@ -40,7 +40,40 @@ set -euo pipefail
 
 EIIS_VERSION_VALUE="1.4"
 ECL_VERSION_VALUE="2.0"
-CRYSTALIUM_VERSION="1.0.0"
+
+# Resolve REPO_ROOT — directory containing this script. Defined here (ahead of
+# argument parsing, moved up from its previous single use-site further below)
+# because CRYSTALIUM_VERSION below needs it, and the --version flag (handled
+# inside the argument-parsing loop right after this) needs CRYSTALIUM_VERSION
+# already set under `set -u`.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Single-source CRYSTALIUM_VERSION from pyproject.toml instead of a
+# hand-maintained literal: this was stale at "1.0.0" since the earliest v1.0
+# releases while the package itself moved on to 1.6.0 — the same class of
+# staleness crystalium/__init__.py's __version__ fix (v1.6, single-sourced via
+# importlib.metadata) closed for the Python package.
+#
+# Two candidate locations, in order:
+#   1. <repo>/mcp-server/pyproject.toml   — git checkout layout
+#   2. <repo>/pyproject.toml              — container image layout (the
+#      Dockerfile COPYs mcp-server/pyproject.toml to /app/pyproject.toml,
+#      and the container test suite runs install.sh from /app)
+# The `|| true` inside the substitution is load-bearing under
+# `set -euo pipefail`: a missing file makes grep exit 2, pipefail propagates
+# it, and a bare failing command substitution in an assignment would abort
+# the whole script (observed as exit 2 across the container CI suite) before
+# the fallback below could ever run.
+_pyproject="${SCRIPT_DIR}/mcp-server/pyproject.toml"
+if [ ! -f "${_pyproject}" ]; then
+    _pyproject="${SCRIPT_DIR}/pyproject.toml"
+fi
+CRYSTALIUM_VERSION=""
+if [ -f "${_pyproject}" ]; then
+    CRYSTALIUM_VERSION="$(grep -m1 '^version' "${_pyproject}" 2>/dev/null | cut -d'"' -f2 || true)"
+fi
+[ -z "${CRYSTALIUM_VERSION}" ] && CRYSTALIUM_VERSION="1.7.0"
+unset _pyproject
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -131,8 +164,8 @@ if [ -z "${TARGET}" ]; then
     TARGET="./.eidolons/crystalium"
 fi
 
-# Resolve REPO_ROOT — directory containing this script
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# SCRIPT_DIR (REPO_ROOT) is resolved earlier now, in the Constants block above —
+# CRYSTALIUM_VERSION needed it ahead of argument parsing (see --version).
 
 # ---------------------------------------------------------------------------
 # Helper: say / ok / warn / die

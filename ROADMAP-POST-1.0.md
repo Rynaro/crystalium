@@ -201,6 +201,24 @@ genuinely beat the prior version; update `DESIGN-RATIONALE.md` §D6.7 + BENCH-NO
 
 ---
 
+## Deferred to v1.8
+
+### `consolidate` batch verb (episode→skill promotion)
+- **Gap:** there is no dedicated CLI/MCP surface for triggering episode→skill
+  promotion on demand — a k-occurrence trigger + held-out validation gate,
+  analogous to `dream`'s consolidation pass but invocable as its own batch
+  verb.
+- **Status:** scoped alongside the v1.7 `commit` CLI verb (the out-of-session
+  write counterpart to `recall`) but cut from 1.7 to keep that release to
+  exactly two features. `dream` remains the sole consolidation entry point
+  until `consolidate` lands.
+- **Exit:** `consolidate` runs the k-occurrence trigger against Episodic,
+  scores candidates against a held-out validation gate, and promotes only
+  those that clear it; a regression test covers the trigger threshold and
+  the held-out gate rejecting a spurious cluster.
+
+---
+
 ## Sequencing
 
 1. **T1 first** (G1.1 unblocks the canary 0.80; G1.2/G1.3 are small correctness wins).
