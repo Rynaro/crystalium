@@ -4,6 +4,7 @@ Subcommands:
   serve     — start the MCP server (stdio transport, D2)
   index     — bulk-load a directory of .md/.txt files into Episodic (T0)
   recall    — read-only one-shot hybrid recall (out-of-MCP-session, BM25 fast path)
+  commit    — one-shot WRITE to Episodic (out-of-MCP-session; recall's write counterpart, v1.7)
   export    — export the scoped memory graph as nodes[]+edges[] (JSON; GraphML/Cytoscape in W-GE6)
   dream     — manually trigger the Dream worker
   doctor    — health checks: imports, config, schemas, data_dir writable, optional deps
@@ -376,6 +377,198 @@ def recall(
         for r in result.records:
             d = r.model_dump() if hasattr(r, "model_dump") else r
             click.echo(f"[{d['layer']}/{d['trust_tier']}] {d['summary']}")
+
+
+# ---------------------------------------------------------------------------
+# commit — one-shot WRITE counterpart to recall (GAP-2 follow-up, v1.7;
+# out-of-MCP-session; unblocks the Eidolons nexus round-trip memory canary)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--summary",
+    "summary",
+    required=True,
+    help=(
+        "Human-readable summary — the sole FTS-indexed field. MUST pass the "
+        "v1.6 mechanical summary-quality gate (crystalium.quality.is_poor_summary): "
+        "(1) >= 24 chars after stripping, (2) >= 3 alphabetic words (maximal "
+        "A-Za-z runs), and (3) NOT shaped like a bare machine label "
+        "(regex ^[a-z_]+:[0-9a-f-]+$, e.g. 'plan_checkpoint:08234787'). "
+        "Unlike the MCP crystalium.commit tool — where a failing summary is "
+        "only advisory (summary_quality: 'poor') because an agent is present "
+        "in-session to read the advisory back and fix it — this one-shot CLI "
+        "writer has no session to read it back, so a failing summary is a "
+        "HARD rejection here (exit 1, nothing written)."
+    ),
+)
+@click.option(
+    "--content",
+    "content",
+    default=None,
+    help="Full content to persist (default: the --summary text, mirrors index()).",
+)
+@click.option(
+    "--scope-project",
+    "scope_project",
+    required=True,
+    help="Scope.project (min_length=1).",
+)
+@click.option(
+    "--scope-visibility",
+    "scope_visibility",
+    default=None,
+    help="Scope.agent_class_visibility (default: None → all).",
+)
+@click.option(
+    "--source",
+    "source",
+    type=click.Choice(["human", "verified_agent", "unverified_agent", "environment"]),
+    default="environment",
+    show_default=True,
+    help="Provenance.source. Default 'environment' — this is a mechanical, out-of-session writer.",
+)
+@click.option(
+    "--author-agent",
+    "author_agent",
+    default="crystalium-cli",
+    show_default=True,
+    help="Provenance.author_agent.",
+)
+@click.option(
+    "--task-id",
+    "task_id",
+    default=None,
+    help="Provenance.task_id (default: None).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "text"]),
+    default="json",
+    show_default=True,
+    help="Output format: json = full commit result; text = just the new crystal id.",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+    help="Path to crystalium.yaml (default: env vars).",
+)
+def commit(
+    summary: str,
+    content: Optional[str],
+    scope_project: str,
+    scope_visibility: Optional[str],
+    source: str,
+    author_agent: str,
+    task_id: Optional[str],
+    fmt: str,
+    config_path: Optional[Path],
+) -> None:
+    """One-shot WRITE to CRYSTALIUM Episodic memory (out-of-MCP-session; recall's write counterpart).
+
+    The mechanical write half of the GAP-2 out-of-session CLI pairing: `recall` reads,
+    `commit` writes. Unlike `recall`, this command DOES write — it is gated by the
+    v1.6 summary-quality check (hard-reject here; see --summary help for the exact
+    mechanical rules) and by enforcement (tier × layer × op). Exit 0 on success
+    (JSON commit result, or with --format text just the new crystal id); exit 1 on
+    any rejection (stderr message).
+    """
+    import os
+    from datetime import datetime, timezone
+
+    import structlog
+
+    # Route all structlog output to stderr so stdout carries exactly one JSON document
+    # (or, with --format text, just the crystal id). Mirrors recall()'s discipline above:
+    # sys.__stderr__ (the real stderr fd) is used rather than sys.stderr so that Click's
+    # CliRunner — which replaces sys.stderr with a capture buffer — does not mix log
+    # lines into the captured stdout. In production Docker, sys.__stderr__ is sys.stderr.
+    _stderr = getattr(sys, "__stderr__", sys.stderr) or sys.stderr
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_stderr))
+
+    # Lazy imports — heavy deps are NEVER pulled just to run `commit --help`
+    # (D-G2b discipline; mirrors recall()/index()). All collaborator imports live
+    # INSIDE the function body.
+    from crystalium.config import Config
+    from crystalium.layers.episodic import EpisodicLayer
+    from crystalium.aetheryte.redact import Redactor
+    from crystalium.enforcement import Enforcement
+    from crystalium.storage.blob import BlobStore
+    from crystalium.storage.relational import RelationalStore
+    from crystalium.quality import POOR_SUMMARY_ADVICE, is_poor_summary
+    from crystalium.schemas import Provenance
+    from crystalium.trust import Tier
+
+    # Hard gate (see --summary help): the MCP tool's soft/advisory behavior only
+    # makes sense when an agent is in-session to read the advisory back; this is
+    # a one-shot mechanical writer with no such reader, so reject up front instead
+    # of silently landing a crystal no BM25/FTS5 query could ever find.
+    if is_poor_summary(summary):
+        raise click.ClickException(
+            f"summary rejected by the v1.6 quality gate: {POOR_SUMMARY_ADVICE}"
+        )
+
+    config = (
+        Config.from_yaml(config_path)
+        if (config_path and config_path.exists())
+        else Config.from_env()
+    )
+
+    blob_store = BlobStore(root=config.blob_root)
+    relational = RelationalStore(db_path=config.sqlite_path)
+    enforcement = Enforcement(config)
+    redactor = Redactor(config=config)
+    importance_fn = _select_importance_fn(config)
+
+    episodic = EpisodicLayer(
+        blob_store=blob_store,
+        relational=relational,
+        vector_store=None,
+        graph_store=None,
+        enforcement=enforcement,
+        redactor=redactor,
+        importance_fn=importance_fn,
+    )
+
+    now_utc = datetime.now(timezone.utc)
+    provenance = Provenance(
+        source=source,
+        author_agent=author_agent,
+        task_id=task_id,
+        created_at=now_utc,
+    )
+
+    # caller_tier default: T0 (asymmetric vs recall's T1 default above). Per
+    # trust.py, T0 is actually the HIGHEST-trust tier in this codebase's ordering
+    # (T0=human operator .. T3=environment/tool-ingested) — so this default is
+    # NOT a literal "least-trusted" floor in the tier-enum sense. Practically it
+    # has little gating effect here: EpisodicLayer.commit's only target (episodic)
+    # has ceiling T3 (universally writable — every tier is admitted), so
+    # caller_tier only decides the trust_tier stamped on the resulting crystal and
+    # (T3 only) whether it lands quarantined. Override with CRYSTALIUM_CALLER_TIER
+    # (e.g. T3) for a caller that wants its unverified writes quarantined pending
+    # review instead of landing as 'unverified'.
+    caller_tier = Tier.from_str(os.environ.get("CRYSTALIUM_CALLER_TIER", "T0"))
+
+    payload = {
+        "summary": summary,
+        "content": content if content is not None else summary,
+        "scope": {"project": scope_project, "agent_class_visibility": scope_visibility},
+    }
+
+    try:
+        result = episodic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
+    except Exception as exc:  # gate rejection, enforcement error, or store error → exit 1
+        raise click.ClickException(f"commit failed: {exc}") from exc
+
+    if fmt == "json":
+        click.echo(json.dumps(result, default=str))
+    else:
+        click.echo(result["id"])
 
 
 # ---------------------------------------------------------------------------

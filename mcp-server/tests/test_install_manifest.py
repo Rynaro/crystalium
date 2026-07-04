@@ -53,7 +53,14 @@ def test_generated_manifest_validates(tmp_path: Path) -> None:
 
     # spot-check the W7 fixes
     assert manifest["ecl_version"] == "2.0"
-    assert manifest["version"] == "1.0.0"
+    # v1.7: install.sh single-sources CRYSTALIUM_VERSION from pyproject.toml
+    # (was a stale hand-maintained "1.0.0" literal) — assert against the same source.
+    expected_version = next(
+        line.split('"')[1]
+        for line in (root / "mcp-server" / "pyproject.toml").read_text().splitlines()
+        if line.startswith("version")
+    )
+    assert manifest["version"] == expected_version
     roles = {f["role"] for f in manifest["files_written"]}
     assert "schema" in roles and "other" not in roles
 

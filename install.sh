@@ -40,7 +40,22 @@ set -euo pipefail
 
 EIIS_VERSION_VALUE="1.4"
 ECL_VERSION_VALUE="2.0"
-CRYSTALIUM_VERSION="1.0.0"
+
+# Resolve REPO_ROOT — directory containing this script. Defined here (ahead of
+# argument parsing, moved up from its previous single use-site further below)
+# because CRYSTALIUM_VERSION below needs it, and the --version flag (handled
+# inside the argument-parsing loop right after this) needs CRYSTALIUM_VERSION
+# already set under `set -u`.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Single-source CRYSTALIUM_VERSION from mcp-server/pyproject.toml instead of a
+# hand-maintained literal: this was stale at "1.0.0" since the earliest v1.0
+# releases while the package itself moved on to 1.6.0 — the same class of
+# staleness crystalium/__init__.py's __version__ fix (v1.6, single-sourced via
+# importlib.metadata) closed for the Python package. Hard fallback keeps
+# `set -u` safe if pyproject.toml is missing/unreadable/malformed.
+CRYSTALIUM_VERSION="$(grep -m1 '^version' "${SCRIPT_DIR}/mcp-server/pyproject.toml" 2>/dev/null | cut -d'"' -f2)"
+[ -z "${CRYSTALIUM_VERSION}" ] && CRYSTALIUM_VERSION="1.7.0"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -131,8 +146,8 @@ if [ -z "${TARGET}" ]; then
     TARGET="./.eidolons/crystalium"
 fi
 
-# Resolve REPO_ROOT — directory containing this script
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# SCRIPT_DIR (REPO_ROOT) is resolved earlier now, in the Constants block above —
+# CRYSTALIUM_VERSION needed it ahead of argument parsing (see --version).
 
 # ---------------------------------------------------------------------------
 # Helper: say / ok / warn / die

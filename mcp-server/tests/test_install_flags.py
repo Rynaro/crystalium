@@ -32,11 +32,25 @@ def _run(args, cwd):
                           cwd=str(cwd), capture_output=True, text=True)
 
 
+def _pkg_version(root: Path) -> str:
+    """Single-source the expected version from mcp-server/pyproject.toml.
+
+    v1.7: install.sh's CRYSTALIUM_VERSION is no longer a hand-maintained literal
+    (it was stale at "1.0.0" since v1.0) — it now greps [project].version from
+    pyproject.toml at runtime. Mirror that here so this test never goes stale
+    against a release bump again.
+    """
+    for line in (root / "mcp-server" / "pyproject.toml").read_text().splitlines():
+        if line.startswith("version"):
+            return line.split('"')[1]
+    raise AssertionError("version not found in mcp-server/pyproject.toml")
+
+
 def test_version_flag_prints_and_exits():
     root = _repo_root()
     res = _run(["--version"], root)
     assert res.returncode == 0
-    assert res.stdout.strip() == "1.0.0"
+    assert res.stdout.strip() == _pkg_version(root)
 
 
 def test_manifest_only_does_not_change_files(tmp_path: Path):
@@ -51,7 +65,7 @@ def test_manifest_only_does_not_change_files(tmp_path: Path):
     assert r2.returncode == 0, r2.stderr
     snap2 = sorted(p.name for p in target.rglob("*") if p.is_file())
     assert snap1 == snap2                                   # no staging/sweep changes
-    assert json.loads((target / "install.manifest.json").read_text())["version"] == "1.0.0"
+    assert json.loads((target / "install.manifest.json").read_text())["version"] == _pkg_version(root)
     assert manifest1  # sanity
 
 
