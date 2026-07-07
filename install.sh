@@ -72,7 +72,7 @@ CRYSTALIUM_VERSION=""
 if [ -f "${_pyproject}" ]; then
     CRYSTALIUM_VERSION="$(grep -m1 '^version' "${_pyproject}" 2>/dev/null | cut -d'"' -f2 || true)"
 fi
-[ -z "${CRYSTALIUM_VERSION}" ] && CRYSTALIUM_VERSION="1.7.0"
+[ -z "${CRYSTALIUM_VERSION}" ] && CRYSTALIUM_VERSION="1.8.0"
 unset _pyproject
 
 # ---------------------------------------------------------------------------

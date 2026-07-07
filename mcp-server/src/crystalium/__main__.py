@@ -5,6 +5,7 @@ Subcommands:
   index     — bulk-load a directory of .md/.txt files into Episodic (T0)
   recall    — read-only one-shot hybrid recall (out-of-MCP-session, BM25 fast path)
   commit    — one-shot WRITE to Episodic (out-of-MCP-session; recall's write counterpart, v1.7)
+  ingest    — one-shot WRITE of an inbound ECL handoff envelope (out-of-MCP-session, v1.8)
   export    — export the scoped memory graph as nodes[]+edges[] (JSON; GraphML/Cytoscape in W-GE6)
   dream     — manually trigger the Dream worker
   doctor    — health checks: imports, config, schemas, data_dir writable, optional deps
@@ -564,6 +565,225 @@ def commit(
         result = episodic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
     except Exception as exc:  # gate rejection, enforcement error, or store error → exit 1
         raise click.ClickException(f"commit failed: {exc}") from exc
+
+    if fmt == "json":
+        click.echo(json.dumps(result, default=str))
+    else:
+        click.echo(result["id"])
+
+
+# ---------------------------------------------------------------------------
+# ingest — one-shot WRITE of an inbound ECL handoff envelope (v1.8; out-of-
+# MCP-session third verb of the GAP-2 pairing: recall reads, commit writes a
+# caller-typed summary, ingest writes a roster ECL envelope + artifact payload)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--envelope",
+    "envelope_json",
+    required=True,
+    help=(
+        "Inbound ECL handoff envelope as a JSON string (v1.x or v2.x; 11 required "
+        "top-level fields — envelope_version/message_id/thread_id/parent_id/from/"
+        "to/performative/objective/artifact/integrity/trace — plus artifact/"
+        "integrity/from-to sub-fields). Parsed with json.loads; a parse failure or "
+        "structural validation error exits 1 with a stderr message, never a Python "
+        "traceback. Validation is required-fields-only: extra top-level fields "
+        "(e.g. a composer's topic_key/contains_tool_origin) are tolerated, not "
+        "rejected."
+    ),
+)
+@click.option(
+    "--payload",
+    "payload",
+    required=True,
+    help=(
+        "Artifact payload text. G7 integrity binding: the raw UTF-8 bytes of THIS "
+        "argument (before any --payload-encoding decoding) must hash to the "
+        "envelope's declared artifact.sha256 when one is declared, or ingest exits "
+        "1 (INGEST_PAYLOAD_HASH_MISMATCH) with no crystal written."
+    ),
+)
+@click.option(
+    "--payload-encoding",
+    "payload_encoding",
+    type=click.Choice(["utf8", "base64", "json"]),
+    default="utf8",
+    show_default=True,
+    help=(
+        "How --payload is decoded into the crystal's encoding_context."
+        "native_artifact (verbatim preservation). Matches the MCP crystalium."
+        "ingest tool's payload_encoding argument name."
+    ),
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "text"]),
+    default="json",
+    show_default=True,
+    help="Output format: json = full ingest result; text = just the new crystal id.",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+    help="Path to crystalium.yaml (default: env vars).",
+)
+def ingest(
+    envelope_json: str,
+    payload: str,
+    payload_encoding: str,
+    fmt: str,
+    config_path: Optional[Path],
+) -> None:
+    """One-shot WRITE of an inbound ECL handoff envelope (out-of-MCP-session).
+
+    Reuses `crystalium.server._handle_ingest` verbatim over a light one-shot
+    component stack (the `commit` verb's precedent: None vector/graph stores;
+    all four layers real-instantiated for exact-signature parity, though only
+    Episodic is reachable while `_KIND_TO_LAYER` stays empty). Everything
+    `_handle_ingest` does is INHERITED, not reimplemented here:
+
+    \b
+    - Envelope validation (11 required fields; extra fields tolerated) and the
+      G7 raw-payload-bytes-hash-to-artifact.sha256 check.
+    - Tier is ENVELOPE-DERIVED MIN-trust (`resolve_caller_tier`): the source
+      identity (from.eidolon) sets the ceiling; a trace.tier token may only
+      self-downgrade, never self-elevate. Unlike `commit` (CRYSTALIUM_CALLER_TIER,
+      default T0) and `recall` (default T1), this verb NEVER reads
+      CRYSTALIUM_CALLER_TIER — an env override here would be a laundering vector
+      around the envelope's own attested source.
+    - Tool-origin / unknown-identity artifacts land Episodic-quarantined (T3 is
+      the only tier Episodic accepts unconditionally); quarantine does not
+      exclude a crystal from default one-shot recall (unchanged store behavior).
+    - Scope canonicalization (v1.6 `normalize_write_scope`): scope.project is
+      rewritten to the canonical (data-dir-derived) project key; the caller's
+      original project/thread_id is preserved verbatim in scope.project_raw.
+      NOTE the FINDING-107 asymmetry: the `commit` CLI verb stores
+      --scope-project VERBATIM (no normalization) — `ingest` DOES normalize,
+      matching the MCP crystalium.ingest tool's behavior exactly.
+    - NO summary-quality gate — unlike `commit`'s hard CLI rejection. Ingest's
+      summary is server-composed (f"{artifact.kind}: {objective}"), not
+      caller-typed prose, so the failure mode the commit gate defends against
+      (a human-typed summary no FTS query could find) does not apply; gating it
+      would also make this CLI wrapper reject envelopes the MCP ingest tool
+      accepts, breaking the parity this verb exists to preserve.
+
+    Exit 0 = success, stdout is exactly one JSON document (or, with --format
+    text, just the new crystal id). Any rejection -> click.ClickException,
+    exit 1, nothing written and no stdout JSON.
+    """
+    import structlog
+
+    # Route all structlog output to stderr so stdout carries exactly one JSON
+    # document (or, with --format text, just the crystal id). Mirrors commit()'s
+    # discipline above: sys.__stderr__ (the real stderr fd) is used rather than
+    # sys.stderr so that Click's CliRunner — which replaces sys.stderr with a
+    # capture buffer — does not mix log lines into the captured stdout.
+    _stderr = getattr(sys, "__stderr__", sys.stderr) or sys.stderr
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_stderr))
+
+    # Lazy imports — heavy deps are NEVER pulled just to run `ingest --help`
+    # (D-G2b discipline; mirrors commit()/recall()/index()). All collaborator
+    # imports, INCLUDING `crystalium.server` (for `_handle_ingest`), live INSIDE
+    # the function body so `--help` never triggers them.
+    from crystalium.config import Config
+    from crystalium.enforcement import Enforcement
+    from crystalium.gate import PromotionGate
+    from crystalium.layers.episodic import EpisodicLayer
+    from crystalium.layers.execution import ExecutionLayer
+    from crystalium.layers.procedural import ProceduralLayer
+    from crystalium.layers.semantic import SemanticLayer
+    from crystalium.aetheryte.redact import Redactor
+    from crystalium.storage.blob import BlobStore
+    from crystalium.storage.relational import RelationalStore
+
+    try:
+        envelope = json.loads(envelope_json)
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(f"--envelope is not valid JSON: {exc}") from exc
+    if not isinstance(envelope, dict):
+        raise click.ClickException("--envelope must decode to a JSON object.")
+
+    config = (
+        Config.from_yaml(config_path)
+        if (config_path and config_path.exists())
+        else Config.from_env()
+    )
+
+    blob_store = BlobStore(root=config.blob_root)
+    relational = RelationalStore(db_path=config.sqlite_path)
+    enforcement = Enforcement(config)
+    redactor = Redactor(config=config)
+    importance_fn = _select_importance_fn(config)
+
+    # Light one-shot stack (commit-verb precedent): None vector/graph stores.
+    # Real instances of all four layers preserve _handle_ingest's exact
+    # signature/parity even though only Episodic is reachable while
+    # ingest_adapter._KIND_TO_LAYER stays empty at 1.8.0.
+    episodic = EpisodicLayer(
+        blob_store=blob_store,
+        relational=relational,
+        vector_store=None,
+        graph_store=None,
+        enforcement=enforcement,
+        redactor=redactor,
+        importance_fn=importance_fn,
+    )
+    gate = PromotionGate(config, relational, enforcement)
+    semantic = SemanticLayer(
+        blob_store=blob_store,
+        relational=relational,
+        vector_store=None,
+        graph_store=None,
+        enforcement=enforcement,
+        gate=gate,
+        redactor=redactor,
+        importance_fn=importance_fn,
+    )
+    procedural = ProceduralLayer(
+        blob_store=blob_store,
+        relational=relational,
+        enforcement=enforcement,
+        gate=gate,
+        redactor=redactor,
+        importance_fn=importance_fn,
+        data_dir=config.data_dir,
+    )
+    # ExecutionLayer.aetheryte is default-safe (None-guarded; execution.py) — no
+    # recall-prefetch warming happens in this one-shot, session-less writer.
+    execution = ExecutionLayer(
+        blob_store=blob_store,
+        relational=relational,
+        enforcement=enforcement,
+        importance_fn=importance_fn,
+        aetheryte=None,
+        recall_cache=None,
+        recall_prefetch=False,
+    )
+
+    from crystalium.server import _handle_ingest
+
+    try:
+        result = _handle_ingest(
+            {
+                "envelope": envelope,
+                "payload": payload,
+                "payload_encoding": payload_encoding,
+            },
+            episodic,
+            semantic,
+            procedural,
+            execution,
+            config,
+            recall_cache=None,
+        )
+    except Exception as exc:  # envelope validation / G7 hash / enforcement / store error → exit 1
+        raise click.ClickException(f"ingest failed: {exc}") from exc
 
     if fmt == "json":
         click.echo(json.dumps(result, default=str))

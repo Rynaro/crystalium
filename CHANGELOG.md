@@ -6,6 +6,51 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-07-07
+
+### Added
+
+- **`ingest` CLI verb (`crystalium ingest`) — the one-shot WRITE of an inbound
+  ECL handoff envelope, out-of-MCP-session.** The third verb of the GAP-2
+  out-of-session pairing (`recall` reads; `commit` writes a caller-typed
+  summary; `ingest` writes a roster ECL envelope + artifact payload).
+  Options: `--envelope <json-string>` (required), `--payload <text>`
+  (required), `--payload-encoding utf8|base64|json` (default `utf8`),
+  `--format json|text` (default `json`), `--config`. Reuses
+  `crystalium.server._handle_ingest` verbatim over a light one-shot component
+  stack (`commit`-verb precedent: `None` vector/graph stores; all four layers
+  real-instantiated for exact-signature parity, though only Episodic is
+  reachable while `ingest_adapter._KIND_TO_LAYER` stays empty). Every
+  behavior below is inherited from the existing MCP `crystalium.ingest` tool,
+  not reimplemented: 11-required-field envelope validation (extra top-level
+  fields tolerated), the G7 raw-payload-bytes-hash-to-`artifact.sha256`
+  binding, and MIN-trust tier resolution.
+  **Tier is ENVELOPE-DERIVED, not read from `CRYSTALIUM_CALLER_TIER`** — unlike
+  `commit` (env var, default `T0`) and `recall` (env var, default `T1`), this
+  verb's trust anchor is the envelope's own attested source identity
+  (`from.eidolon` / `trace.tier` MIN-trust clamp); an env override here would
+  be a laundering vector. Tool-origin / unknown-identity envelopes land
+  Episodic-quarantined exactly as the MCP tool does, and quarantine does not
+  exclude a crystal from default one-shot recall (no recall-side change).
+  **No summary-quality gate** on this path (MCP `crystalium.ingest` parity) —
+  unlike `commit`'s hard CLI rejection: ingest's summary is server-composed
+  (`f"{artifact.kind}: {objective}"`), not caller-typed prose, so gating it
+  here would make the CLI wrapper reject envelopes the MCP tool accepts.
+  **Scope is canonicalized** (v1.6 `normalize_write_scope`) — `scope.project`
+  is rewritten to the canonical (data-dir-derived) project key with the
+  caller's original project/`thread_id` preserved verbatim in
+  `scope.project_raw`. Flagging the asymmetry this creates: the `commit` CLI
+  verb stores `--scope-project` **verbatim** (no normalization, test-locked);
+  `ingest` **does** normalize — MCP-consistent, CLI-`commit`-inconsistent.
+
+### Deferred
+
+- **The `consolidate` batch verb (episode→skill promotion) is re-deferred, now
+  to 1.9.** Pre-deferred from 1.7 to 1.8 (see the 1.7.0 entry below); this
+  release scopes to `ingest` only. `dream` remains the sole consolidation
+  entry point until `consolidate` lands. See `ROADMAP-POST-1.0.md` for the
+  ledger entry.
+
 ## [1.7.0] — 2026-07-04
 
 ### Added
