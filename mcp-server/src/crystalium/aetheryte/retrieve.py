@@ -177,6 +177,7 @@ class Aetheryte:
         k: int,
         layers: list[str] | None,
         caller_tier: Tier,
+        explain: bool = False,
     ) -> RecallResult:
         """Hybrid recall — BM25 + dense + graph-expand, fused via RRF.
 
@@ -203,6 +204,19 @@ class Aetheryte:
             k:           Target number of records to return.
             layers:      Subset of layers to search (None = all four layers).
             caller_tier: Trust tier of the calling agent (universally allowed for recall).
+            explain:     v1.6 diagnosability. When True, RecallResult.explain is
+                         populated with a diagnostic object:
+                           {candidates_prefilter, filtered_by_status, filtered_by_scope,
+                            arms: {bm25: on|off, dense: active|inactive(reason), graph: on|off},
+                            store: {total_crystals, active, embedded},
+                            project_keys_present: [...]}
+                         so a zero-record recall against a non-empty store is
+                         diagnosable from the result alone (the MOTIVATING INCIDENT
+                         test, CHANGELOG v1.6.0). Bypasses the recall cache in both
+                         directions (never read from, never written to) so a
+                         diagnostic call is always freshly computed and never
+                         contaminates a normal call's cached result with a stale
+                         `explain` object.
 
         Returns:
             RecallResult with records, slot_breakdown, total_tokens, evicted_count.
@@ -222,7 +236,8 @@ class Aetheryte:
 
             # 2b. W5 prefetch: serve a pre-warmed result from the recall cache.
             # The chokepoint above still ran. Off (recall_cache None) -> no cache.
-            if self.recall_cache is not None:
+            # v1.6: explain=True always bypasses the cache (see docstring).
+            if self.recall_cache is not None and not explain:
                 cached = self.recall_cache.get(
                     getattr(scope, "project", None), query, **self._cache_ctx(scope, k, layers, caller_tier)
                 )
@@ -236,6 +251,9 @@ class Aetheryte:
             sparse_ranking: list[str] = []
             dense_ranking: list[str] = []
             graph_ranking: list[str] = []
+            # v1.6 explain: did ANY layer's embed() call return a usable vector?
+            # Cheap to track unconditionally; only surfaced when explain=True.
+            dense_got_vector = False
 
             candidate_k = max(k * 3, 10)
 
@@ -258,6 +276,7 @@ class Aetheryte:
                     log.warning("embed_skipped", layer=layer, error=str(exc))
 
                 if query_vec:
+                    dense_got_vector = True
                     dense_hits = self.vector_store.dense_search(
                         query_vec=query_vec, layer_filter=layer, k=candidate_k
                     )
@@ -387,12 +406,26 @@ class Aetheryte:
                         temporal = {}
                 return temporal.get("t_valid_to") is None
 
-            filtered_ids = [
-                cid for cid in fused_ids
-                if cid in all_candidates
-                and _scope_matches(all_candidates[cid])
-                and _is_active(all_candidates[cid])
-            ]
+            # v1.6 explain: waterfall the combined filter into its two stages so a
+            # zero-record recall against a non-empty store is diagnosable — each
+            # fused candidate is attributed to exactly ONE reason (scope checked
+            # before status, matching evaluation order below). Counters are cheap
+            # (pure Python, no extra I/O) and computed unconditionally; only
+            # surfaced in the result when explain=True.
+            filtered_ids: list[str] = []
+            _filtered_by_scope = 0
+            _filtered_by_status = 0
+            for cid in fused_ids:
+                candidate = all_candidates.get(cid)
+                if candidate is None:
+                    continue
+                if not _scope_matches(candidate):
+                    _filtered_by_scope += 1
+                    continue
+                if not _is_active(candidate):
+                    _filtered_by_status += 1
+                    continue
+                filtered_ids.append(cid)
 
             # Build Crystal-like objects for the composer
             now = datetime.now(timezone.utc)
@@ -538,6 +571,37 @@ class Aetheryte:
                     )
                 )
 
+            # v1.6 item 3: build the `explain` diagnostic object (only when
+            # requested — the store aggregate query is skipped otherwise).
+            explain_obj: dict[str, Any] | None = None
+            if explain:
+                dense_null = bool(getattr(self.vector_store, "_is_null", False))
+                if dense_null:
+                    dense_status = "inactive(null_vector_store)"
+                elif not dense_got_vector:
+                    dense_status = "inactive(embed_unavailable)"
+                else:
+                    dense_status = "active"
+                graph_status = "off" if getattr(self.graph_store, "_is_null", False) else "on"
+
+                store_stats = self.relational.diagnostics_summary()
+                explain_obj = {
+                    "candidates_prefilter": len(all_candidates),
+                    "filtered_by_status": _filtered_by_status,
+                    "filtered_by_scope": _filtered_by_scope,
+                    "arms": {
+                        "bm25": "on",
+                        "dense": dense_status,
+                        "graph": graph_status,
+                    },
+                    "store": {
+                        "total_crystals": store_stats["total_crystals"],
+                        "active": store_stats["active"],
+                        "embedded": store_stats["embedded"],
+                    },
+                    "project_keys_present": sorted(store_stats["by_project"].keys()),
+                }
+
             result = RecallResult(
                 records=result_records,
                 slot_breakdown=SlotBreakdown(
@@ -550,6 +614,7 @@ class Aetheryte:
                 ),
                 total_tokens=composed.total_tokens,
                 evicted_count=composed.evicted_count,
+                explain=explain_obj,
             )
 
             log.info(
@@ -565,7 +630,8 @@ class Aetheryte:
             )
 
             # W5 prefetch: cache this (cold) result so a pre-warmed read hits later.
-            if self.recall_cache is not None:
+            # v1.6: never cache an explain=True result (see docstring).
+            if self.recall_cache is not None and not explain:
                 self.recall_cache.put(
                     getattr(scope, "project", None), query, result,
                     **self._cache_ctx(scope, k, layers, caller_tier),

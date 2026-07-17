@@ -4,6 +4,8 @@ Subcommands:
   serve     — start the MCP server (stdio transport, D2)
   index     — bulk-load a directory of .md/.txt files into Episodic (T0)
   recall    — read-only one-shot hybrid recall (out-of-MCP-session, BM25 fast path)
+  commit    — one-shot WRITE to Episodic (out-of-MCP-session; recall's write counterpart, v1.7)
+  ingest    — one-shot WRITE of an inbound ECL handoff envelope (out-of-MCP-session, v1.8)
   export    — export the scoped memory graph as nodes[]+edges[] (JSON; GraphML/Cytoscape in W-GE6)
   dream     — manually trigger the Dream worker
   doctor    — health checks: imports, config, schemas, data_dir writable, optional deps
@@ -239,6 +241,17 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
     help="Output format: json = RecallResult JSON; text = compact per-record lines.",
 )
 @click.option(
+    "--explain",
+    "explain",
+    is_flag=True,
+    default=False,
+    help=(
+        "v1.6: attach a diagnostic `explain` object (candidate/filter counts, "
+        "arm status, store totals, distinct project keys present). Bypasses "
+        "the recall cache."
+    ),
+)
+@click.option(
     "--config",
     "config_path",
     type=click.Path(exists=False, path_type=Path),
@@ -253,6 +266,7 @@ def recall(
     layers_csv: Optional[str],
     full: bool,
     fmt: str,
+    explain: bool,
     config_path: Optional[Path],
 ) -> None:
     """Read-only hybrid recall from CRYSTALIUM memory (one-shot; out-of-MCP-session).
@@ -350,17 +364,431 @@ def recall(
 
     try:
         result = aetheryte.recall(
-            scope=scope, query=query, k=k_clamped, layers=layers, caller_tier=caller_tier
+            scope=scope, query=query, k=k_clamped, layers=layers, caller_tier=caller_tier,
+            explain=explain,
         )
     except Exception as exc:  # enforcement error or store error → exit 1
         raise click.ClickException(f"recall failed: {exc}") from exc
 
     if fmt == "json":
-        click.echo(json.dumps(result.model_dump(), default=str))
+        # exclude_none: `explain` is the only Optional field on RecallResult, so
+        # a non-explain call's JSON shape is byte-identical to pre-v1.6.
+        click.echo(json.dumps(result.model_dump(exclude_none=True), default=str))
     else:
         for r in result.records:
             d = r.model_dump() if hasattr(r, "model_dump") else r
             click.echo(f"[{d['layer']}/{d['trust_tier']}] {d['summary']}")
+
+
+# ---------------------------------------------------------------------------
+# commit — one-shot WRITE counterpart to recall (GAP-2 follow-up, v1.7;
+# out-of-MCP-session; unblocks the Eidolons nexus round-trip memory canary)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--summary",
+    "summary",
+    required=True,
+    help=(
+        "Human-readable summary — the sole FTS-indexed field. MUST pass the "
+        "v1.6 mechanical summary-quality gate (crystalium.quality.is_poor_summary): "
+        "(1) >= 24 chars after stripping, (2) >= 3 alphabetic words (maximal "
+        "A-Za-z runs), and (3) NOT shaped like a bare machine label "
+        "(regex ^[a-z_]+:[0-9a-f-]+$, e.g. 'plan_checkpoint:08234787'). "
+        "Unlike the MCP crystalium.commit tool — where a failing summary is "
+        "only advisory (summary_quality: 'poor') because an agent is present "
+        "in-session to read the advisory back and fix it — this one-shot CLI "
+        "writer has no session to read it back, so a failing summary is a "
+        "HARD rejection here (exit 1, nothing written)."
+    ),
+)
+@click.option(
+    "--content",
+    "content",
+    default=None,
+    help="Full content to persist (default: the --summary text, mirrors index()).",
+)
+@click.option(
+    "--scope-project",
+    "scope_project",
+    required=True,
+    help="Scope.project (min_length=1).",
+)
+@click.option(
+    "--scope-visibility",
+    "scope_visibility",
+    default=None,
+    help="Scope.agent_class_visibility (default: None → all).",
+)
+@click.option(
+    "--source",
+    "source",
+    type=click.Choice(["human", "verified_agent", "unverified_agent", "environment"]),
+    default="environment",
+    show_default=True,
+    help="Provenance.source. Default 'environment' — this is a mechanical, out-of-session writer.",
+)
+@click.option(
+    "--author-agent",
+    "author_agent",
+    default="crystalium-cli",
+    show_default=True,
+    help="Provenance.author_agent.",
+)
+@click.option(
+    "--task-id",
+    "task_id",
+    default=None,
+    help="Provenance.task_id (default: None).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "text"]),
+    default="json",
+    show_default=True,
+    help="Output format: json = full commit result; text = just the new crystal id.",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+    help="Path to crystalium.yaml (default: env vars).",
+)
+def commit(
+    summary: str,
+    content: Optional[str],
+    scope_project: str,
+    scope_visibility: Optional[str],
+    source: str,
+    author_agent: str,
+    task_id: Optional[str],
+    fmt: str,
+    config_path: Optional[Path],
+) -> None:
+    """One-shot WRITE to CRYSTALIUM Episodic memory (out-of-MCP-session; recall's write counterpart).
+
+    The mechanical write half of the GAP-2 out-of-session CLI pairing: `recall` reads,
+    `commit` writes. Unlike `recall`, this command DOES write — it is gated by the
+    v1.6 summary-quality check (hard-reject here; see --summary help for the exact
+    mechanical rules) and by enforcement (tier × layer × op). Exit 0 on success
+    (JSON commit result, or with --format text just the new crystal id); exit 1 on
+    any rejection (stderr message).
+    """
+    import os
+    from datetime import datetime, timezone
+
+    import structlog
+
+    # Route all structlog output to stderr so stdout carries exactly one JSON document
+    # (or, with --format text, just the crystal id). Mirrors recall()'s discipline above:
+    # sys.__stderr__ (the real stderr fd) is used rather than sys.stderr so that Click's
+    # CliRunner — which replaces sys.stderr with a capture buffer — does not mix log
+    # lines into the captured stdout. In production Docker, sys.__stderr__ is sys.stderr.
+    _stderr = getattr(sys, "__stderr__", sys.stderr) or sys.stderr
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_stderr))
+
+    # Lazy imports — heavy deps are NEVER pulled just to run `commit --help`
+    # (D-G2b discipline; mirrors recall()/index()). All collaborator imports live
+    # INSIDE the function body.
+    from crystalium.config import Config
+    from crystalium.layers.episodic import EpisodicLayer
+    from crystalium.aetheryte.redact import Redactor
+    from crystalium.enforcement import Enforcement
+    from crystalium.storage.blob import BlobStore
+    from crystalium.storage.relational import RelationalStore
+    from crystalium.quality import POOR_SUMMARY_ADVICE, is_poor_summary
+    from crystalium.schemas import Provenance
+    from crystalium.trust import Tier
+
+    # Hard gate (see --summary help): the MCP tool's soft/advisory behavior only
+    # makes sense when an agent is in-session to read the advisory back; this is
+    # a one-shot mechanical writer with no such reader, so reject up front instead
+    # of silently landing a crystal no BM25/FTS5 query could ever find.
+    if is_poor_summary(summary):
+        raise click.ClickException(
+            f"summary rejected by the v1.6 quality gate: {POOR_SUMMARY_ADVICE}"
+        )
+
+    config = (
+        Config.from_yaml(config_path)
+        if (config_path and config_path.exists())
+        else Config.from_env()
+    )
+
+    blob_store = BlobStore(root=config.blob_root)
+    relational = RelationalStore(db_path=config.sqlite_path)
+    enforcement = Enforcement(config)
+    redactor = Redactor(config=config)
+    importance_fn = _select_importance_fn(config)
+
+    episodic = EpisodicLayer(
+        blob_store=blob_store,
+        relational=relational,
+        vector_store=None,
+        graph_store=None,
+        enforcement=enforcement,
+        redactor=redactor,
+        importance_fn=importance_fn,
+    )
+
+    now_utc = datetime.now(timezone.utc)
+    provenance = Provenance(
+        source=source,
+        author_agent=author_agent,
+        task_id=task_id,
+        created_at=now_utc,
+    )
+
+    # caller_tier default: T0 (asymmetric vs recall's T1 default above). Per
+    # trust.py, T0 is actually the HIGHEST-trust tier in this codebase's ordering
+    # (T0=human operator .. T3=environment/tool-ingested) — so this default is
+    # NOT a literal "least-trusted" floor in the tier-enum sense. Practically it
+    # has little gating effect here: EpisodicLayer.commit's only target (episodic)
+    # has ceiling T3 (universally writable — every tier is admitted), so
+    # caller_tier only decides the trust_tier stamped on the resulting crystal and
+    # (T3 only) whether it lands quarantined. Override with CRYSTALIUM_CALLER_TIER
+    # (e.g. T3) for a caller that wants its unverified writes quarantined pending
+    # review instead of landing as 'unverified'.
+    caller_tier = Tier.from_str(os.environ.get("CRYSTALIUM_CALLER_TIER", "T0"))
+
+    payload = {
+        "summary": summary,
+        "content": content if content is not None else summary,
+        "scope": {"project": scope_project, "agent_class_visibility": scope_visibility},
+    }
+
+    try:
+        result = episodic.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
+    except Exception as exc:  # gate rejection, enforcement error, or store error → exit 1
+        raise click.ClickException(f"commit failed: {exc}") from exc
+
+    if fmt == "json":
+        click.echo(json.dumps(result, default=str))
+    else:
+        click.echo(result["id"])
+
+
+# ---------------------------------------------------------------------------
+# ingest — one-shot WRITE of an inbound ECL handoff envelope (v1.8; out-of-
+# MCP-session third verb of the GAP-2 pairing: recall reads, commit writes a
+# caller-typed summary, ingest writes a roster ECL envelope + artifact payload)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--envelope",
+    "envelope_json",
+    required=True,
+    help=(
+        "Inbound ECL handoff envelope as a JSON string (v1.x or v2.x; 11 required "
+        "top-level fields — envelope_version/message_id/thread_id/parent_id/from/"
+        "to/performative/objective/artifact/integrity/trace — plus artifact/"
+        "integrity/from-to sub-fields). Parsed with json.loads; a parse failure or "
+        "structural validation error exits 1 with a stderr message, never a Python "
+        "traceback. Validation is required-fields-only: extra top-level fields "
+        "(e.g. a composer's topic_key/contains_tool_origin) are tolerated, not "
+        "rejected."
+    ),
+)
+@click.option(
+    "--payload",
+    "payload",
+    required=True,
+    help=(
+        "Artifact payload text. G7 integrity binding: the raw UTF-8 bytes of THIS "
+        "argument (before any --payload-encoding decoding) must hash to the "
+        "envelope's declared artifact.sha256 when one is declared, or ingest exits "
+        "1 (INGEST_PAYLOAD_HASH_MISMATCH) with no crystal written."
+    ),
+)
+@click.option(
+    "--payload-encoding",
+    "payload_encoding",
+    type=click.Choice(["utf8", "base64", "json"]),
+    default="utf8",
+    show_default=True,
+    help=(
+        "How --payload is decoded into the crystal's encoding_context."
+        "native_artifact (verbatim preservation). Matches the MCP crystalium."
+        "ingest tool's payload_encoding argument name."
+    ),
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "text"]),
+    default="json",
+    show_default=True,
+    help="Output format: json = full ingest result; text = just the new crystal id.",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+    help="Path to crystalium.yaml (default: env vars).",
+)
+def ingest(
+    envelope_json: str,
+    payload: str,
+    payload_encoding: str,
+    fmt: str,
+    config_path: Optional[Path],
+) -> None:
+    """One-shot WRITE of an inbound ECL handoff envelope (out-of-MCP-session).
+
+    Reuses `crystalium.server._handle_ingest` verbatim over a light one-shot
+    component stack (the `commit` verb's precedent: None vector/graph stores;
+    all four layers real-instantiated for exact-signature parity, though only
+    Episodic is reachable while `_KIND_TO_LAYER` stays empty). Everything
+    `_handle_ingest` does is INHERITED, not reimplemented here:
+
+    \b
+    - Envelope validation (11 required fields; extra fields tolerated) and the
+      G7 raw-payload-bytes-hash-to-artifact.sha256 check.
+    - Tier is ENVELOPE-DERIVED MIN-trust (`resolve_caller_tier`): the source
+      identity (from.eidolon) sets the ceiling; a trace.tier token may only
+      self-downgrade, never self-elevate. Unlike `commit` (CRYSTALIUM_CALLER_TIER,
+      default T0) and `recall` (default T1), this verb NEVER reads
+      CRYSTALIUM_CALLER_TIER — an env override here would be a laundering vector
+      around the envelope's own attested source.
+    - Tool-origin / unknown-identity artifacts land Episodic-quarantined (T3 is
+      the only tier Episodic accepts unconditionally); quarantine does not
+      exclude a crystal from default one-shot recall (unchanged store behavior).
+    - Scope canonicalization (v1.6 `normalize_write_scope`): scope.project is
+      rewritten to the canonical (data-dir-derived) project key; the caller's
+      original project/thread_id is preserved verbatim in scope.project_raw.
+      NOTE the FINDING-107 asymmetry: the `commit` CLI verb stores
+      --scope-project VERBATIM (no normalization) — `ingest` DOES normalize,
+      matching the MCP crystalium.ingest tool's behavior exactly.
+    - NO summary-quality gate — unlike `commit`'s hard CLI rejection. Ingest's
+      summary is server-composed (f"{artifact.kind}: {objective}"), not
+      caller-typed prose, so the failure mode the commit gate defends against
+      (a human-typed summary no FTS query could find) does not apply; gating it
+      would also make this CLI wrapper reject envelopes the MCP ingest tool
+      accepts, breaking the parity this verb exists to preserve.
+
+    Exit 0 = success, stdout is exactly one JSON document (or, with --format
+    text, just the new crystal id). Any rejection -> click.ClickException,
+    exit 1, nothing written and no stdout JSON.
+    """
+    import structlog
+
+    # Route all structlog output to stderr so stdout carries exactly one JSON
+    # document (or, with --format text, just the crystal id). Mirrors commit()'s
+    # discipline above: sys.__stderr__ (the real stderr fd) is used rather than
+    # sys.stderr so that Click's CliRunner — which replaces sys.stderr with a
+    # capture buffer — does not mix log lines into the captured stdout.
+    _stderr = getattr(sys, "__stderr__", sys.stderr) or sys.stderr
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_stderr))
+
+    # Lazy imports — heavy deps are NEVER pulled just to run `ingest --help`
+    # (D-G2b discipline; mirrors commit()/recall()/index()). All collaborator
+    # imports, INCLUDING `crystalium.server` (for `_handle_ingest`), live INSIDE
+    # the function body so `--help` never triggers them.
+    from crystalium.config import Config
+    from crystalium.enforcement import Enforcement
+    from crystalium.gate import PromotionGate
+    from crystalium.layers.episodic import EpisodicLayer
+    from crystalium.layers.execution import ExecutionLayer
+    from crystalium.layers.procedural import ProceduralLayer
+    from crystalium.layers.semantic import SemanticLayer
+    from crystalium.aetheryte.redact import Redactor
+    from crystalium.storage.blob import BlobStore
+    from crystalium.storage.relational import RelationalStore
+
+    try:
+        envelope = json.loads(envelope_json)
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(f"--envelope is not valid JSON: {exc}") from exc
+    if not isinstance(envelope, dict):
+        raise click.ClickException("--envelope must decode to a JSON object.")
+
+    config = (
+        Config.from_yaml(config_path)
+        if (config_path and config_path.exists())
+        else Config.from_env()
+    )
+
+    blob_store = BlobStore(root=config.blob_root)
+    relational = RelationalStore(db_path=config.sqlite_path)
+    enforcement = Enforcement(config)
+    redactor = Redactor(config=config)
+    importance_fn = _select_importance_fn(config)
+
+    # Light one-shot stack (commit-verb precedent): None vector/graph stores.
+    # Real instances of all four layers preserve _handle_ingest's exact
+    # signature/parity even though only Episodic is reachable while
+    # ingest_adapter._KIND_TO_LAYER stays empty at 1.8.0.
+    episodic = EpisodicLayer(
+        blob_store=blob_store,
+        relational=relational,
+        vector_store=None,
+        graph_store=None,
+        enforcement=enforcement,
+        redactor=redactor,
+        importance_fn=importance_fn,
+    )
+    gate = PromotionGate(config, relational, enforcement)
+    semantic = SemanticLayer(
+        blob_store=blob_store,
+        relational=relational,
+        vector_store=None,
+        graph_store=None,
+        enforcement=enforcement,
+        gate=gate,
+        redactor=redactor,
+        importance_fn=importance_fn,
+    )
+    procedural = ProceduralLayer(
+        blob_store=blob_store,
+        relational=relational,
+        enforcement=enforcement,
+        gate=gate,
+        redactor=redactor,
+        importance_fn=importance_fn,
+        data_dir=config.data_dir,
+    )
+    # ExecutionLayer.aetheryte is default-safe (None-guarded; execution.py) — no
+    # recall-prefetch warming happens in this one-shot, session-less writer.
+    execution = ExecutionLayer(
+        blob_store=blob_store,
+        relational=relational,
+        enforcement=enforcement,
+        importance_fn=importance_fn,
+        aetheryte=None,
+        recall_cache=None,
+        recall_prefetch=False,
+    )
+
+    from crystalium.server import _handle_ingest
+
+    try:
+        result = _handle_ingest(
+            {
+                "envelope": envelope,
+                "payload": payload,
+                "payload_encoding": payload_encoding,
+            },
+            episodic,
+            semantic,
+            procedural,
+            execution,
+            config,
+            recall_cache=None,
+        )
+    except Exception as exc:  # envelope validation / G7 hash / enforcement / store error → exit 1
+        raise click.ClickException(f"ingest failed: {exc}") from exc
+
+    if fmt == "json":
+        click.echo(json.dumps(result, default=str))
+    else:
+        click.echo(result["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -831,6 +1259,58 @@ def doctor(config_path: Optional[Path]) -> None:
     _optional("apscheduler", lambda: __import__("apscheduler"))
     _optional("lancedb", lambda: __import__("lancedb"))
     _optional("kuzu", lambda: __import__("kuzu"))
+
+    # v1.6 memory diagnostics — informational only; never affects the P0 exit
+    # code. See MOTIVATING INCIDENT (CHANGELOG v1.6.0): a 9-crystal store
+    # answering every recall with 0 records was undiagnosable pre-v1.6.
+    click.echo("\nMemory diagnostics (v1.6):")
+
+    def _memory_diagnostics() -> None:
+        from crystalium.config import Config
+        from crystalium.storage.relational import RelationalStore
+
+        cfg = (
+            Config.from_yaml(Path(config_path))
+            if (config_path and Path(config_path).exists())
+            else Config.from_env()
+        )
+        relational = RelationalStore(db_path=cfg.sqlite_path)
+        stats = relational.diagnostics_summary()
+        click.echo(
+            f"  crystals: total={stats['total_crystals']} "
+            f"active={stats['active']} embedded={stats['embedded']}"
+        )
+        click.echo(f"  by status: {stats['by_status']}")
+        click.echo(f"  by project key: {stats['by_project']}")
+        if len(stats["by_project"]) > 1:
+            click.echo(
+                "  [WARN] multiple distinct project keys present in one store — "
+                "scoped recall silently partitions across them (v1.6 normalizes "
+                "NEW writes to one canonical key; existing rows are not migrated)."
+            )
+
+        # Dense arm (embedding/vector store)
+        try:
+            from crystalium.storage.vector import VectorStore
+
+            VectorStore(lance_dir=cfg.lance_path)
+            click.echo("  dense arm: active")
+        except Exception as exc:  # noqa: BLE001 — reporting, not raising
+            click.echo(f"  dense arm: inactive (reason: {exc})")
+
+        # Graph arm (kuzu store)
+        try:
+            from crystalium.storage.graph import GraphStore
+
+            GraphStore(kuzu_dir=cfg.kuzu_path)
+            click.echo("  graph arm: active")
+        except Exception as exc:  # noqa: BLE001 — reporting, not raising
+            click.echo(f"  graph arm: inactive (reason: {exc})")
+
+    try:
+        _memory_diagnostics()
+    except Exception as exc:  # noqa: BLE001 — doctor must never crash on diagnostics
+        click.echo(f"  [WARN] memory diagnostics unavailable: {exc}")
 
     click.echo()
     if p0_ok:

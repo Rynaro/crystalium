@@ -77,14 +77,20 @@ def _exec_layer(tmp_path: Path, *, prefetch: bool, cache: RecallCache | None, ae
         importance_fn=importance_score, aetheryte=aetheryte,
         recall_cache=cache, recall_prefetch=prefetch,
     )
-    return layer, store
+    return layer, store, cfg
 
 
 def test_checkpoint_warms_cache_and_records_prediction_error(tmp_path: Path) -> None:
+    from crystalium.scope import canonical_project_key
+
     cache = RecallCache()
     aeth = MagicMock()
-    aeth.recall.side_effect = lambda *a, **k: cache.put("proj", "next step", "WARM")
-    layer, store = _exec_layer(tmp_path, prefetch=True, cache=cache, aetheryte=aeth)
+    layer, store, cfg = _exec_layer(tmp_path, prefetch=True, cache=cache, aetheryte=aeth)
+    # v1.6: checkpoint() normalizes state.scope.project to the canonical
+    # (data-dir-derived) key BEFORE _prefetch reads it — the warm-up write must
+    # use that same canonical key, not the caller-supplied "proj".
+    canonical = canonical_project_key(cfg.data_dir)
+    aeth.recall.side_effect = lambda *a, **k: cache.put(canonical, "next step", "WARM")
 
     res = layer.checkpoint(
         state={"scope": {"project": "proj"}, "predicted_next_query": "next step",
@@ -93,19 +99,23 @@ def test_checkpoint_warms_cache_and_records_prediction_error(tmp_path: Path) -> 
     )
     # cold prediction -> warmed via aetheryte, prediction_error = 1.0 on the crystal
     aeth.recall.assert_called_once()
-    assert cache.peek("proj", "next step") is True
+    assert cache.peek(canonical, "next step") is True
     dyn = store.get_crystal(res["id"]).get("memory_dynamics") or {}
     assert dyn.get("prediction_error") == 1.0
+    assert res["scope_normalized"] is True
 
 
 def test_checkpoint_warm_prediction_has_zero_error(tmp_path: Path) -> None:
+    from crystalium.scope import canonical_project_key
+
     cache = RecallCache()
+    aeth = MagicMock()
+    layer, store, cfg = _exec_layer(tmp_path, prefetch=True, cache=cache, aetheryte=aeth)
+    canonical = canonical_project_key(cfg.data_dir)
     # Pre-warm with the SAME key the checkpoint's warmth check uses (k=10, layers=None,
     # scope visibility/sensitivity None, tier=T1) — see ExecutionLayer.checkpoint.
-    cache.put("proj", "next step", "ALREADY",
+    cache.put(canonical, "next step", "ALREADY",
               k=10, layers=None, visibility=None, sensitivity=None, tier="T1")
-    aeth = MagicMock()
-    layer, store = _exec_layer(tmp_path, prefetch=True, cache=cache, aetheryte=aeth)
 
     res = layer.checkpoint(
         state={"scope": {"project": "proj"}, "predicted_next_query": "next step"},
@@ -119,7 +129,7 @@ def test_checkpoint_warm_prediction_has_zero_error(tmp_path: Path) -> None:
 def test_checkpoint_off_does_not_touch_cache(tmp_path: Path) -> None:
     cache = RecallCache()
     aeth = MagicMock()
-    layer, store = _exec_layer(tmp_path, prefetch=False, cache=cache, aetheryte=aeth)
+    layer, store, cfg = _exec_layer(tmp_path, prefetch=False, cache=cache, aetheryte=aeth)
     res = layer.checkpoint(
         state={"scope": {"project": "proj"}, "predicted_next_query": "next step"},
         caller_tier=Tier.T1,

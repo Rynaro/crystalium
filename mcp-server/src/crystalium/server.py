@@ -52,7 +52,9 @@ from crystalium.layers.episodic import EpisodicLayer
 from crystalium.layers.execution import ExecutionLayer
 from crystalium.layers.procedural import ProceduralLayer
 from crystalium.layers.semantic import SemanticLayer
+from crystalium.quality import POOR_SUMMARY_ADVICE, is_poor_summary
 from crystalium.schemas import Provenance, Scope
+from crystalium.scope import canonical_project_key, default_recall_project, normalize_write_scope
 from crystalium.storage.blob import BlobStore
 from crystalium.storage.graph import GraphStore
 from crystalium.storage.relational import RelationalStore
@@ -168,7 +170,7 @@ def _caller_tier(caller: dict[str, Any]) -> Tier:
 
 
 def build_tool_manifest() -> list[dict[str, Any]]:
-    """Return the seven tool descriptors served via tools/list.
+    """Return the nine tool descriptors served via tools/list.
 
     Descriptions include enforcement bounds per spec.yaml §tool_surface.
     """
@@ -179,7 +181,10 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                 "Hybrid BM25 + dense + graph recall from CRYSTALIUM memory. "
                 "Returns slot-budgeted, redacted CrystalSummary records. "
                 "Universally allowed (all tiers). "
-                "Rate-limited (200 calls/min)."
+                "Rate-limited (200 calls/min). "
+                "explain=true (v1.6) adds a diagnostic `explain` object to the "
+                "result so a zero-record recall against a non-empty store is "
+                "diagnosable without a separate `doctor` call."
             ),
             "inputSchema": {
                 "type": "object",
@@ -187,7 +192,11 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                 "properties": {
                     "scope": {
                         "type": "object",
-                        "description": "Scope filter: {project, agent_class_visibility, sensitivity_tag}",
+                        "description": (
+                            "Scope filter: {project, agent_class_visibility, "
+                            "sensitivity_tag}. project defaults to the canonical "
+                            "(data-dir-derived) project key when omitted."
+                        ),
                     },
                     "query": {"type": "string", "description": "Free-text recall query"},
                     "k": {
@@ -200,6 +209,15 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                         "items": {"type": "string", "enum": ["episodic", "semantic", "procedural", "execution"]},
                         "description": "Subset of layers to search (default: all four)",
                     },
+                    "explain": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "v1.6: attach a diagnostic `explain` object (candidate/filter "
+                            "counts, arm status, store totals, distinct project keys "
+                            "present) to the result. Bypasses the recall cache."
+                        ),
+                    },
                 },
             },
         },
@@ -210,7 +228,10 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                 "T3 callers: Episodic-quarantine only (G1). "
                 "T2: Episodic or Procedural-candidate only (G1, G2). "
                 "T1/T0: Semantic, Procedural, Execution allowed (with gate checks G4, G5). "
-                "Bi-temporal: write-new, never hard-delete (P0-5)."
+                "Bi-temporal: write-new, never hard-delete (P0-5). "
+                "v1.6: scope.project is normalized to the canonical (data-dir-derived) "
+                "project key (advisory: scope_normalized=true); summary is checked "
+                "against a mechanical quality gate (advisory: summary_quality='poor')."
             ),
             "inputSchema": {
                 "type": "object",
@@ -307,7 +328,11 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             "description": (
                 "Write a TTL-bound plan checkpoint to the Execution layer. "
                 "T0/T1 only (G1: T2/T3 blocked). "
-                "Expires after execution TTL (default 24h)."
+                "Expires after execution TTL (default 24h). "
+                "v1.6: scope.project normalized to the canonical project key; a "
+                "missing/poor summary is auto-enriched (plan + scope + phase) "
+                "instead of the bare 'plan_checkpoint:<id>' label; the last "
+                "active checkpoint for a plan is never auto-deprecated by Dream."
             ),
             "inputSchema": {
                 "type": "object",
@@ -576,6 +601,12 @@ def _build_components(
 class _NullVectorStore:
     """No-op VectorStore — used when LanceDB / sentence-transformers unavailable."""
 
+    # v1.6 `recall --explain` (item 3/4): marks this as a stub so the dense arm
+    # reports "inactive(null_vector_store)" instead of silently returning
+    # nothing with no visible reason — the MOTIVATING INCIDENT's root cause #4
+    # (embedding_ref null on every crystal because deps were absent).
+    _is_null = True
+
     def embed(self, text: str) -> list[float]:
         return []
 
@@ -585,6 +616,9 @@ class _NullVectorStore:
 
 class _NullGraphStore:
     """No-op GraphStore — used when KuzuDB unavailable."""
+
+    # v1.6 `recall --explain` / `doctor` (item 3/4): see _NullVectorStore._is_null.
+    _is_null = True
 
     def neighbor_expand(self, seed_ids: list[str], depth: int = 1) -> list[str]:
         return []
@@ -638,14 +672,18 @@ def _emit_ecl_sidecar(
 
 
 def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
-    """Build the MCP Server with all 7 tools wired, plus its DreamScheduler.
+    """Build the MCP Server with all 9 tools wired, plus its DreamScheduler.
 
     Transport-agnostic: shared verbatim by both run_stdio and run_http (D2,
     v0.2). The caller is responsible for starting the scheduler and running the
     chosen transport. Components (_build_components) and the @server.call_tool
     dispatch are reused as-is across transports.
     """
-    server = Server("crystalium")
+    # v1.6: pass version=__version__ explicitly. Without it, mcp.server.lowlevel
+    # .Server.create_initialization_options() falls back to the installed `mcp`
+    # SDK package's own version for serverInfo — silently reporting the wrong
+    # component's version to MCP clients, not even the stale crystalium literal.
+    server = Server("crystalium", version=__version__)
 
     (
         enforcement,
@@ -690,7 +728,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
             with tool_span(name, tier=tier_str):
                 performative = "INFORM"
                 if name == "crystalium.recall":
-                    result = _handle_recall(arguments, aetheryte, scheduler, caller_tier)
+                    result = _handle_recall(arguments, aetheryte, scheduler, caller_tier, config)
                     scheduler.record_activity()
                     result_bytes = json.dumps(
                         result if isinstance(result, dict) else result.model_dump(),
@@ -701,7 +739,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                 elif name == "crystalium.commit":
                     layer_hint = arguments.get("layer")
                     result = _handle_commit(
-                        arguments, episodic, semantic, procedural, execution, caller_tier,
+                        arguments, episodic, semantic, procedural, execution, caller_tier, config,
                         recall_cache=execution.recall_cache,
                     )
                     scheduler.record_activity()
@@ -710,7 +748,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
 
                 elif name == "crystalium.ingest":
                     result = _handle_ingest(
-                        arguments, episodic, semantic, procedural, execution,
+                        arguments, episodic, semantic, procedural, execution, config,
                         recall_cache=execution.recall_cache,
                     )
                     layer_hint = result.get("layer")
@@ -911,11 +949,18 @@ def _handle_recall(
     aetheryte: Aetheryte,
     scheduler: DreamScheduler,
     caller_tier: Tier,
+    config: Config,
 ) -> Any:
     """Handle crystalium.recall."""
     raw_scope = args.get("scope", {})
+    # v1.6: an omitted scope.project defaults to the canonical (data-dir-derived)
+    # project key, not the literal string "default". An EXPLICIT scope.project is
+    # never rewritten here — recall is a read filter, not a write of record, and
+    # legacy/fragmented project keys must stay queryable (recall --explain
+    # diagnoses that fragmentation instead of papering over it).
+    canonical_project = canonical_project_key(config.data_dir)
     scope = Scope(
-        project=raw_scope.get("project", "default"),
+        project=default_recall_project(raw_scope, canonical_project),
         agent_class_visibility=raw_scope.get("agent_class_visibility"),
         sensitivity_tag=raw_scope.get("sensitivity_tag"),
     )
@@ -927,6 +972,7 @@ def _handle_recall(
     except (TypeError, ValueError):
         k = 10
     layers = args.get("layers")
+    explain = bool(args.get("explain", False))
 
     result = aetheryte.recall(
         scope=scope,
@@ -934,8 +980,11 @@ def _handle_recall(
         k=k,
         layers=layers,
         caller_tier=caller_tier,
+        explain=explain,
     )
-    return result.model_dump() if hasattr(result, "model_dump") else result
+    # exclude_none: `explain` is the only Optional field on RecallResult, so a
+    # non-explain call's JSON shape is byte-identical to pre-v1.6.
+    return result.model_dump(exclude_none=True) if hasattr(result, "model_dump") else result
 
 
 # ---------------------------------------------------------------------------
@@ -972,6 +1021,7 @@ def _handle_commit(
     procedural: ProceduralLayer,
     execution: ExecutionLayer,
     caller_tier: Tier,
+    config: Config,
     recall_cache: Any = None,
 ) -> dict[str, Any]:
     """Dispatch crystalium.commit to the correct layer adapter."""
@@ -980,6 +1030,23 @@ def _handle_commit(
     payload = args.get("payload", {})
     raw_prov = args.get("provenance", {})
     now_utc = _dt.datetime.now(_dt.timezone.utc)
+
+    # v1.6 item 1: canonical project-key normalization (write path). Mutates a
+    # COPY of payload/scope — the caller's dict is never mutated in place.
+    canonical_project = canonical_project_key(config.data_dir)
+    raw_scope = payload.get("scope") if isinstance(payload, dict) else None
+    normalized_scope, scope_normalized = normalize_write_scope(raw_scope, canonical_project)
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        payload["scope"] = normalized_scope
+
+    # v1.6 item 2: mechanical summary-quality gate (soft — advisory only, never
+    # blocks the write). Assessed on the caller-supplied summary at the
+    # crystalium.commit boundary; per-layer fallback summaries (e.g. a
+    # truncated payload repr) are inherently poor and correctly flagged too
+    # once persisted, but this check runs on the pre-fallback value so the
+    # advisory reflects what the caller actually supplied.
+    summary_poor = is_poor_summary(payload.get("summary") if isinstance(payload, dict) else None)
 
     # S2 (GAP-1): tolerant created_at parse — mirrors the ingest path (server.py:1055-1061).
     # Handles: Z-suffixed ISO, epoch int/float, non-ISO garbage. Never crashes.
@@ -1030,7 +1097,16 @@ def _handle_commit(
     elif layer == "procedural":
         result = procedural.commit(payload=payload, provenance=provenance, caller_tier=caller_tier)
     elif layer == "execution":
-        return execution.checkpoint(state=payload, caller_tier=caller_tier)
+        # execution.checkpoint() does its own scope/summary normalization (it is
+        # also reachable directly via the crystalium.plan_checkpoint tool, which
+        # bypasses this handler entirely) — by the time it runs here payload.scope
+        # is already canonical, so that pass is a no-op; scope_normalized below
+        # reflects the (real) normalization already performed above.
+        result = execution.checkpoint(state=payload, caller_tier=caller_tier)
+        if scope_normalized:
+            result = dict(result)
+            result["scope_normalized"] = True
+        return result
     else:
         from crystalium.enforcement import CrystaliumEnforcementError
         raise CrystaliumEnforcementError(
@@ -1049,6 +1125,16 @@ def _handle_commit(
     if coercions:
         result = dict(result)  # shallow copy — do not mutate the layer's return value
         result["provenance_coercion"] = coercions[0] if len(coercions) == 1 else coercions
+
+    # v1.6 items 1 + 2: additive advisories, byte-identical result on the clean path.
+    if scope_normalized:
+        result = dict(result)
+        result["scope_normalized"] = True
+    if summary_poor:
+        result = dict(result)
+        result["summary_quality"] = "poor"
+        result["advisory"] = POOR_SUMMARY_ADVICE
+
     return result
 
 
@@ -1058,6 +1144,7 @@ def _handle_ingest(
     semantic: SemanticLayer,
     procedural: ProceduralLayer,
     execution: ExecutionLayer,
+    config: Config,
     recall_cache: Any = None,
 ) -> dict[str, Any]:
     """Ingest a roster ECL handoff envelope as a crystal (W7).
@@ -1116,6 +1203,15 @@ def _handle_ingest(
         envelope, payload, caller_tier, payload_encoding
     )
 
+    # v1.6 item 1: canonical project-key normalization (write path). The generic
+    # adapter derives scope.project from thread_id/eidolon (ingest_adapter.py) —
+    # exactly the kind of free-typed key the MOTIVATING INCIDENT fragmented on.
+    canonical_project = canonical_project_key(config.data_dir)
+    normalized_scope, scope_normalized = normalize_write_scope(
+        crystal_payload.get("scope"), canonical_project
+    )
+    crystal_payload["scope"] = normalized_scope
+
     prov = crystal_payload.get("provenance", {}) or {}
     created_raw = prov.get("created_at")
     if isinstance(created_raw, str):
@@ -1147,7 +1243,7 @@ def _handle_ingest(
     else:  # episodic (default; only layer accepting T3 -> quarantined)
         commit_result = episodic.commit(payload=crystal_payload, provenance=provenance, caller_tier=caller_tier)
 
-    return {
+    result = {
         "status": "ingested",
         "id": commit_result.get("id"),
         "layer": layer,
@@ -1158,6 +1254,10 @@ def _handle_ingest(
         "envelope_version": str(envelope.get("envelope_version", "")),
         "commit_status": commit_result.get("status"),
     }
+    # v1.6 item 1: additive advisory, byte-identical result on the clean path.
+    if scope_normalized:
+        result["scope_normalized"] = True
+    return result
 
 
 # Identity- and trust-bearing fields that an update patch must never overwrite

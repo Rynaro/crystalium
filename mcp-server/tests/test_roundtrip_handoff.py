@@ -56,8 +56,11 @@ def _components(tmp_path: Path):
 
 
 def test_pipeline_round_trips_with_provenance_and_min_tier(tmp_path: Path) -> None:
+    from crystalium.scope import canonical_project_key
+
     comps = _components(tmp_path)
-    (_e, aetheryte, ep, se, pr, ex, _g, _s, relational) = comps
+    (enforcement, aetheryte, ep, se, pr, ex, _g, _s, relational) = comps
+    canonical = canonical_project_key(enforcement.config.data_dir)
 
     for name in _PIPELINE:
         env = _load(name)
@@ -68,7 +71,7 @@ def test_pipeline_round_trips_with_provenance_and_min_tier(tmp_path: Path) -> No
                     "from": eidolon}
         receipt = _handle_ingest(
             {"envelope": env, "payload": artifact, "payload_encoding": "json"},
-            ep, se, pr, ex,
+            ep, se, pr, ex, enforcement.config,
         )
 
         # 1. ingest landed (episodic; roster default tier T1 -> not quarantined)
@@ -84,25 +87,28 @@ def test_pipeline_round_trips_with_provenance_and_min_tier(tmp_path: Path) -> No
         assert crystal["encoding_context"]["native_artifact"] == artifact
         assert crystal["encoding_context"]["artifact_kind"] == env["artifact"]["kind"]
 
-        # 3. downstream recall (a consuming Eidolon) finds it with provenance + tier intact
-        project = env["thread_id"]
-        out = aetheryte.recall(Scope(project=project), _keywords(env["objective"]), 10, None, Tier.T1)
+        # 3. downstream recall (a consuming Eidolon) finds it with provenance + tier
+        # intact. v1.6: scope.project is normalized to the canonical (data-dir-
+        # derived) key — thread_id is preserved verbatim in scope.project_raw.
+        out = aetheryte.recall(Scope(project=canonical), _keywords(env["objective"]), 10, None, Tier.T1)
         rec = next((r for r in out.records if r.id == receipt["id"]), None)
         assert rec is not None, f"{name}: not recallable downstream"
         assert rec.trust_tier == "T1"                          # MIN-tier intact (no laundering)
         assert crystal["provenance"]["author_agent"] == eidolon
         assert crystal["provenance"]["task_id"] == env["thread_id"]
+        assert crystal["scope"]["project"] == canonical
+        assert crystal["scope"]["project_raw"] == env["thread_id"]
 
 
 def test_no_tier_laundering_across_pipeline(tmp_path: Path) -> None:
     # Every ingested roster artifact stays at T1 — none is laundered up to T0.
     comps = _components(tmp_path)
-    (_e, _a, ep, se, pr, ex, _g, _s, relational) = comps
+    (enforcement, _a, ep, se, pr, ex, _g, _s, relational) = comps
     ids = []
     for name in _PIPELINE:
         env = _load(name)
         r = _handle_ingest({"envelope": env, "payload": {"k": name},
-                            "payload_encoding": "json"}, ep, se, pr, ex)
+                            "payload_encoding": "json"}, ep, se, pr, ex, enforcement.config)
         ids.append(r["id"])
     for cid in ids:
         c = relational.get_crystal(cid)
