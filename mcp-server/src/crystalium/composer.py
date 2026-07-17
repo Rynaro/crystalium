@@ -74,7 +74,10 @@ def _build_tokenizer() -> Callable[[str], int]:
         enc = tiktoken.get_encoding("cl100k_base")
 
         def _tiktoken(text: str) -> int:
-            return len(enc.encode(text))
+            # disallowed_special=() → count any special-token STRING embedded in stored
+            # content (e.g. '<|endoftext|>') as ordinary text instead of raising and
+            # taking down the whole recall. tiktoken defaults disallowed_special="all".
+            return len(enc.encode(text, disallowed_special=()))
 
         log.debug("tokenizer_backend", backend="tiktoken_cl100k_base")
         return _tiktoken

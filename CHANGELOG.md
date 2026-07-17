@@ -6,6 +6,20 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`crystalium.recall` no longer crashes when a stored crystal's `summary`
+  embeds a cl100k_base special-token string (e.g. `<|endoftext|>`).** The
+  composer's `tiktoken` tokenizer called `enc.encode(text)`, which defaults to
+  `disallowed_special="all"` and raises `ValueError` on any such text —
+  taking down the entire recall with no partial result. `composer.py`'s
+  `_tiktoken` now calls `enc.encode(text, disallowed_special=())`, counting an
+  embedded special-token string as ordinary text instead of raising.
+  Defense-in-depth: `retrieve.py` also wraps the `composer.compose()` call so
+  any *future* tokenizer/composer fault degrades a recall to an empty,
+  diagnostic working set with a logged warning rather than crashing the whole
+  call. (#32)
+
 ## [1.5.1] — 2026-06-29
 
 ### Fixed
