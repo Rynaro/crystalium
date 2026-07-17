@@ -491,8 +491,27 @@ class Aetheryte:
                 if cid in all_candidates
             ]
 
-            # 7. Composer: slot-budgeted assembly
-            composed = self.composer.compose(composer_records)
+            # 7. Composer: slot-budgeted assembly. Defense-in-depth (issue #32): a
+            # future tokenizer/composer fault (e.g. an unencodable summary) must
+            # degrade recall to an empty, diagnostic working set with a logged
+            # warning rather than crash the whole call — mirrors the
+            # graph_expand_skipped / completion_walk_skipped pattern above.
+            try:
+                composed = self.composer.compose(composer_records)
+            except Exception as exc:
+                log.warning(
+                    "composer_compose_skipped",
+                    error=str(exc),
+                    record_count=len(composer_records),
+                )
+                from crystalium.composer import ComposedSet
+
+                composed = ComposedSet(
+                    records=[],
+                    slot_tokens={},
+                    total_tokens=0,
+                    evicted_count=len(composer_records),
+                )
 
             # 7b. W2 access event: bump access_count/last_access for every surfaced
             # crystal (a layer fact recorded in BOTH A/B arms). Under evb_enabled,

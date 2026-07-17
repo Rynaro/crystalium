@@ -341,3 +341,17 @@ class TestTokenizer:
         cfg = _make_config()
         composer = Composer(config=cfg)
         assert composer.tokenize("") == 0
+
+    def test_compose_tolerates_tiktoken_special_token_in_summary(self) -> None:
+        """A stored crystal whose summary embeds a cl100k_base special-token string
+        (e.g. '<|endoftext|>') must NOT crash the composer/recall (issue #32)."""
+        cfg = _make_config()
+        composer = Composer(config=cfg)  # DEFAULT tokenizer → exercises the tiktoken path
+        rec = _Rec(
+            "c-special", "semantic",
+            "note: GPT docs are joined with <|endoftext|> as a delimiter",
+            importance=0.9, last_access=_ts(0),
+        )
+        out = composer.compose([rec])  # must not raise
+        assert out.total_tokens > 0
+        assert any(r.id == "c-special" for r in out.records)
