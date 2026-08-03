@@ -856,6 +856,88 @@ class TestDX:
 
 
 # ---------------------------------------------------------------------------
+# AC-031 — seam 3b: fetch width decoupled from response cap k (DP-R1 / C-12)
+#
+# Models vigil's F-V1 mechanism (verification.md): `seed_ids = dense_ranking[:k]`
+# (pre seam-3b) makes graph/completion arm MEMBERSHIP a function of the
+# caller's response cap `k`, not just how many records come back. At a small
+# k the walk's seed window narrows, concentrating attention and letting a
+# cluster of topically-unrelated "neighbours" accumulate a third arm
+# (graph + completion) that outranks a fresh, exactly-matching crystal's own
+# two-arm (sparse+dense) presence — so the fresh crystal is not merely
+# ranked worse, it is TRUNCATED OUT by seam 3's k-gate entirely.
+#
+# Modelled here via a seed-window-length-conditioned mock on
+# neighbor_expand/decaying_walk: len(seed_ids) <= 3 (the pre-fix k=3 window,
+# since dense_ranking[:3] has exactly 3 entries) injects a 4-strong noise
+# cluster; a wider window (post seam-3b, fetch_width = max(k,
+# FETCH_WIDTH_FLOOR) = 10 >= len(dense_ranking) = 5) does not. `fresh` is
+# ALSO given a real dense hit (rank 1) so the post-fix comparison is a clean
+# two-arm-vs-one-arm win, not a rank-1/rank-1 RRF tie (the exact trap
+# critique F1 warned about for AC-001/AC-004).
+# ---------------------------------------------------------------------------
+
+
+class TestSmallKFetchWidth:
+    def test_fresh_crystal_returned_at_k3(
+        self, tmp_path: Path, tmp_relational_store: RelationalStore
+    ) -> None:
+        query = "glimmerfen paltrix bewock"  # 3 distinctive low-frequency tokens
+
+        fresh = _crystal_dict(id="fresh", summary=f"{query} runbook notes here")
+        tmp_relational_store.insert_crystal(fresh)
+        for i in range(1, 5):
+            tmp_relational_store.insert_crystal(
+                _crystal_dict(id=f"n{i}", summary=f"unrelated topic filler content number {i}")
+            )
+
+        cfg = _make_config(tmp_path, recall_relevance_primary=True)
+        enforcement = Enforcement(cfg)
+        redactor = Redactor(cfg)
+        composer = Composer(config=cfg, tokenizer=_word_tokenizer, recall_relevance_primary=True)
+
+        vector_store = MagicMock()
+        vector_store.embed.return_value = [0.1, 0.2, 0.3]
+        # fresh is ALSO dense rank-1 (two-arm baseline: sparse + dense).
+        vector_store.dense_search.return_value = [
+            {"id": "fresh"}, {"id": "n1"}, {"id": "n2"}, {"id": "n3"}, {"id": "n4"},
+        ]
+
+        def _neighbor_expand(seed_ids: list[str], depth: int) -> list[str]:
+            if len(seed_ids) <= 3:
+                return ["n1", "n2", "n3", "n4"]
+            return []
+
+        def _decaying_walk(seed_ids: list[str], max_hops: int, decay: float) -> dict[str, float]:
+            if len(seed_ids) <= 3:
+                return {"n1": 0.9, "n2": 0.8, "n3": 0.7, "n4": 0.6}
+            return {}
+
+        graph_store = MagicMock()
+        graph_store.neighbor_expand.side_effect = _neighbor_expand
+        graph_store.decaying_walk.side_effect = _decaying_walk
+
+        aetheryte = Aetheryte(
+            relational=tmp_relational_store,
+            vector_store=vector_store,
+            graph_store=graph_store,
+            enforcement=enforcement,
+            redactor=redactor,
+            importance_fn=importance_score,
+            composer=composer,
+            completion=True,
+            recall_relevance_primary=True,
+        )
+
+        result = aetheryte.recall(
+            scope=Scope(project="proj-a"), query=query, k=3,
+            layers=["episodic"], caller_tier=Tier.T1,
+        )
+        ids = {r.id for r in result.records}
+        assert "fresh" in ids, f"fresh crystal must be returned at k=3; got {ids}"
+
+
+# ---------------------------------------------------------------------------
 # AC-028 / AC-029 — schema round-trip (DP-X, C-7)
 #
 # C-7 hazard: must NOT use the skip-on-ImportError helper at test_schemas.py:
