@@ -302,15 +302,28 @@ confirmed by a live before/after run (af24493 vs this branch,
 |---|---|---|
 | multihop_f1.flat | 0.121 | 0.308 |
 | multihop_f1.completion | 0.176 | 0.462 |
-| context_rank (flat/context/both) | 2 / 2 / 4 | 2 / 2 / 4 |
+| context_rank.flat / .context | 2 / 2 | 2 / 2 |
+| context_rank.both | 4 | **4 or 5 (run-varying — see note)** |
 | `completion_pass` | **true** | **true** |
 | `context_pass` | **false** | **false** |
 | `gate_pass` | **true** | **true** |
 
+**`context_rank.both` is run-varying, not a fixed 4** (vigil's independent
+re-run measured 5, `verification.md` F-V6; two further maker re-runs on this
+same code both measured 4). `flat`/`context`/`completion_pass`/`context_pass`/
+`gate_pass` reproduce exactly across every run; only the `both`-arm rank
+(completion AND context_match both on) fluctuates by one position — plausibly
+real-embedder or tie-break non-determinism in that specific combined arm. It
+feeds no pass predicate (`completion_ok` compares `comp` vs `flat`;
+`context_ok` compares `ctx` vs `flat`; neither reads `both`), so the verdict
+is unaffected either way — recorded here as run-varying rather than a single
+number so a future re-run isn't mistaken for drift.
+
 Both F1 numbers roughly double (denominator shrinks from ~31 candidates to a
 real `k=10`), exactly as predicted — this is precision rising mechanically,
-not a faculty change. `context_rank` is unchanged (rank-based, not
-count-based, so the k-cap doesn't move it). **No verdict flipped** — per C-6
+not a faculty change. `context_rank.flat`/`.context` are unchanged (rank-
+based, not count-based, so the k-cap doesn't move them). **No verdict
+flipped** — per C-6
 this is the check that matters; the absolute F1/recall numbers are expected to
 drift with every future retrieval-relevant change and are not, by themselves,
 a regression signal. `evb_gate`, `forgetting_gate`, `prefetch_gate` and
