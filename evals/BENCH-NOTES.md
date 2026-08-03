@@ -289,6 +289,38 @@ null on that faculty).** `recall_completion` default flipped ON; full suite gree
 the flip (661 passed) — the graph walk runs on every recall without breakage. Guard
 tests: `test_retrieval_gate.py`.
 
+**crystalium#36 update (v1.9.0, 2026-08-02) — numbers shift, verdicts hold.**
+`recall_relevance_primary` (default `true`) makes `k` a real cap and query
+relevance the primary composition signal, mechanically shrinking the
+`retrieval-gate` result set from "the whole filtered RRF list" to a genuine
+top-`k=10`. Predicted in spec.md §Test Plan ("denominator ~30 → 10") and
+confirmed by a live before/after run (af24493 vs this branch,
+`python -m evals retrieval-gate`; full JSON in the ESL change dir
+`crystalium-recall-starvation-36/eval-{before,after}.json`):
+
+| axis | before (af24493) | after (v1.9.0) |
+|---|---|---|
+| multihop_f1.flat | 0.121 | 0.308 |
+| multihop_f1.completion | 0.176 | 0.462 |
+| context_rank (flat/context/both) | 2 / 2 / 4 | 2 / 2 / 4 |
+| `completion_pass` | **true** | **true** |
+| `context_pass` | **false** | **false** |
+| `gate_pass` | **true** | **true** |
+
+Both F1 numbers roughly double (denominator shrinks from ~31 candidates to a
+real `k=10`), exactly as predicted — this is precision rising mechanically,
+not a faculty change. `context_rank` is unchanged (rank-based, not
+count-based, so the k-cap doesn't move it). **No verdict flipped** — per C-6
+this is the check that matters; the absolute F1/recall numbers are expected to
+drift with every future retrieval-relevant change and are not, by themselves,
+a regression signal. `evb_gate`, `forgetting_gate`, `prefetch_gate` and
+`dream_gate` were also re-run (C-6, uniform-importance-baseline-shift check);
+all pass, unaffected — none of those four gates route through
+`Aetheryte.recall()`'s composed record set in a way their DoD axes depend on
+(forgetting_gate calls `recall()` but only measures latency; the others never
+call it, and Dream's prune always recomputes importance fresh rather than
+reading the stored `utility.importance` value D4 changed).
+
 ### (ii) dedup-merge (pattern separation) — PASS, flip `write_dedup_merge` ON
 
 | axis | on (dedup) | off (append) |
