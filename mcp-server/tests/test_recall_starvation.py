@@ -395,10 +395,31 @@ class TestOrdering:
         self, tmp_path: Path, tmp_relational_store: RelationalStore
     ) -> None:
         query = "alpha bravo charlie"
-        # Differing term overlap -> differing BM25 rank -> differing RRF score.
-        tmp_relational_store.insert_crystal(_crystal_dict(id="c3", summary="alpha bravo charlie", importance=0.1))
-        tmp_relational_store.insert_crystal(_crystal_dict(id="c2", summary="alpha bravo delta echo", importance=0.9))
-        tmp_relational_store.insert_crystal(_crystal_dict(id="c1", summary="alpha foxtrot golf hotel", importance=0.9))
+        # FTS5 MATCH is implicit-AND across terms (relational.py:_fts5_query) —
+        # every crystal must contain ALL THREE query terms to become a candidate
+        # at all. Differing document LENGTH (same term set, more filler words)
+        # differentiates BM25 rank via length normalisation: the shortest exact
+        # match ranks best, the longest padded one ranks worst.
+        tmp_relational_store.insert_crystal(
+            _crystal_dict(id="c1", summary="alpha bravo charlie", importance=0.1)
+        )
+        tmp_relational_store.insert_crystal(
+            _crystal_dict(
+                id="c2",
+                summary="alpha bravo charlie plus some extra padding filler words here",
+                importance=0.9,
+            )
+        )
+        tmp_relational_store.insert_crystal(
+            _crystal_dict(
+                id="c3",
+                summary=(
+                    "alpha bravo charlie with considerably more additional padding "
+                    "filler words present in this much longer document body overall"
+                ),
+                importance=0.9,
+            )
+        )
         aetheryte = _build_aetheryte(tmp_path, tmp_relational_store)
 
         result = aetheryte.recall(

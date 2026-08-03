@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from crystalium.aetheryte.retrieve import rrf_merge
+from crystalium.aetheryte.retrieve import rrf_merge, rrf_merge_scored
 
 
 class TestRrfMerge:
@@ -104,3 +104,28 @@ class TestRrfMerge:
         """
         result = rrf_merge([["x", "y", "z"]], k_rrf=60)
         assert result == ["x", "y", "z"]
+
+    def test_rrf_merge_scored_matches_rrf_merge(self) -> None:
+        """crystalium#36 seam 1: rrf_merge_scored is the ID-with-score sibling of
+        rrf_merge — same fusion, same tie-break, over the existing fixtures.
+        rrf_merge is reimplemented as [cid for cid, _ in rrf_merge_scored(...)],
+        so this pins that rrf_merge's own output contract is unaffected
+        (test_rrf.py stays byte-identical, per S-1's output contract)."""
+        fixtures: list[list[list[str]]] = [
+            [],
+            [["a", "b", "c"]],
+            [["a", "b", "c"], ["c", "a", "b"], ["b", "c", "a"]],
+            [["shared", "exclusive_a"], ["shared", "exclusive_b"]],
+            [
+                ["alpha", "beta", "gamma", "delta"],
+                ["beta", "alpha", "delta", "gamma"],
+                ["alpha", "gamma", "delta", "beta"],
+                ["gamma", "alpha", "beta", "delta"],
+                ["delta", "beta", "alpha", "gamma"],
+            ],
+        ]
+        for rankings in fixtures:
+            for k_rrf in (1, 60):
+                assert [cid for cid, _ in rrf_merge_scored(rankings, k_rrf=k_rrf)] == rrf_merge(
+                    rankings, k_rrf=k_rrf
+                )

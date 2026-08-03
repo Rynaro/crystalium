@@ -184,7 +184,15 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                 "Rate-limited (200 calls/min). "
                 "explain=true (v1.6) adds a diagnostic `explain` object to the "
                 "result so a zero-record recall against a non-empty store is "
-                "diagnosable without a separate `doctor` call."
+                "diagnosable without a separate `doctor` call. "
+                "v1.9.0 (crystalium#36): query relevance is the primary composition "
+                "signal — `k` is a hard cap on the number of returned records, and "
+                "records are emitted in non-increasing `score` order (id ascending "
+                "tiebreak). Every record carries a non-null `score` (raw hybrid-"
+                "retrieval RRF value) and the response always carries a `budget` "
+                "object (total_cap, slots, k_requested, k_applied, truncated_count). "
+                "Revertible to the pre-1.9.0 behaviour via "
+                "Config.recall_relevance_primary=false."
             ),
             "inputSchema": {
                 "type": "object",
@@ -202,7 +210,11 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                     "k": {
                         "type": "integer",
                         "default": 10,
-                        "description": "Max records to return",
+                        "description": (
+                            "Max records to return (hard cap when relevance-primary "
+                            "composition is active, the default). Clamped to [1, 100]; "
+                            "a non-numeric/non-coercible value falls back to 10."
+                        ),
                     },
                     "layers": {
                         "type": "array",
@@ -247,7 +259,15 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                     },
                     "provenance": {
                         "type": "object",
-                        "description": "Provenance dict: {source, author_agent, task_id, created_at}",
+                        "description": (
+                            "Provenance dict: {source, author_agent, task_id, created_at}. "
+                            "source must be one of: "
+                            + ", ".join(sorted(_VALID_PROVENANCE_SOURCES))
+                            + " — an out-of-enum value is COERCED to a value derived "
+                            "from the caller's trust tier (never 'human' for a non-T0 "
+                            "caller) rather than rejected, with a `provenance_coercion` "
+                            "advisory attached to the result."
+                        ),
                     },
                 },
             },
@@ -457,7 +477,7 @@ def _build_components(
     relational = RelationalStore(db_path=config.sqlite_path)
     enforcement = Enforcement(config)
     redactor = Redactor(config=config)
-    composer = Composer(config)
+    composer = Composer(config, recall_relevance_primary=config.recall_relevance_primary)
 
     # Optional heavy stores — fall back to None-like stubs on ImportError
     try:
@@ -546,6 +566,7 @@ def _build_components(
         context_match=config.recall_context_match,
         recall_cache=recall_cache,
         recall_active_only=config.recall_active_only,
+        recall_relevance_primary=config.recall_relevance_primary,
     )
     # Execution layer depends on aetheryte/recall_cache for W5 prefetch warming.
     execution = ExecutionLayer(
@@ -741,6 +762,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     result = _handle_commit(
                         arguments, episodic, semantic, procedural, execution, caller_tier, config,
                         recall_cache=execution.recall_cache,
+                        composer=aetheryte.composer,
                     )
                     scheduler.record_activity()
                     result_bytes = json.dumps(result, default=str).encode()
@@ -944,6 +966,31 @@ async def run_http(config: Config) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: DP-3d / C-11 (crystalium#36): a numeric k is clamped into [1, 100]; a
+#: non-coercible k (e.g. a garbage string) falls back to _K_DEFAULT rather than
+#: raising — recall is a read path and must degrade, not reject. Single source
+#: of truth for BOTH entry points: server._handle_recall AND the CLI `recall`
+#: verb (__main__.py imports normalize_k from here).
+_K_DEFAULT: int = 10
+_K_MIN: int = 1
+_K_MAX: int = 100
+
+
+def normalize_k(raw: Any, default: int = _K_DEFAULT) -> int:
+    """Clamp a caller-supplied `k` into [1, 100]; degrade to *default* on garbage.
+
+    Replaces the pre-1.9.0 `max(0, int(k))` pattern, which let `k=0` through and
+    — once `k` became a hard cap on the number of returned records (crystalium#36
+    seam 3) — would have silently returned zero records for that input, a bug the
+    fix would have introduced (DP-3d).
+    """
+    try:
+        k = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(_K_MIN, min(_K_MAX, k))
+
+
 def _handle_recall(
     args: dict[str, Any],
     aetheryte: Aetheryte,
@@ -965,12 +1012,8 @@ def _handle_recall(
         sensitivity_tag=raw_scope.get("sensitivity_tag"),
     )
     query = args.get("query", "")
-    # Battle-test fix: clamp k to a non-negative int (a negative k slices the
-    # candidate list from the tail — silent mis-ranking); default 10 on garbage.
-    try:
-        k = max(0, int(args.get("k", 10)))
-    except (TypeError, ValueError):
-        k = 10
+    # crystalium#36 / DP-3d / C-11: clamp to [1,100]; non-coercible -> default 10.
+    k = normalize_k(args.get("k", _K_DEFAULT))
     layers = args.get("layers")
     explain = bool(args.get("explain", False))
 
@@ -1023,8 +1066,15 @@ def _handle_commit(
     caller_tier: Tier,
     config: Config,
     recall_cache: Any = None,
+    composer: Any = None,
 ) -> dict[str, Any]:
-    """Dispatch crystalium.commit to the correct layer adapter."""
+    """Dispatch crystalium.commit to the correct layer adapter.
+
+    *composer* (crystalium#36 / D5, optional — the oversized-summary advisory
+    is skipped entirely when None, e.g. in tests that drive this handler with
+    mocked layers and no full component graph) supplies the module-hardened
+    tokenizer (composer.py, post-#32) for the oversized-summary advisory below.
+    """
     import datetime as _dt
     layer = args.get("layer", "episodic")
     payload = args.get("payload", {})
@@ -1134,6 +1184,43 @@ def _handle_commit(
         result = dict(result)
         result["summary_quality"] = "poor"
         result["advisory"] = POOR_SUMMARY_ADVICE
+
+    # crystalium#36 / D5 (DP-8): advisory-only — the summary tokenises above its
+    # destination layer's slot cap, so the composer may evict this crystal on
+    # size alone at a future recall. Layer-aware (the FULL slot cap, not a
+    # fraction — a fractional threshold would fire routinely and break the
+    # clean-path byte-identity test_diagnosability.py locks in). NEVER a
+    # rejection (the reporter proved shrinking the summary did not restore
+    # retrievability — size is a hint, not the cause). C-4: any tokenizer
+    # exception skips the advisory silently and never fails/delays the commit.
+    if composer is not None:
+        try:
+            raw_summary_for_size = payload.get("summary") if isinstance(payload, dict) else None
+            if isinstance(raw_summary_for_size, str) and raw_summary_for_size:
+                summary_tokens = composer.tokenize(raw_summary_for_size)
+                slot_cap = config.slots.get(layer)
+                if slot_cap is not None and summary_tokens > slot_cap:
+                    result = dict(result)
+                    result["summary_size"] = "oversized"
+                    result["summary_tokens"] = summary_tokens
+                    result["slot_cap"] = slot_cap
+                    oversized_advice = (
+                        f"summary tokenises to {summary_tokens} tokens, above the "
+                        f"'{layer}' slot cap of {slot_cap} — a future recall's "
+                        "composer may evict this crystal on size alone. Advisory "
+                        "only; the commit is not rejected."
+                    )
+                    # Don't clobber a co-occurring summary_quality advisory (rare in
+                    # practice — a "poor" summary is short, an "oversized" one is
+                    # not — but never silently drop one message for the other).
+                    existing_advisory = result.get("advisory")
+                    result["advisory"] = (
+                        f"{existing_advisory} {oversized_advice}"
+                        if existing_advisory
+                        else oversized_advice
+                    )
+        except Exception as exc:  # noqa: BLE001 — C-4: never fail/delay the commit
+            log.debug("oversized_summary_check_skipped", error=str(exc))
 
     return result
 

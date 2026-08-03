@@ -29,7 +29,7 @@ import structlog
 
 from crystalium.enforcement import Enforcement
 from crystalium.aetheryte.redact import Redactor
-from crystalium.schemas import RecallResult, SlotBreakdown, CrystalSummary, Scope
+from crystalium.schemas import Budget, RecallResult, SlotBreakdown, CrystalSummary, Scope
 from crystalium.telemetry import now_ms, record_call
 from crystalium.trust import Tier
 
@@ -48,6 +48,36 @@ _ALL_LAYERS: list[str] = ["episodic", "semantic", "procedural", "execution"]
 # ---------------------------------------------------------------------------
 # Pure RRF fusion function (tested independently in test_rrf.py)
 # ---------------------------------------------------------------------------
+
+
+def rrf_merge_scored(
+    rankings: list[list[str]],
+    k_rrf: int = 60,
+) -> list[tuple[str, float]]:
+    """Reciprocal Rank Fusion (RRF), returning IDs WITH their fused score.
+
+    Same fusion as `rrf_merge` (see there for the formula), but exposes the
+    `scores` dict that `rrf_merge` computed and discarded (crystalium#36 seam
+    1) — the raw fusion value is what lets query relevance reach the composer
+    (`_ComposerRecord.relevance_score`) and the client (`CrystalSummary.score`).
+
+    Args:
+        rankings: List of ranked lists (each list is already ordered best-first).
+                  Duplicates within a single list are allowed but unusual.
+        k_rrf:    RRF smoothing constant (default 60, as per Cormack et al. 2009).
+
+    Returns:
+        Deduplicated list of (id, score) sorted by descending RRF score. Ties
+        broken by the natural dict-insertion order (deterministic for Python
+        3.7+) — identical tie behaviour to `rrf_merge`.
+    """
+    scores: dict[str, float] = {}
+    for ranking in rankings:
+        for rank_0, record_id in enumerate(ranking):
+            rank_1 = rank_0 + 1  # 1-based
+            scores[record_id] = scores.get(record_id, 0.0) + 1.0 / (k_rrf + rank_1)
+
+    return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
 
 
 def rrf_merge(
@@ -71,13 +101,7 @@ def rrf_merge(
     Returns:
         Deduplicated list of IDs sorted by descending RRF score.
     """
-    scores: dict[str, float] = {}
-    for ranking in rankings:
-        for rank_0, record_id in enumerate(ranking):
-            rank_1 = rank_0 + 1  # 1-based
-            scores[record_id] = scores.get(record_id, 0.0) + 1.0 / (k_rrf + rank_1)
-
-    return sorted(scores, key=lambda x: scores[x], reverse=True)
+    return [cid for cid, _ in rrf_merge_scored(rankings, k_rrf)]
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +148,7 @@ class Aetheryte:
         context_match: bool = False,
         recall_cache: Any = None,
         recall_active_only: bool = False,
+        recall_relevance_primary: bool = True,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -153,6 +178,13 @@ class Aetheryte:
         # crystals — the defense that makes operator reject=deprecate and bi-temporal
         # supersession actually bite. Off -> byte-identical to W5 (returns everything).
         self.recall_active_only = recall_active_only
+        # crystalium#36 / FORGE DP-1+DP-2: gates seam 3 (top-k truncation, below)
+        # as one unit with the Composer's own recall_relevance_primary flag
+        # (seams 4+5 — relevance-primary eviction key + descending-relevance
+        # ordering). Default ON: earned by correctness (a fresh crystal must be
+        # retrievable), not an ablation win. Off -> seam 3 is skipped entirely;
+        # `k` is not a cap (AC-009).
+        self.recall_relevance_primary = recall_relevance_primary
 
     # ------------------------------------------------------------------
     # Public recall API
@@ -186,11 +218,27 @@ class Aetheryte:
           2. assert_tier_allowed(op="recall") — universally allowed; runs for telemetry
           3. Hybrid retrieve per layer subset
           4. RRF fusion
+          4b. k-gate (recall_relevance_primary only, crystalium#36 seam 3): truncate
+              the scope/status-filtered, RRF-descending candidate list to the first
+              `k` entries BEFORE composition — relevance is decisive over
+              *membership*, not just fetch order, so `len(result.records) <= k` is a
+              hard guarantee in this mode (AC-003). Off: `k` is not a cap, exactly
+              as before v1.9.0 (AC-009).
           5. Optional reranker (stub, default DISABLED; see docstring below)
           6. Scope filter (project + agent_class_visibility)
-          7. composer.compose(records) → slot-budgeted output
+          7. composer.compose(records) → slot-budgeted output. Eviction key and
+             final ordering are relevance-primary in this mode (crystalium#36
+             seams 4+5 — see composer.py); flag off restores the pre-1.9.0
+             (importance, last_access, id) key and per-slot artefact order.
           8. redactor.redact(summary, sensitivity_tag) per record
           9. Return RecallResult
+
+        Ordering contract (crystalium#36 / FORGE DP-6): in the default
+        configuration (recall_relevance_primary=True), `result.records` is
+        emitted in non-increasing `score` order, `id` ascending as a tiebreak.
+        With the flag off, the order is the historical composer artefact (per-
+        slot insertion order, or ascending-eviction-key order when the global
+        token-cap pass fired) — an accident of implementation, not a contract.
 
         Reranker note:
             BGE-reranker-v2-m3 is stubbed behind config.reranker_enabled (default
@@ -201,7 +249,12 @@ class Aetheryte:
         Args:
             scope:       Project + agent_class_visibility + sensitivity_tag triple.
             query:       Free-text recall query.
-            k:           Target number of records to return.
+            k:           Target number of records to return. A HARD CAP on
+                         len(result.records) when recall_relevance_primary is
+                         True (the default); the caller is responsible for
+                         clamping k to [1, 100] before calling (server._handle_recall
+                         / the CLI verb do this — Aetheryte.recall() itself takes
+                         k as given).
             layers:      Subset of layers to search (None = all four layers).
             caller_tier: Trust tier of the calling agent (universally allowed for recall).
             explain:     v1.6 diagnosability. When True, RecallResult.explain is
@@ -209,7 +262,8 @@ class Aetheryte:
                            {candidates_prefilter, filtered_by_status, filtered_by_scope,
                             arms: {bm25: on|off, dense: active|inactive(reason), graph: on|off},
                             store: {total_crystals, active, embedded},
-                            project_keys_present: [...]}
+                            project_keys_present: [...],
+                            k_applied, truncated_by_k}
                          so a zero-record recall against a non-empty store is
                          diagnosable from the result alone (the MOTIVATING INCIDENT
                          test, CHANGELOG v1.6.0). Bypasses the recall cache in both
@@ -219,7 +273,11 @@ class Aetheryte:
                          `explain` object.
 
         Returns:
-            RecallResult with records, slot_breakdown, total_tokens, evicted_count.
+            RecallResult with records (each carrying a non-null `score`,
+            crystalium#36 / D3), slot_breakdown, total_tokens, evicted_count
+            (token-budget evictions ONLY — never folds in k-truncation, DP-7),
+            and budget (ALWAYS present: total_cap, slots, k_requested, k_applied,
+            truncated_count — crystalium#36 / DP-3c).
         """
         t0 = now_ms()
         outcome = "ok"
@@ -336,7 +394,14 @@ class Aetheryte:
             rankings = [sparse_ranking, dense_ranking, graph_ranking]
             if completion_ranking:
                 rankings.append(completion_ranking)
-            fused_ids = rrf_merge(rankings, k_rrf=60)
+            # crystalium#36 seam 1: rrf_merge_scored exposes the raw fusion score
+            # rrf_merge itself discarded. rrf_score_by_id is the SOURCE OF TRUTH
+            # for _ComposerRecord.relevance_score / CrystalSummary.score below —
+            # captured here, BEFORE the context_match re-rank, so `score` stays
+            # the raw RRF fusion value (D3) regardless of that re-rank.
+            fused_scored = rrf_merge_scored(rankings, k_rrf=60)
+            fused_ids = [cid for cid, _ in fused_scored]
+            rrf_score_by_id: dict[str, float] = dict(fused_scored)
 
             # 4b. W5 encoding-specificity: post-RRF re-rank that boosts crystals
             # whose stored encoding_context overlaps the scope-derived query context
@@ -427,10 +492,28 @@ class Aetheryte:
                     continue
                 filtered_ids.append(cid)
 
+            # crystalium#36 seam 3 (gated by recall_relevance_primary): filtered_ids
+            # is already in descending-RRF order, so truncating to the first k
+            # entries here — BEFORE composer_records is built — makes relevance
+            # decisive over *membership*, not just fetch order, and is the
+            # mechanism by which `k` becomes a hard cap on len(result.records)
+            # (DP-3a). `truncated_by_k_count` feeds budget.truncated_count /
+            # explain.truncated_by_k (DP-7 — kept separate from evicted_count,
+            # which stays token-budget-only). Off -> filtered_ids is untouched and
+            # `k` is not a cap (AC-009), matching pre-1.9.0 behaviour exactly.
+            truncated_by_k_count = 0
+            if self.recall_relevance_primary:
+                truncated_by_k_count = max(0, len(filtered_ids) - k)
+                filtered_ids = filtered_ids[:k]
+
             # Build Crystal-like objects for the composer
             now = datetime.now(timezone.utc)
 
-            def _to_composer_record(crystal: dict[str, Any]) -> "_ComposerRecord":
+            def _to_composer_record(
+                crystal: dict[str, Any],
+                relevance_score: float = 0.0,
+                relevance_rank: int = 0,
+            ) -> "_ComposerRecord":
                 utility = crystal.get("utility", {})
                 if isinstance(utility, str):
                     import json
@@ -483,11 +566,23 @@ class Aetheryte:
                     content_ref=crystal.get("content_ref"),
                     scope_sensitivity_tag=(raw_scope.get("sensitivity_tag") or "none"),
                     slot_override=raw_scope.get("slot"),
+                    relevance_score=relevance_score,
+                    relevance_rank=relevance_rank,
                 )
 
+            # crystalium#36 seam 2: relevance_score (raw RRF fusion value, D3) and
+            # relevance_rank (0-based position in the post-filter fused order,
+            # i.e. filtered_ids as of here — after the seam-3 gate above, so a
+            # truncated run only ever assigns ranks 0..k-1) travel with the record
+            # from here through the composer to CrystalSummary.score. Populated
+            # in BOTH flag modes — only membership/eviction-key/ordering are gated.
             composer_records = [
-                _to_composer_record(all_candidates[cid])
-                for cid in filtered_ids
+                _to_composer_record(
+                    all_candidates[cid],
+                    relevance_score=rrf_score_by_id.get(cid, 0.0),
+                    relevance_rank=rank,
+                )
+                for rank, cid in enumerate(filtered_ids)
                 if cid in all_candidates
             ]
 
@@ -568,6 +663,11 @@ class Aetheryte:
                         importance=rec.importance,
                         last_access=rec.last_access,
                         content_ref=rec.content_ref,
+                        # crystalium#36 / DP-5: raw RRF fusion value, populated in
+                        # BOTH flag modes — the fusion always runs; suppressing it
+                        # under flag-off would remove diagnosability exactly where
+                        # an operator on the legacy path needs it most.
+                        score=rec.relevance_score,
                     )
                 )
 
@@ -600,7 +700,25 @@ class Aetheryte:
                         "embedded": store_stats["embedded"],
                     },
                     "project_keys_present": sorted(store_stats["by_project"].keys()),
+                    # crystalium#36 / DP-3c: k-gate diagnosability, present in both
+                    # flag modes (truncated_by_k_count is 0 when the flag is off).
+                    "k_applied": len(result_records),
+                    "truncated_by_k": truncated_by_k_count,
                 }
+
+            # crystalium#36 / DP-3c (D2.4): the working-set budget, ALWAYS present
+            # (never explain-gated) — an explain-only budget would recreate the
+            # exact discoverability failure issue #36 is about. total_cap/slots
+            # come from Config (DP-3b: the budget itself never scales with k);
+            # truncated_count is the k-gate-only drop count (DP-7 — evicted_count
+            # keeps its existing, token-budget-only meaning, untouched below).
+            budget = Budget(
+                total_cap=self.composer.config.total_cap,
+                slots=dict(self.composer.config.slots),
+                k_requested=k,
+                k_applied=len(result_records),
+                truncated_count=truncated_by_k_count,
+            )
 
             result = RecallResult(
                 records=result_records,
@@ -614,6 +732,7 @@ class Aetheryte:
                 ),
                 total_tokens=composed.total_tokens,
                 evicted_count=composed.evicted_count,
+                budget=budget,
                 explain=explain_obj,
             )
 
@@ -703,6 +822,14 @@ class _ComposerRecord:
         "access_count",
         "outcome_success",
         "novelty_at_write",
+        # crystalium#36 seam 2: query relevance carried from Aetheryte's RRF
+        # fusion through to the Composer (_eviction_key, seam 4) and back out to
+        # CrystalSummary.score (seam 5 / D3). relevance_score is the raw RRF
+        # fusion value; relevance_rank is its 0-based position in the post-filter
+        # fused order. __slots__ is declared, so both are ALSO in __init__ below
+        # — editing one without the other raises AttributeError on assignment.
+        "relevance_score",
+        "relevance_rank",
     )
 
     def __init__(
@@ -717,6 +844,8 @@ class _ComposerRecord:
         content_ref: str | None,
         scope_sensitivity_tag: str,
         slot_override: str | None = None,
+        relevance_score: float = 0.0,
+        relevance_rank: int = 0,
     ) -> None:
         self.id = id
         self.layer = layer
@@ -732,3 +861,6 @@ class _ComposerRecord:
         self.access_count = 0
         self.outcome_success: float | None = None
         self.novelty_at_write: float = 0.5
+        # crystalium#36 seam 2 (see __slots__ note above).
+        self.relevance_score = relevance_score
+        self.relevance_rank = relevance_rank

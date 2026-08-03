@@ -6,6 +6,53 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-08-02
+
+### Fixed
+
+- **`crystalium.recall` no longer returns query-independent results.** The
+  BM25 + dense + graph RRF fusion order reached the composer only as a *fetch*
+  order: `Composer.compose()` took no `k` and ranked slot survival strictly by
+  `(importance, last_access, id)`, so a topically-unrelated record with accumulated
+  access history always outlived a topically-relevant one. Combined with `importance`
+  being hardcoded to `0.0` on every episodic/procedural/semantic commit — and with a
+  fresh crystal's only routes off 0.0 being an access event it could only earn by
+  *already* winning, or an idle-gated Dream sweep — a freshly committed crystal was
+  effectively unretrievable, making `commit` silent write-only storage. Relevance is
+  now the primary composition signal, with `importance` retained as the secondary.
+  Revertible via `recall_relevance_primary: false`. (#36)
+- **`k` is now an upper bound on the number of returned records.** It previously only
+  sized the per-layer candidate fetch (`max(k*3, 10)`) and the graph seed set, so
+  `k=3` and `k=15` returned identical result sets. `k` is also clamped to `[1, 100]`
+  at the MCP handler and the CLI verb, with a non-coercible `k` falling back to the
+  default 10. (#36)
+- **A freshly committed crystal now starts at a non-zero `utility.importance`,**
+  computed from the layer's injected `importance_fn` (wired into every layer
+  constructor but never called) and clamped to a documented cold-start ceiling of
+  0.30 so the legacy scorer cannot invert the ranking. No storage migration:
+  pre-existing rows keep their stored value and are reachable via the new relevance
+  ranking. (#36)
+- **`schemas/recall-result.v1.json` now matches the emitted result.** It declared
+  `additionalProperties: false` while omitting the v1.6 `explain` field; `budget` and
+  `explain` are both declared now, and a round-trip test validates a live
+  `RecallResult` against the file. (#36)
+
+### Added
+
+- `CrystalSummary.score` is populated with the raw hybrid-retrieval RRF score
+  (previously declared `Optional[float]` and never set), so client-side ranking is
+  inspectable. Populated in both ranking modes. (#36)
+- `RecallResult.budget` surfaces the working-set token budget, the requested and
+  applied `k`, and `truncated_count`. `evicted_count` keeps its existing meaning
+  (token-budget evictions only). The hard 3500-token cap (P0-9) is unchanged. (#36)
+- `Config.recall_relevance_primary` (default `true`) — set `false` to restore the
+  pre-1.9.0 composition ordering, `k` behaviour and result sets. (#36)
+- `crystalium.commit` attaches a `summary_size` advisory when a summary cannot fit
+  its destination layer's slot. Advisory only — never a rejection. (#36)
+- The `crystalium.commit` tool description now names the four accepted
+  `provenance.source` literals, and the `TIER_VIOLATION` advice names the
+  procedural-candidate fallback and states where caller identity comes from. (#36)
+
 ## [1.8.1] — 2026-07-17
 
 ### Fixed

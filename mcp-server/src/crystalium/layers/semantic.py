@@ -23,6 +23,7 @@ import structlog
 from crystalium.enforcement import Enforcement
 from crystalium.gate import PromotionGate, CrystalRef
 from crystalium.aetheryte.redact import Redactor
+from crystalium.importance import initial_importance
 from crystalium.schemas import Provenance
 from crystalium.telemetry import now_ms
 from crystalium.trust import Tier
@@ -224,13 +225,23 @@ class SemanticLayer:
             if dup_id is not None:
                 self.relational.merge_provenance(dup_id, prov_dict)
                 log.info("semantic_dedup_merged", merged_into=dup_id)
+                # crystalium#36 (critique F2): merge echo, not a fresh commit — the
+                # merged-into crystal has its own stored importance; echoing 0.0
+                # misreported it. Report the ALREADY-STORED value. Out of AC-010's
+                # scope; best-effort with a 0.0 fallback on lookup failure.
+                merged_crystal = self.relational.get_crystal(dup_id)
+                merged_importance = (
+                    float((merged_crystal.get("utility") or {}).get("importance", 0.0))
+                    if merged_crystal is not None
+                    else 0.0
+                )
                 return {
                     "status": "merged",
                     "id": dup_id,
                     "layer": "semantic",
                     "merged_into": dup_id,
                     "validation_state": "validated",
-                    "importance": 0.0,
+                    "importance": merged_importance,
                 }
 
             # W6 write-conflict detection: a same-subject-but-divergent prior is a
@@ -280,6 +291,7 @@ class SemanticLayer:
             scope = payload.get("scope", {})
             summary = payload.get("summary", "")
 
+            # crystalium#36 / DP-4=C: cold-start importance, clamped.
             utility = {
                 "access_count": 0,
                 "last_access": now.isoformat(),
@@ -287,6 +299,7 @@ class SemanticLayer:
                 "importance": 0.0,
                 "novelty_at_write": payload.get("novelty_at_write", 0.5),
             }
+            utility["importance"] = initial_importance(self.importance_fn, utility, now)
 
             from crystalium.protection import resolve_encoding_context, resolve_protection
             protected, tags = resolve_protection(payload, prov_dict.get("source"))
@@ -377,7 +390,8 @@ class SemanticLayer:
                 "id": crystal_id,
                 "layer": "semantic",
                 "validation_state": "validated",
-                "importance": 0.0,
+                # DP-4c: echo the computed cold-start value.
+                "importance": utility["importance"],
                 "content_ref": content_ref,
             }
             if conflict_recorded:

@@ -223,7 +223,12 @@ class ExecutionLayer:
                 "access_count": 0,
                 "last_access": now.isoformat(),
                 "outcome_success_score": None,
-                "importance": 0.5,  # execution entries are currently active work
+                # execution entries are currently active work. DP-4d (crystalium#36):
+                # left untouched — deliberately ABOVE the 0.30 cold-start ceiling
+                # (importance.COLD_START_IMPORTANCE_CEILING) other layers now clamp
+                # to, because active work should survive composition; this is a
+                # privilege, not a cold-start estimate.
+                "importance": 0.5,
                 "novelty_at_write": 0.5,
             }
 
@@ -365,6 +370,9 @@ class ExecutionLayer:
                 "access_count": 0,
                 "last_access": now.isoformat(),
                 "outcome_success_score": None,
+                # DP-4d (crystalium#36): same "currently active work" privilege as
+                # checkpoint() above — deliberately above the 0.30 cold-start ceiling,
+                # not a cold-start estimate.
                 "importance": 0.5,
                 "novelty_at_write": 0.5,
             }
