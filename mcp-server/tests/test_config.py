@@ -390,6 +390,97 @@ class TestRecallRelevancePrimary:
         assert cfg.recall_relevance_primary is False
 
 
+class TestFusionConfig:
+    """crystalium#38 (FORGE deliberation.md DP-1..DP-9): weighted RRF fusion
+    config surface — AC-127, parameterised over all four new fields crossed
+    with BOTH documented sources (env var + `crystalium.yaml` / `_from_dict`).
+    The YAML/`_from_dict` half is the one that silently fails when a field is
+    wired only into `from_env` and left out of the `bool_field`/`float_field`
+    allowlists (spec.md §D6's G-4 finding)."""
+
+    def test_defaults(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.recall_weighted_fusion is True
+        assert cfg.fusion_weight_dense == 1.0
+        assert cfg.fusion_weight_derived == 1.0
+        assert cfg.fusion_sparse_boost_alpha == 1.0
+
+    def test_recall_weighted_fusion_from_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CRYSTALIUM_RECALL_WEIGHTED_FUSION", "false")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.recall_weighted_fusion is False
+
+    def test_recall_weighted_fusion_from_dict(self) -> None:
+        cfg = Config._from_dict({"recall_weighted_fusion": False})
+        assert cfg.recall_weighted_fusion is False
+
+    def test_recall_weighted_fusion_default_true_when_unset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CRYSTALIUM_RECALL_WEIGHTED_FUSION", raising=False)
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.recall_weighted_fusion is True
+
+    def test_fusion_weight_dense_from_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CRYSTALIUM_FUSION_WEIGHT_DENSE", "0.8")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.fusion_weight_dense == 0.8
+
+    def test_fusion_weight_dense_from_dict(self) -> None:
+        cfg = Config._from_dict({"fusion_weight_dense": 0.8})
+        assert cfg.fusion_weight_dense == 0.8
+
+    def test_fusion_weight_derived_from_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CRYSTALIUM_FUSION_WEIGHT_DERIVED", "0.95")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.fusion_weight_derived == 0.95
+
+    def test_fusion_weight_derived_from_dict(self) -> None:
+        # 0.95 stays LEGAL config (deliberation.md DP-2) even though it is
+        # outside the documented/supported band — no validator, no clamp.
+        cfg = Config._from_dict({"fusion_weight_derived": 0.95})
+        assert cfg.fusion_weight_derived == 0.95
+
+    def test_fusion_sparse_boost_alpha_from_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CRYSTALIUM_FUSION_SPARSE_BOOST_ALPHA", "0.0")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.fusion_sparse_boost_alpha == 0.0
+
+    def test_fusion_sparse_boost_alpha_from_dict(self) -> None:
+        cfg = Config._from_dict({"fusion_sparse_boost_alpha": 0.0})
+        assert cfg.fusion_sparse_boost_alpha == 0.0
+
+    def test_all_four_from_dict_together(self) -> None:
+        """The `_from_dict` allowlist regression this AC exists to guard:
+        every one of the four fields must round-trip through the SAME dict
+        source `crystalium.yaml` loads through — a field present in the
+        dataclass and in `from_env` but absent from `_from_dict`'s
+        `bool_field`/`float_field` tuples is silently ignored from YAML."""
+        cfg = Config._from_dict({
+            "recall_weighted_fusion": False,
+            "fusion_weight_dense": 0.5,
+            "fusion_weight_derived": 0.5,
+            "fusion_sparse_boost_alpha": 2.0,
+        })
+        assert cfg.recall_weighted_fusion is False
+        assert cfg.fusion_weight_dense == 0.5
+        assert cfg.fusion_weight_derived == 0.5
+        assert cfg.fusion_sparse_boost_alpha == 2.0
+
+
 class TestSecurityFlags:
     """W6 security & integrity hardening flags (default OFF — ablation-or-revert)."""
 
@@ -439,6 +530,7 @@ class TestDefaultParity:
         "forgetting_fsrs", "recall_completion", "recall_context_match",
         "write_dedup_merge", "recall_prefetch", "drift_detect",
         "write_conflict_detect", "recall_active_only",
+        "recall_weighted_fusion",  # crystalium#38
     )
 
     def test_dataclass_default_equals_from_env_default(

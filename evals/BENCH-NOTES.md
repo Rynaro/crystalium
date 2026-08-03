@@ -319,6 +319,42 @@ feeds no pass predicate (`completion_ok` compares `comp` vs `flat`;
 is unaffected either way — recorded here as run-varying rather than a single
 number so a future re-run isn't mistaken for drift.
 
+**crystalium#38 update (v1.10.0, 2026-08-03) — the F-V6 figure now has a named
+mechanism, and it is retired only PARTIALLY.** #38's P3 investigation found
+TWO separate causes behind the graph/completion arms' non-reproducibility,
+and this release fixes only one of them:
+
+1. **Consumer-side ordering (FIXED this release).** `neighbor_expand` returns
+   a `set[str]` and `decaying_walk` scores a set comprehension; both were
+   iterated in per-process hash-randomised order before being fused.
+   `retrieve.py` now applies `sorted()` at both consumption points
+   (deterministic, outside the `recall_weighted_fusion` flag). Measured
+   directly (crystalium#38 `red-evidence.txt`): fixed fused order is
+   byte-identical across `PYTHONHASHSEED` 0-4 on a >=4-distinct-UUID derived
+   arm fixture.
+2. **Store-side membership (OPEN, follow-up issue, NOT fixed here).**
+   `GraphStore.neighbor_expand` (`storage/graph.py`, out of scope for #38)
+   wraps its whole seed-loop in one `try`, and the underlying Kuzu driver
+   RAISES at cursor exhaustion instead of returning `None` — so only the
+   FIRST seed's neighbourhood is ever actually explored
+   (`neighbor_expand(seeds) == neighbor_expand([seeds[0]])`). This is a
+   **membership**, not merely ordering, nondeterminism that (1)'s `sorted()`
+   fix cannot reach — WHICH seed happens to be tried first (and therefore
+   which neighbours are found at all) still varies with the graph
+   walk's frontier construction.
+
+**Consequence for `context_rank.both`: it remains run-varying AFTER v1.10.0,
+for the SECOND (still-open) reason above, not the first.** Re-measured on
+the fusion-gate work (crystalium#38 measurement, real `GraphStore`):
+`context_rank.both` observed values now include `{2, 4, 5}` (widening the
+previously-recorded `{4, 5}` set), including a `4 -> 2` variation across two
+runs at the *same* (unset) `PYTHONHASHSEED` — because crystal ids are
+`uuid4`-fresh per run, so even a fixed hash seed does not pin the graph
+walk's outcome. **A future reader must not treat a stable figure here as
+evidence the fix is complete** — only the *ordering* half is; the
+*membership* half is tracked as a follow-up issue and will be re-annotated
+when it lands.
+
 Both F1 numbers roughly double (denominator shrinks from ~31 candidates to a
 real `k=10`), exactly as predicted — this is precision rising mechanically,
 not a faculty change. `context_rank.flat`/`.context` are unchanged (rank-

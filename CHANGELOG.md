@@ -6,6 +6,112 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-08-03
+
+### Changed
+
+- **`CrystalSummary.score` is now a WEIGHTED hybrid-retrieval RRF fusion
+  value (previously unweighted).** Ordering semantics are unchanged (still
+  non-increasing, id-ascending tiebreak) but the *magnitude*, and the
+  relative order among candidates, can differ from 1.9.0: a record present
+  in many weak arms no longer automatically outranks a record ranked first
+  by the single arm that actually fits the query (crystalium#38). The
+  manifest description and this entry are the disclosure required by the
+  score-semantics change (DP-7). No storage migration, no schema break.
+
+### Fixed
+
+- **RRF fusion summed unweighted arms, so a record seen by many weak arms
+  could outrank the one arm's exact top match.** `weighted_rrf_merge_scored`
+  (new; `rrf_merge`/`rrf_merge_scored` are UNCHANGED and remain the
+  `recall_weighted_fusion: false` path) applies a per-arm weight:
+  `score(id) = sum(w_arm / (60 + rank_arm(id)))`. Deterministic tiebreak by
+  `(-score, id)` — insertion order is not stable once graph/completion rank
+  order can vary between processes (see the determinism fix below).
+- **The graph and completion arms were not independent evidence — both are
+  seeded from the dense ranking, so the dense arm's opinion was counted up
+  to three times.** They are now collapsed into ONE derived voter by
+  min-rank before fusion (`fusion_weight_derived`, default `1.0` — at that
+  value the merge is the exact identity of today's fusion when only one of
+  the two source arms is populated, measured bitwise: 20/20 in-process
+  comparisons, max score diff exactly `0.0`).
+- **Graph and completion expansion was seeded from `dense_ranking` alone,**
+  so a record the lexical (BM25) arm surfaced but the dense arm ranked
+  outside the seed width never had a chance to seed a neighbourhood walk.
+  Seeding now uses a preliminary fusion of the sparse + dense arms only
+  (never the derived arms — no feedback loop); the seed *count*
+  (`fetch_width`) is unchanged, only its *composition*.
+- **A query-conditional selectivity boost for the sparse arm**
+  (`fusion_sparse_boost_alpha`, default `1.0`): `w_sparse` resolves to
+  `1.0 + alpha * selectivity`, where selectivity measures how far the
+  lexical arm narrowed the corpus for THIS query, scoped to the searched
+  layers and to the same active/all-statuses population the response
+  itself applies (`recall_active_only`) — a query matching every crystal in
+  the searched layer, or the search-space count drawn from a different
+  status population than the match count, both resolve to no boost
+  (`w_sparse = 1.0`) rather than an inflated one.
+- **The graph and completion arms had no deterministic rank order at all.**
+  `neighbor_expand` returns a `set[str]` and `decaying_walk` scores a set
+  comprehension, so their iteration order was per-process hash-randomised —
+  every fused score touching those arms varied between processes (this is
+  the mechanism behind #36's `evals/BENCH-NOTES.md` F-V6 non-reproducible
+  `context_rank.both` figure, now annotated there). Two consumer-side
+  `sorted()` calls in `retrieve.py` fix the *ordering* — deliberately
+  OUTSIDE the `recall_weighted_fusion` flag, since gating a determinism fix
+  behind a flag would leave the flag-off path irreproducible too. This does
+  **not** fix the graph store's own *membership* nondeterminism (see
+  Known limitations below).
+
+### Added
+
+- `Config.recall_weighted_fusion` (default `true`) — the master gate for
+  the weighted fusion path, SUBSUMED under `recall_relevance_primary`
+  (either flag off restores the unweighted, pre-1.10.0 fusion exactly —
+  same single revert lever as 1.9.0's flag).
+- `Config.fusion_weight_dense` (default `1.0`), `Config.fusion_weight_derived`
+  (default `1.0`; measured cliff — 0.90 fails the shipped fusion-gate
+  deterministically, 0.95 is a flake tied to an open store-side determinism
+  bug, 1.00 carries a bitwise-measured identity property no other value
+  has; values outside `[1.0, ...]` remain legal config but are outside the
+  documented/supported band), `Config.fusion_sparse_boost_alpha` (default
+  `1.0`). All four are env-var- and `crystalium.yaml`-configurable.
+  Deliberately no `fusion_weight_sparse`: RRF ordering is invariant to a
+  global positive scale factor.
+- `result.explain.fusion` (only when `explain=true`): the three arm
+  weights, the selectivity inputs that produced them (`n_sparse`,
+  `n_sparse_cap`, `n_scoped`, `n_scoped_layers`, `n_scoped_status`), and
+  `fetch_width`/`candidate_k`/`arm_sizes` — never disagrees with the
+  surfaced `score`.
+- `evals/fusion_gate.py` (`python -m evals fusion-gate`, `--floor` for a
+  `FETCH_WIDTH_FLOOR`-overridden single-arm probe): a weighted-vs-unweighted
+  A/B over an identical real-`RelationalStore` + real-`GraphStore` corpus,
+  plus a multi-layer sparse-arm-rank axis.
+
+### Known limitations (recorded, not fixed here — see follow-up issues)
+
+- **The determinism fix above is ordering-only.** `GraphStore.neighbor_expand`
+  wraps its whole seed loop in one `try`, and the underlying Kuzu driver
+  raises at cursor exhaustion instead of returning `None`, so in practice
+  only the FIRST seed's neighbourhood is ever explored
+  (`neighbor_expand(seeds) == neighbor_expand([seeds[0]])`) — a
+  **membership**, not merely ordering, nondeterminism this release does not
+  touch (`storage/graph.py` is out of scope for this change). Every
+  fusion-gate figure in this release's evidence trail was measured on a
+  one-seed expansion; a follow-up issue tracks the store-side fix and the
+  re-baseline it requires.
+- **No claim is made that this change replaces the v1.9.0
+  `FETCH_WIDTH_FLOOR` guard.** At very small `k` (below the shipped floor
+  of 10) with the floor artificially lowered, the fix's own thesis test is
+  layered on top of, rather than a replacement for, that guard — recorded
+  as a finding about the change's nature, not a defect, and it does not
+  affect the shipped default (`FETCH_WIDTH_FLOOR` remains the constant `10`
+  in every normal deployment).
+- **Cross-layer rank blocking is unchanged.** `sparse_ranking`/
+  `dense_ranking` are still built layer-by-layer in a fixed layer order, so
+  with `layers=None` a hit in an earlier-iterated layer can still precede a
+  more relevant hit in a later one. `evals/fusion_gate.py`'s multi-layer
+  axis measures this; the fix itself is deferred to a follow-up issue.
+
 ## [1.9.0] — 2026-08-02
 
 ### Fixed

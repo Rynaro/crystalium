@@ -106,6 +106,11 @@ def _make_config(tmp_path: Path, **overrides: Any) -> Config:
     # covers Composer-only construction, but this keeps Config itself complete
     # for any code path that reads it directly).
     cfg.recall_relevance_primary = True
+    # crystalium#38 / S-5: the four new fusion config fields, same rationale.
+    cfg.recall_weighted_fusion = True
+    cfg.fusion_weight_dense = 1.0
+    cfg.fusion_weight_derived = 1.0
+    cfg.fusion_sparse_boost_alpha = 1.0
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     for key, value in overrides.items():
         setattr(cfg, key, value)
