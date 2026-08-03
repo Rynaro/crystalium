@@ -140,7 +140,6 @@ def _build_fixture(relational: Any, graph: Any) -> tuple[list[str], str]:
     # ALWAYS among {N1, N2, N3} (all three edge-bearing), never a coin flip
     # against `target`'s own (edge-less) exhaustion aborting the walk.
     return dense_hits, "target"
-    return dense_hits, "target"
 
 
 def run_arm(
