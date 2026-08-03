@@ -44,6 +44,14 @@ log = structlog.get_logger("crystalium.aetheryte.retrieve")
 # All four valid layer names (from trust.py VALID_LAYERS)
 _ALL_LAYERS: list[str] = ["episodic", "semantic", "procedural", "execution"]
 
+# crystalium#36 seam 3b (DP-R1 / C-12, post-verification): the minimum
+# ARM-SEEDING fetch width once k becomes a real response cap (seam 3).
+# Matches the existing candidate_k floor (max(k*3, 10), below) and the
+# shipped default k (both the MCP manifest and the CLI default to 10) — not
+# a new magic number. Read only under Config.recall_relevance_primary; flag
+# off keeps every arm-seeding slice as bare `[:k]`, byte-identical to 323229f.
+FETCH_WIDTH_FLOOR: int = 10
+
 
 # ---------------------------------------------------------------------------
 # Pure RRF fusion function (tested independently in test_rrf.py)
@@ -351,8 +359,22 @@ class Aetheryte:
                         if cid not in dense_ranking:
                             dense_ranking.append(cid)
 
-            # Graph-expand: neighbours of top-k dense hits (depth=1)
-            seed_ids = dense_ranking[:k]
+            # crystalium#36 seam 3b (gated; DP-R1/C-12): once k means "response
+            # cap" (seam 3), the RANKING UNIVERSE must not shrink with it, or a
+            # small k silently changes which arms vote — seed_ids/completion_seeds
+            # sliced by bare `k` let a narrow window concentrate the graph/
+            # completion walk onto a handful of seeds, handing their
+            # topically-unrelated neighbours enough extra arms to outrank a
+            # fresh, exactly-matching crystal and truncate it out of the k-gate
+            # entirely (vigil's F-V1, verification.md). fetch_width is used for
+            # EVERY arm-seeding slice below; the `[:k]` response slice (seam 3,
+            # already applied earlier) remains the ONLY consumer of caller k.
+            # Flag off: fetch_width == k exactly, so this is a no-op — every
+            # arm-seeding slice stays bare `[:k]`, byte-identical to 323229f.
+            fetch_width = max(k, FETCH_WIDTH_FLOOR) if self.recall_relevance_primary else k
+
+            # Graph-expand: neighbours of top fetch_width dense hits (depth=1)
+            seed_ids = dense_ranking[:fetch_width]
             if seed_ids:
                 try:
                     neighbour_ids = self.graph_store.neighbor_expand(
@@ -372,7 +394,7 @@ class Aetheryte:
             # the top seeds (CA3-analogue). Off -> no 4th arm (byte-identical RRF).
             completion_ranking: list[str] = []
             if self.completion:
-                completion_seeds = seed_ids or sparse_ranking[:k]
+                completion_seeds = seed_ids or sparse_ranking[:fetch_width]
                 if completion_seeds:
                     try:
                         walked = self.graph_store.decaying_walk(
@@ -493,18 +515,44 @@ class Aetheryte:
                 filtered_ids.append(cid)
 
             # crystalium#36 seam 3 (gated by recall_relevance_primary): filtered_ids
-            # is already in descending-RRF order, so truncating to the first k
-            # entries here — BEFORE composer_records is built — makes relevance
-            # decisive over *membership*, not just fetch order, and is the
-            # mechanism by which `k` becomes a hard cap on len(result.records)
-            # (DP-3a). `truncated_by_k_count` feeds budget.truncated_count /
-            # explain.truncated_by_k (DP-7 — kept separate from evicted_count,
-            # which stays token-budget-only). Off -> filtered_ids is untouched and
+            # is already in descending-RRF order — UNLESS `context_match` is on,
+            # in which case it was re-sorted by context-overlap-then-RRF at
+            # step 4b (`fused_ids = sorted(fused_ids, key=lambda cid: -_ctx_overlap(cid))`,
+            # above) before this scope/status filter built filtered_ids from it;
+            # the k-gate below then selects the top-k by THAT order, giving
+            # `context_match` membership power it did not have pre-1.9.0
+            # (vigil's F-V4, verification.md). Harmless as shipped:
+            # `recall_context_match` defaults OFF and is gate-recommended to
+            # stay off (context_pass: false), and seam 5 re-sorts the survivors
+            # by raw RRF regardless (AC-003/AC-007 hold either way). Truncating
+            # to the first k entries here — BEFORE composer_records is built —
+            # makes relevance (or, when context_match is on, context-then-
+            # relevance) decisive over *membership*, not just fetch order, and
+            # is the mechanism by which `k` becomes a hard cap on
+            # len(result.records) (DP-3a). Off -> filtered_ids is untouched and
             # `k` is not a cap (AC-009), matching pre-1.9.0 behaviour exactly.
-            truncated_by_k_count = 0
+            _filtered_ids_before_k = len(filtered_ids)
             if self.recall_relevance_primary:
-                truncated_by_k_count = max(0, len(filtered_ids) - k)
                 filtered_ids = filtered_ids[:k]
+
+            # crystalium#36 / DP-R3 / C-14: truncated_count and k_applied are
+            # derived from the slice ACTUALLY PERFORMED above, never from
+            # pre-slice intent. Attack D (delete the `filtered_ids[:k]` line
+            # above, keep a counter computed independently of it) shipped
+            # `k_requested=15, k_applied=20, truncated_count=5` — five drops
+            # that never happened — while an arithmetic-only oracle stayed
+            # green (verification.md F-V3). Comparing the real before/after
+            # lengths of the block above makes both fields true by
+            # construction: delete that slice and `len(filtered_ids)` no
+            # longer shrinks, so `truncated_by_k_count` collapses to 0 here
+            # too — the counter cannot diverge from the code it describes.
+            # `k_applied_count` is capped at `k` by `min(...)`, so
+            # `k_applied <= k_requested` holds in EVERY configuration
+            # (including flag-off, where no slice runs and the real result
+            # set may exceed k — AC-009; DP-7 keeps `evicted_count` — the
+            # token-budget counter — entirely separate, AC-032).
+            truncated_by_k_count = _filtered_ids_before_k - len(filtered_ids)
+            k_applied_count = min(k, _filtered_ids_before_k)
 
             # Build Crystal-like objects for the composer
             now = datetime.now(timezone.utc)
@@ -702,7 +750,9 @@ class Aetheryte:
                     "project_keys_present": sorted(store_stats["by_project"].keys()),
                     # crystalium#36 / DP-3c: k-gate diagnosability, present in both
                     # flag modes (truncated_by_k_count is 0 when the flag is off).
-                    "k_applied": len(result_records),
+                    # Same slice-derived values as `budget` below (DP-R3/C-14) —
+                    # explain and budget never disagree.
+                    "k_applied": k_applied_count,
                     "truncated_by_k": truncated_by_k_count,
                 }
 
@@ -712,11 +762,15 @@ class Aetheryte:
             # come from Config (DP-3b: the budget itself never scales with k);
             # truncated_count is the k-gate-only drop count (DP-7 — evicted_count
             # keeps its existing, token-budget-only meaning, untouched below).
+            # k_applied/truncated_count are slice-derived (DP-R3/C-14), NOT
+            # `len(result_records)` — the composer's own token-budget eviction
+            # (evicted_count) can further shrink the final result set below
+            # k_applied; that is a SEPARATE, already-counted signal (AC-032).
             budget = Budget(
                 total_cap=self.composer.config.total_cap,
                 slots=dict(self.composer.config.slots),
                 k_requested=k,
-                k_applied=len(result_records),
+                k_applied=k_applied_count,
                 truncated_count=truncated_by_k_count,
             )
 

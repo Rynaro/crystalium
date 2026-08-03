@@ -386,27 +386,47 @@ class TestScorePopulated:
 
 
 # ---------------------------------------------------------------------------
-# AC-007 — descending score ordering (default configuration)
+# AC-007 — descending score ordering (default configuration), STRENGTHENED
+# per DP-R2/C-13 (revision 2.1.0 amendment)
 # ---------------------------------------------------------------------------
 
 
 class TestOrdering:
-    def test_records_ordered_by_descending_score(
+    def test_evicting_slot_emits_descending_score(
         self, tmp_path: Path, tmp_relational_store: RelationalStore
     ) -> None:
+        """AC-007, strengthened (was test_records_ordered_by_descending_score).
+
+        vigil's F-V2: the previous fixture (3 short records, 800-token slot)
+        never evicted, so Pass-1 never touched `remaining` (sorted ASCENDING
+        by eviction key) and insertion order was already descending —
+        deleting seam 5's output sort (attack E) left the old node GREEN even
+        though seam 5 is the ONLY code guaranteeing descending order. THIS
+        fixture forces >=1 eviction: four candidates (differing BM25 rank via
+        document-length normalisation — FTS5 MATCH is implicit-AND, so every
+        summary must contain all three query terms, per
+        relational.py:_fts5_query) routed to one 30-token episodic slot.
+        Total = 3+10+17+24 = 54 tokens > 30 -> Pass 1 evicts exactly the
+        lowest-relevance survivor (c4, 24 tokens; 54-24=30, not > cap) and
+        reassembles the slot from `remaining` (POST-pop order [c3, c2, c1] —
+        ASCENDING relevance, the worst-first order F-V2 warned about). Only
+        seam 5's final sort turns that into [c1, c2, c3] (descending).
+        Gate proof: deleting the seam-5 sort must turn this RED (verified
+        manually — see the maker's attack-sanity notes).
+        """
         query = "alpha bravo charlie"
-        # FTS5 MATCH is implicit-AND across terms (relational.py:_fts5_query) —
-        # every crystal must contain ALL THREE query terms to become a candidate
-        # at all. Differing document LENGTH (same term set, more filler words)
-        # differentiates BM25 rank via length normalisation: the shortest exact
-        # match ranks best, the longest padded one ranks worst.
+        # FTS5 MATCH is implicit-AND across terms — every crystal must contain
+        # all three query terms to become a candidate at all. Differing
+        # document LENGTH (same term set, more filler words) differentiates
+        # BM25 rank via length normalisation: the shortest exact match ranks
+        # best, the longest padded one ranks worst.
         tmp_relational_store.insert_crystal(
             _crystal_dict(id="c1", summary="alpha bravo charlie", importance=0.1)
         )
         tmp_relational_store.insert_crystal(
             _crystal_dict(
                 id="c2",
-                summary="alpha bravo charlie plus some extra padding filler words here",
+                summary="alpha bravo charlie one two three four five six seven",
                 importance=0.9,
             )
         )
@@ -414,19 +434,32 @@ class TestOrdering:
             _crystal_dict(
                 id="c3",
                 summary=(
-                    "alpha bravo charlie with considerably more additional padding "
-                    "filler words present in this much longer document body overall"
+                    "alpha bravo charlie one two three four five six seven eight "
+                    "nine ten eleven twelve thirteen fourteen"
                 ),
                 importance=0.9,
             )
         )
-        aetheryte = _build_aetheryte(tmp_path, tmp_relational_store)
+        tmp_relational_store.insert_crystal(
+            _crystal_dict(
+                id="c4",
+                summary=(
+                    "alpha bravo charlie one two three four five six seven eight "
+                    "nine ten eleven twelve thirteen fourteen fifteen sixteen "
+                    "seventeen eighteen nineteen twenty twentyone"
+                ),
+                importance=0.9,
+            )
+        )
+        aetheryte = _build_aetheryte(tmp_path, tmp_relational_store, episodic_cap=30)
 
         result = aetheryte.recall(
             scope=Scope(project="proj-a"), query=query, k=10,
             layers=["episodic"], caller_tier=Tier.T1,
         )
-        assert len(result.records) >= 2
+        ids = [r.id for r in result.records]
+        assert "c4" not in ids, f"c4 (lowest relevance) should have been evicted; got {ids}"
+        assert len(result.records) >= 2, "fixture must survive with >=2 records to prove ordering"
         scores = [r.score for r in result.records]
         assert scores == sorted(scores, reverse=True), f"expected non-increasing score order, got {scores}"
 
@@ -637,7 +670,8 @@ class TestColdStartImportance:
 
 
 # ---------------------------------------------------------------------------
-# AC-015..019 — budget surfaced
+# AC-015..019, AC-032 — budget surfaced (AC-016/AC-017 strengthened, AC-032
+# new-by-relocation, per DP-R3/C-14 — revision 2.1.0 amendment)
 # ---------------------------------------------------------------------------
 
 
@@ -657,21 +691,71 @@ class TestBudgetSurfaced:
         assert result.budget.k_applied == len(result.records)
         assert result.budget.truncated_count >= 0
 
-    def test_truncated_count_reports_k_drops(
+    def test_truncated_count_derived_from_real_slice(
         self, tmp_path: Path, tmp_relational_store: RelationalStore
     ) -> None:
+        """AC-016, strengthened per DP-R3/C-14 (was test_truncated_count_reports_k_drops).
+
+        The oracle asserts the SLICE IDENTITY: `len(records) + truncated_count
+        == candidates-before-the-slice`, not bare arithmetic (`8 - 3`) — a
+        counter computed from pre-slice INTENT rather than the performed act
+        can satisfy `8 - 3 == 5` while being completely disconnected from
+        reality (verification.md F-V3: attack D — delete `filtered_ids =
+        filtered_ids[:k]`, keep the old counter — shipped `truncated_count=5`
+        for zero actual drops, and the old bare-arithmetic oracle stayed
+        green). The identity catches that shape of defect: it only holds when
+        `truncated_count` is genuinely `before - after`.
+        """
         query = "cardamom lissome vantablack"
         _insert_matching_crystals(tmp_relational_store, 8, query)
         aetheryte = _build_aetheryte(tmp_path, tmp_relational_store)
+
+        # Independent baseline: candidates-before-the-slice, observed via a
+        # k large enough that seam 3 never truncates (8 candidates < k=100).
+        baseline = aetheryte.recall(
+            scope=Scope(project="proj-a"), query=query, k=100,
+            layers=["episodic"], caller_tier=Tier.T1,
+        )
+        candidates_before_slice = len(baseline.records)
+        assert candidates_before_slice == 8  # sanity: the fixture's own count
+
         result = aetheryte.recall(
             scope=Scope(project="proj-a"), query=query, k=3,
             layers=["episodic"], caller_tier=Tier.T1,
         )
         assert result.budget.truncated_count == 8 - 3
+        assert len(result.records) + result.budget.truncated_count == candidates_before_slice
+
+    def test_k_applied_never_exceeds_k_requested(
+        self, tmp_path: Path, tmp_relational_store: RelationalStore
+    ) -> None:
+        """AC-017, strengthened / re-subjected per DP-R3/C-14 (new node — the
+        `evicted_count == 0` pin this ID previously carried relocates
+        verbatim to AC-032 / test_evicted_count_excludes_k_truncation below).
+
+        `k_applied = min(k_requested, len(before))` makes `k_applied <=
+        k_requested` true BY CONSTRUCTION, in every configuration. Under
+        attack D the shipped object reported `k_requested=15, k_applied=20`
+        (`k_applied > k_requested`) while every existing oracle stayed green
+        (verification.md F-V3).
+        """
+        query = "starwise glockenfen tarrow"
+        _insert_matching_crystals(tmp_relational_store, 8, query)
+        aetheryte = _build_aetheryte(tmp_path, tmp_relational_store)
+        for k in (1, 3, 5, 8, 15, 100):
+            result = aetheryte.recall(
+                scope=Scope(project="proj-a"), query=query, k=k,
+                layers=["episodic"], caller_tier=Tier.T1,
+            )
+            assert result.budget.k_applied <= result.budget.k_requested, (
+                f"k_applied={result.budget.k_applied} > k_requested={result.budget.k_requested} at k={k}"
+            )
 
     def test_evicted_count_excludes_k_truncation(
         self, tmp_path: Path, tmp_relational_store: RelationalStore
     ) -> None:
+        """AC-032 (relocated verbatim from revision 2.0.0's AC-017 when that ID
+        took the k_applied invariant above; text and body unchanged)."""
         query = "hexalith prismwatch dunnage"
         _insert_matching_crystals(tmp_relational_store, 8, query)
         aetheryte = _build_aetheryte(tmp_path, tmp_relational_store)

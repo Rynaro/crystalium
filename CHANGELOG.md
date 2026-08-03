@@ -21,6 +21,12 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   effectively unretrievable, making `commit` silent write-only storage. Relevance is
   now the primary composition signal, with `importance` retained as the secondary.
   Revertible via `recall_relevance_primary: false`. (#36)
+- **The retrieval arms' seed width no longer follows the caller's `k`.** Graph and
+  completion arm membership was seeded from `dense_ranking[:k]`, so a small `k` changed
+  which arms voted, not just how many records came back — at `k<=3` that could push a
+  freshly committed, exactly-matching crystal out of the result entirely. Arm seeding
+  now uses `max(k, 10)`; the `k` slice remains the only consumer of the caller's `k`.
+  (#36)
 - **`k` is now an upper bound on the number of returned records.** It previously only
   sized the per-layer candidate fetch (`max(k*3, 10)`) and the graph seed set, so
   `k=3` and `k=15` returned identical result sets. `k` is also clamped to `[1, 100]`

@@ -188,17 +188,31 @@ class Composer:
         self,
         config: Config,
         tokenizer: Callable[[str], int] | None = None,
-        recall_relevance_primary: bool = True,
+        recall_relevance_primary: bool | None = None,
     ) -> None:
         self.config = config
         self._tokenize: Callable[[str], int] = tokenizer if tokenizer is not None else _TOKENIZER
         # crystalium#36 / FORGE DP-2: gates the eviction key (seam 4) and the
         # final response ordering (seam 5) as one unit with Aetheryte's own
-        # recall_relevance_primary flag (seam 3, top-k truncation). Wired from
+        # recall_relevance_primary flag (seam 3+3b). Wired from
         # Config.recall_relevance_primary at server.py's composer construction
-        # site; explicit kwarg (not a config read) so a bare `Composer(config)`
-        # in a test predating this change still defaults to the new behaviour.
-        self.recall_relevance_primary = recall_relevance_primary
+        # site; explicit kwarg (not a bare `self.config` read) so a bare
+        # `Composer(config)` in a test predating this change still gets the
+        # new behaviour without threading the flag through every call site.
+        #
+        # C-16 / DP-R4(iii) (post-verification, D3 sentinel): defaults to
+        # `None`, which falls back to `config.recall_relevance_primary`,
+        # rather than a bare `True`. vigil's D3 finding: a hardcoded `True`
+        # default meant a FUTURE third construction site that forgot the
+        # kwarg would silently run seams 4+5 ON while Aetheryte's seam 3(b)
+        # stayed OFF (a half-gated mode no criterion covers, in which
+        # `Config.recall_relevance_primary=False` is silently ignored). Both
+        # existing production call sites (server.py, __main__.py) keep their
+        # explicit `recall_relevance_primary=config.recall_relevance_primary`
+        # kwarg, so behaviour at each is byte-identical to before this sentinel.
+        self.recall_relevance_primary = (
+            config.recall_relevance_primary if recall_relevance_primary is None else recall_relevance_primary
+        )
 
     # ------------------------------------------------------------------
     # Public API
