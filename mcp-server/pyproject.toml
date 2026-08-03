@@ -15,7 +15,7 @@ authors = [
 ]
 
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.2.0,<2",
     "pydantic>=2.6",
     "lancedb>=0.6",
     "kuzu>=0.4",

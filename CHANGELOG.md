@@ -42,6 +42,10 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   `additionalProperties: false` while omitting the v1.6 `explain` field; `budget` and
   `explain` are both declared now, and a round-trip test validates a live
   `RecallResult` against the file. (#36)
+- **Pin `mcp` SDK to `>=1.2.0,<2`.** `mcp` 2.0.0 removed the low-level
+  `Server.list_tools` decorator API; unpinned fresh builds (CI and release
+  images) installed it and broke the server at import. Migration tracked
+  separately.
 
 ### Added
 
