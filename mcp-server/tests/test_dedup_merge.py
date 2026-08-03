@@ -21,14 +21,14 @@ from crystalium.trust import Tier
 _NOW = datetime(2026, 5, 30, tzinfo=timezone.utc)
 
 
-def _existing(cid: str) -> dict:
+def _existing(cid: str, *, importance: float = 0.0) -> dict:
     return {
         "id": cid, "layer": "episodic", "trust_tier": "T1",
         "validation_state": "unverified", "status": "active", "summary": "auth uses argon2",
         "content_ref": "a" * 64, "scope": {"project": "p"},
         "provenance": {"source": "verified_agent", "author_agent": "agent-a",
                        "created_at": _NOW.isoformat()},
-        "utility": {"access_count": 0, "last_access": _NOW.isoformat(), "importance": 0.0,
+        "utility": {"access_count": 0, "last_access": _NOW.isoformat(), "importance": importance,
                     "novelty_at_write": 0.5},
         "temporal": {"t_valid_from": _NOW.isoformat()},
     }
@@ -45,10 +45,12 @@ def test_merge_provenance_unions_and_bumps(tmp_path: Path) -> None:
     assert store.merge_provenance("missing", {"source": "human"}) is False
 
 
-def _layer(tmp_path: Path, *, dedup_merge: bool, vec_hit_distance: float | None):
+def _layer(
+    tmp_path: Path, *, dedup_merge: bool, vec_hit_distance: float | None, existing_importance: float = 0.0
+):
     cfg = Config(data_dir=tmp_path / f"d-{dedup_merge}-{vec_hit_distance}", rate_limit_per_minute=10000)
     store = RelationalStore(db_path=cfg.sqlite_path)
-    store.insert_crystal(_existing("existing"))
+    store.insert_crystal(_existing("existing", importance=existing_importance))
     vec = MagicMock()
     vec.embed.return_value = [0.1, 0.2, 0.3]
     vec.dense_search.return_value = (
@@ -81,6 +83,22 @@ def test_dedup_merge_merges_near_duplicate(tmp_path: Path) -> None:
     assert res["id"] == "existing"
     assert _rowcount(store) == before                       # no new row
     assert store.get_crystal("existing")["provenance"]["corroboration"] == 2
+
+
+def test_dedup_merge_echoes_existing_importance(tmp_path: Path) -> None:
+    """D1 deviation, verification.md caveat: the merge echo must report the
+    ALREADY-STORED importance of the crystal that absorbed the merge, not the
+    literal 0.0 pre-1.9.0 hardcoded a fresh-commit cold-start value would be
+    (critique F2). Uses a NONZERO existing importance (0.0 cannot discriminate
+    "correctly echoed" from "still hardcoded 0.0" — test_dedup_merge_merges_
+    near_duplicate above only ever exercised the 0.0 case)."""
+    layer, store = _layer(tmp_path, dedup_merge=True, vec_hit_distance=0.05, existing_importance=0.42)
+    res = layer.commit(payload={"summary": "auth uses argon2", "scope": {"project": "p"}},
+                       provenance={"source": "verified_agent", "author_agent": "agent-b"},
+                       caller_tier=Tier.T1)
+    assert res["status"] == "merged"
+    assert res["importance"] == 0.42
+    assert store.get_crystal("existing")["utility"]["importance"] == 0.42  # untouched by the merge
 
 
 def test_dedup_below_threshold_inserts(tmp_path: Path) -> None:

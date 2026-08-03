@@ -24,6 +24,7 @@ import structlog
 from crystalium.enforcement import Enforcement, VerifierFailed
 from crystalium.gate import PromotionGate, SkillResult
 from crystalium.aetheryte.redact import Redactor
+from crystalium.importance import initial_importance
 from crystalium.schemas import Provenance
 from crystalium.telemetry import now_ms
 from crystalium.trust import Tier
@@ -142,6 +143,7 @@ class ProceduralLayer:
             scope = payload.get("scope", {})
             summary = payload.get("summary", "")
 
+            # crystalium#36 / DP-4=C: cold-start importance, clamped.
             utility = {
                 "access_count": 0,
                 "last_access": now.isoformat(),
@@ -149,6 +151,7 @@ class ProceduralLayer:
                 "importance": 0.0,
                 "novelty_at_write": payload.get("novelty_at_write", 0.5),
             }
+            utility["importance"] = initial_importance(self.importance_fn, utility, now)
 
             from crystalium.protection import resolve_encoding_context, resolve_protection
             protected, tags = resolve_protection(payload, prov_dict.get("source"))
@@ -190,7 +193,8 @@ class ProceduralLayer:
                 "id": crystal_id,
                 "layer": "procedural",
                 "validation_state": validation_state,
-                "importance": 0.0,
+                # DP-4c: echo the computed cold-start value.
+                "importance": utility["importance"],
                 "content_ref": content_ref,
             }
 

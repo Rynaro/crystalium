@@ -5,7 +5,7 @@
   "description": "Output contract for crystalium.recall(). Slot breakdown mirrors the Baddeley working-set model (MISSION.md §Bounded, slotted working set).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["records", "slot_breakdown", "total_tokens", "evicted_count"],
+  "required": ["records", "slot_breakdown", "total_tokens", "evicted_count", "budget"],
   "properties": {
     "records": {
       "type": "array",
@@ -84,8 +84,45 @@
     },
     "evicted_count": {
       "type": "integer",
-      "description": "Number of candidates evicted to satisfy the token budget.",
+      "description": "Number of candidates evicted to satisfy the token budget (token-budget drops ONLY — never includes candidates dropped by the k gate; see budget.truncated_count).",
       "minimum": 0
+    },
+    "budget": {
+      "type": "object",
+      "description": "Working-set budget (crystalium#36, v1.9.0). ALWAYS present, in every recall_relevance_primary mode — an explain-only budget would recreate the discoverability failure issue #36 is about.",
+      "additionalProperties": false,
+      "required": ["total_cap", "slots", "k_requested", "k_applied", "truncated_count"],
+      "properties": {
+        "total_cap": {
+          "type": "integer",
+          "description": "Fixed hard token cap for the assembled working set (currently 3500; never scales with k).",
+          "minimum": 0
+        },
+        "slots": {
+          "type": "object",
+          "description": "Per-slot token caps (mirrors Config.slots: executive, procedural, semantic, episodic, execution, buffer)."
+        },
+        "k_requested": {
+          "type": "integer",
+          "description": "The caller's k, post-clamp to [1, 100].",
+          "minimum": 0
+        },
+        "k_applied": {
+          "type": "integer",
+          "description": "Number of records actually returned in this response.",
+          "minimum": 0
+        },
+        "truncated_count": {
+          "type": "integer",
+          "description": "Candidates dropped by the k gate only (never folded with evicted_count, which stays token-budget-only).",
+          "minimum": 0
+        }
+      }
+    },
+    "explain": {
+      "type": "object",
+      "description": "v1.6+ diagnostic object, populated only when the caller opts in (explain=true). Diagnostic/unstable — additionalProperties is intentionally loose so evolving keys (e.g. k_applied, truncated_by_k) never re-drift this schema. See aetheryte/retrieve.py::recall() docstring for the current shape.",
+      "additionalProperties": true
     }
   }
 }

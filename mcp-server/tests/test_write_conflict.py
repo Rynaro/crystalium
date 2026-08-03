@@ -22,20 +22,20 @@ from crystalium.trust import Tier
 _NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
 
 
-def _prior(cid: str, summary: str, *, tier="T1", project="p") -> dict:
+def _prior(cid: str, summary: str, *, tier="T1", project="p", importance: float = 0.0) -> dict:
     return {
         "id": cid, "layer": "semantic", "trust_tier": tier,
         "validation_state": "validated", "status": "active", "summary": summary,
         "content_ref": "a" * 64, "scope": {"project": project},
         "provenance": {"source": "verified_agent", "created_at": _NOW.isoformat()},
-        "utility": {"importance": 0.0}, "temporal": {"t_valid_from": _NOW.isoformat()},
+        "utility": {"importance": importance}, "temporal": {"t_valid_from": _NOW.isoformat()},
     }
 
 
-def _layer(tmp_path: Path, *, conflict: bool, dist: float):
+def _layer(tmp_path: Path, *, conflict: bool, dist: float, prior_importance: float = 0.0):
     cfg = Config(data_dir=tmp_path / f"wc-{conflict}", rate_limit_per_minute=100000)
     store = RelationalStore(db_path=cfg.sqlite_path)
-    store.insert_crystal(_prior("old", "deploys use blue-green"))
+    store.insert_crystal(_prior("old", "deploys use blue-green", importance=prior_importance))
     vec = MagicMock()
     vec.embed.return_value = [0.1, 0.2, 0.3]
     vec.dense_search.return_value = [{"id": "old", "_distance": dist}]
@@ -97,3 +97,16 @@ def test_near_duplicate_not_a_conflict(tmp_path: Path) -> None:
     # dedup-merge absorbs it as corroboration (W5 behavior); no conflict recorded
     assert res["status"] == "merged"
     assert store.list_conflicts() == []
+
+
+def test_near_duplicate_echoes_existing_importance(tmp_path: Path) -> None:
+    """D1 deviation, verification.md caveat: the semantic dedup-merge echo
+    must report the ALREADY-STORED importance of the crystal that absorbed
+    the merge, not a literal 0.0 (critique F2). NONZERO prior importance —
+    0.0 cannot discriminate "correctly echoed" from "still hardcoded 0.0"
+    (test_near_duplicate_not_a_conflict above only ever exercised 0.0)."""
+    layer, store = _layer(tmp_path, conflict=True, dist=0.03, prior_importance=0.37)
+    res = _commit_divergent(layer)
+    assert res["status"] == "merged"
+    assert res["importance"] == 0.37
+    assert store.get_crystal("old")["utility"]["importance"] == 0.37  # untouched by the merge

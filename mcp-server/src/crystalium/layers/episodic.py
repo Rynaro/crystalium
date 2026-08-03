@@ -19,6 +19,7 @@ import structlog
 
 from crystalium.enforcement import Enforcement
 from crystalium.aetheryte.redact import Redactor
+from crystalium.importance import initial_importance
 from crystalium.schemas import Provenance
 from crystalium.telemetry import now_ms
 from crystalium.trust import Tier
@@ -167,13 +168,26 @@ class EpisodicLayer:
             if dup_id is not None:
                 self.relational.merge_provenance(dup_id, prov_dict)
                 log.info("episodic_dedup_merged", merged_into=dup_id)
+                # crystalium#36 (critique F2): this is a merge echo, not a fresh
+                # commit — the merged-into crystal already has its own stored
+                # importance. Echoing the literal 0.0 misreported it whenever the
+                # absorbing crystal had earned a non-zero score; report the
+                # ALREADY-STORED value instead. Out of AC-010's scope (that AC
+                # covers only the non-dedup commit path) — best-effort: a lookup
+                # failure falls back to 0.0 rather than raising.
+                merged_crystal = self.relational.get_crystal(dup_id)
+                merged_importance = (
+                    float((merged_crystal.get("utility") or {}).get("importance", 0.0))
+                    if merged_crystal is not None
+                    else 0.0
+                )
                 return {
                     "status": "merged",
                     "id": dup_id,
                     "layer": "episodic",
                     "merged_into": dup_id,
                     "validation_state": validation_state,
-                    "importance": 0.0,
+                    "importance": merged_importance,
                 }
 
             # Serialize payload to bytes for blob storage
@@ -183,7 +197,11 @@ class EpisodicLayer:
             # 4. Put blob (P0-8: index→pointer→content)
             content_ref = self.blob_store.put(payload_bytes)
 
-            # Build utility stub (importance scored from access baseline)
+            # Build utility stub (importance scored from access baseline).
+            # crystalium#36 / DP-4=C: cold-start importance from the injected
+            # importance_fn, clamped to COLD_START_IMPORTANCE_CEILING — no longer
+            # a hardcoded 0.0 that pins a fresh crystal below every accumulated
+            # record regardless of topic.
             utility = {
                 "access_count": 0,
                 "last_access": now.isoformat(),
@@ -191,6 +209,7 @@ class EpisodicLayer:
                 "importance": 0.0,
                 "novelty_at_write": payload.get("novelty_at_write", 0.5),
             }
+            utility["importance"] = initial_importance(self.importance_fn, utility, now)
 
             scope = payload.get("scope", {})
             summary = payload.get("summary", "")
@@ -259,7 +278,8 @@ class EpisodicLayer:
                 "id": crystal_id,
                 "layer": "episodic",
                 "validation_state": validation_state,
-                "importance": 0.0,
+                # DP-4c: echo the computed cold-start value (no longer a bare 0.0).
+                "importance": utility["importance"],
                 "content_ref": content_ref,
             }
 

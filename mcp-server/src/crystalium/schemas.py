@@ -235,6 +235,26 @@ class SlotBreakdown(BaseModel):
     buffer: int = Field(ge=0)
 
 
+class Budget(BaseModel):
+    """Working-set budget surfaced on every RecallResult (crystalium#36, DP-3c).
+
+    Always present (never explain-gated) — an explain-only budget would
+    recreate the exact discoverability failure issue #36 is about. `k` is
+    documented as an upper bound *subject to* the fixed `total_cap` token
+    budget (DP-3b: the budget itself never scales with k).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_cap: int = Field(ge=0)
+    slots: dict[str, int]
+    k_requested: int = Field(ge=0)
+    k_applied: int = Field(ge=0)
+    #: Candidates dropped by the `k` gate only (DP-7) — NEVER folded with
+    #: `evicted_count`, which keeps its existing meaning (token-budget drops).
+    truncated_count: int = Field(ge=0)
+
+
 class RecallResult(BaseModel):
     """Mirrors recall-result.v1.json."""
 
@@ -244,6 +264,7 @@ class RecallResult(BaseModel):
     slot_breakdown: SlotBreakdown
     total_tokens: int = Field(ge=0, le=3500)
     evicted_count: int = Field(ge=0)
+    budget: Budget
     # v1.6 `recall --explain` (diagnosability). Populated only when the caller
     # opts in (explain=True); absent (None) otherwise, and callers should dump
     # with exclude_none=True so a normal recall's JSON shape is unchanged.

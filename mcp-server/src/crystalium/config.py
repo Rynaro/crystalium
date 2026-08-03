@@ -203,6 +203,16 @@ class Config:
     write_dedup_merge: bool = True         # W5 gate PASS (confound-free): merge near-dups at write
     sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
     recall_prefetch: bool = False          # protention: pre-warm recall cache on plan_checkpoint
+    # crystalium#36 fix (v1.9.0): relevance is the primary composition signal (the
+    # RRF-fused query relevance gates + orders the working set), importance is
+    # retained as the secondary/tiebreak signal. Gates seams 3+4+5 (top-k truncation,
+    # relevance-primary eviction key, descending-relevance ordering) as ONE unit —
+    # everything else in the fix (score, budget, k clamp, cold-start importance) is
+    # ungated. Default ON: earned by CORRECTNESS (a fresh crystal must be retrievable
+    # at all), not by an ablation win — unlike every other W5/W6 flag above, this one
+    # is not an optional faculty. Set False for a one-line revert to pre-1.9.0
+    # composition ordering, k behaviour and result sets (R-1).
+    recall_relevance_primary: bool = True
 
     # Security & integrity hardening (W6) — each defense behind its own flag,
     # default OFF (ablation-or-revert; the poisoning ASR gate is the arbiter).
@@ -305,6 +315,7 @@ class Config:
             write_dedup_merge=_env_bool("CRYSTALIUM_WRITE_DEDUP_MERGE", True),
             sep_threshold=_env_float("CRYSTALIUM_SEP_THRESHOLD", 0.92),
             recall_prefetch=_env_bool("CRYSTALIUM_RECALL_PREFETCH", False),
+            recall_relevance_primary=_env_bool("CRYSTALIUM_RECALL_RELEVANCE_PRIMARY", True),
             drift_detect=_env_bool("CRYSTALIUM_DRIFT_DETECT", False),
             drift_tau_lo=_env_float("CRYSTALIUM_DRIFT_TAU_LO", 0.80),
             drift_tau_hi=_env_float("CRYSTALIUM_DRIFT_TAU_HI", 0.97),
@@ -334,6 +345,7 @@ class Config:
             "forgetting_fsrs",
             "recall_completion", "recall_context_match", "write_dedup_merge", "recall_prefetch",
             "drift_detect", "write_conflict_detect", "recall_active_only",
+            "recall_relevance_primary",
         ):
             if bool_field in data:
                 kwargs[bool_field] = bool(data[bool_field])

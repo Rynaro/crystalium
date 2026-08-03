@@ -107,7 +107,26 @@ class TierViolation(CrystaliumEnforcementError):
         self.op = op
         super().__init__(
             f"Tier {tier} is not permitted for {op!r} on layer {layer!r} via {tool!r}.",
-            advice=f"Use a lower-trust layer or escalate caller identity above {tier}.",
+            # DX-2 / C-9 (crystalium#36): name a real mechanism and a real layer.
+            # "Escalate caller identity" named nothing — identity is resolved ONCE
+            # at server start from CRYSTALIUM_CALLER_EIDOLON / CRYSTALIUM_CALLER_TIER
+            # (server._extract_caller_identity), host/env configuration, not
+            # escalatable per call. T2's real fallback is 'procedural' (accepted,
+            # lands validation_state='candidate' per gate.py's G2 rule) or
+            # 'episodic'. C-9 (binding): must NOT state or imply T2->semantic
+            # promotion — gate.propose_procedural (G2) makes a T2 proposal stay
+            # 'candidate' forever; a passing verifier never admits it to
+            # shared/validated. Promotion to a validated/semantic record requires
+            # a T1/T0 proposer through the corroboration gate, not this fallback.
+            advice=(
+                f"Layer {layer!r} is not writable at tier {tier}. T2 callers should "
+                "commit to 'procedural' (accepted, lands validation_state='candidate' "
+                "per G2 — it stays candidate; promotion to a validated/semantic "
+                "record requires a T1/T0 proposer through the corroboration gate) or "
+                "to 'episodic'. Caller identity is set by the host at server start "
+                "via CRYSTALIUM_CALLER_EIDOLON / CRYSTALIUM_CALLER_TIER and cannot be "
+                "escalated per call."
+            ),
         )
 
 

@@ -215,10 +215,15 @@ def index(path: Path, config_path: Optional[Path], extensions: tuple[str, ...]) 
 )
 @click.option(
     "--k",
-    default=10,
-    type=int,
+    default="10",
+    type=str,
     show_default=True,
-    help="Max records to return (clamped max(0, int)).",
+    help=(
+        "Max records to return. Clamped to [1, 100] (crystalium#36 / C-11); a "
+        "non-numeric value falls back to 10 rather than raising — accepts a raw "
+        "string (not click's int type) so a garbage value degrades instead of "
+        "being rejected at the CLI parse layer."
+    ),
 )
 @click.option(
     "--layers",
@@ -262,7 +267,7 @@ def recall(
     query: str,
     scope_project: str,
     scope_visibility: Optional[str],
-    k: int,
+    k: str,
     layers_csv: Optional[str],
     full: bool,
     fmt: str,
@@ -297,7 +302,7 @@ def recall(
     from crystalium.composer import Composer
     from crystalium.enforcement import Enforcement
     from crystalium.schemas import Scope
-    from crystalium.server import _NullVectorStore, _NullGraphStore
+    from crystalium.server import _NullVectorStore, _NullGraphStore, normalize_k
     from crystalium.storage.relational import RelationalStore
     from crystalium.trust import Tier
 
@@ -310,7 +315,7 @@ def recall(
     relational = RelationalStore(db_path=config.sqlite_path)
     enforcement = Enforcement(config)
     redactor = Redactor(config=config)
-    composer = Composer(config)
+    composer = Composer(config, recall_relevance_primary=config.recall_relevance_primary)
     importance_fn = _select_importance_fn(config)
 
     if full:
@@ -344,6 +349,7 @@ def recall(
         persist_dynamics=False,
         forgetting_fsrs=False,
         recall_active_only=config.recall_active_only,
+        recall_relevance_primary=config.recall_relevance_primary,
     )
 
     # Parse and validate --layers CSV.
@@ -360,7 +366,9 @@ def recall(
 
     scope = Scope(project=scope_project, agent_class_visibility=scope_visibility, sensitivity_tag=None)
     caller_tier = Tier.from_str(os.environ.get("CRYSTALIUM_CALLER_TIER", "T1"))
-    k_clamped = max(0, int(k))
+    # crystalium#36 / DP-3d / C-11: same clamp-to-[1,100] / fallback-to-10 rule as
+    # server._handle_recall (normalize_k is the single source of truth for both).
+    k_clamped = normalize_k(k)
 
     try:
         result = aetheryte.recall(

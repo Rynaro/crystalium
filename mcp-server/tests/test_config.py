@@ -364,6 +364,32 @@ class TestRetrievalFlags:
         assert cfg.completion_decay == 0.7
 
 
+class TestRecallRelevancePrimary:
+    """crystalium#36 / DP-2: relevance-primary composition flag. Default ON —
+    earned by CORRECTNESS (a fresh crystal must be retrievable), not an
+    ablation win, unlike every other W5/W6 flag above."""
+
+    def test_default_true(self, tmp_path: Path) -> None:
+        cfg = Config(data_dir=tmp_path)
+        assert cfg.recall_relevance_primary is True
+
+    def test_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRYSTALIUM_RECALL_RELEVANCE_PRIMARY", "false")
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.recall_relevance_primary is False
+
+    def test_from_env_default_true_when_unset(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CRYSTALIUM_RECALL_RELEVANCE_PRIMARY", raising=False)
+        monkeypatch.setenv("CRYSTALIUM_DATA_DIR", str(tmp_path / "d"))
+        cfg = Config.from_env()
+        assert cfg.recall_relevance_primary is True
+
+    def test_from_dict(self) -> None:
+        cfg = Config._from_dict({"recall_relevance_primary": False})
+        assert cfg.recall_relevance_primary is False
+
+
 class TestSecurityFlags:
     """W6 security & integrity hardening flags (default OFF — ablation-or-revert)."""
 

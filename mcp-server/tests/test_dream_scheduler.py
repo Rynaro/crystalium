@@ -60,6 +60,9 @@ def _make_config(
     cfg.rate_limit_per_minute = 200
     cfg.install_ts = None
     cfg.repo_root = None
+    # crystalium#36 / C-8: the new Config field, assigned in the same commit
+    # that adds it (R-3).
+    cfg.recall_relevance_primary = True
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     return cfg
 

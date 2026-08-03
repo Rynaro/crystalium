@@ -3,12 +3,22 @@
 P0-9 (MISSION.md §67-74): the composer assembles at most 3 500 tokens from
 typed slots with hard per-slot caps and fully deterministic eviction.
 
-Eviction rule (D9):
-  Pop the record with the LOWEST tuple (importance, last_access, record_id)
-  where "lowest" means:
-    - importance  ascending  (evict least important first)
+Eviction rule (D9, superseded by crystalium#36 / FORGE DP-1 when
+Config.recall_relevance_primary is True — the default since v1.9.0):
+  Pop the record with the LOWEST tuple
+  (relevance_score, importance, last_access, record_id) where "lowest" means:
+    - relevance_score ascending (evict least query-relevant first — PRIMARY
+      signal since v1.9.0; read via getattr(rec, "relevance_score", 0.0) so a
+      record with no relevance_score attribute ties at 0.0, see C-2)
+    - importance  ascending  (evict least important first — the secondary/
+      tiebreak signal since v1.9.0; was the sole/primary key pre-1.9.0)
     - last_access ascending  (evict oldest accessed first, i.e. smaller timestamp)
     - record_id   ascending  (lexicographic tiebreak for reproducibility)
+
+  `recall_relevance_primary=False` restores the pre-1.9.0 rule exactly:
+  (importance, last_access, record_id), and the composer no longer re-sorts
+  its output by relevance either (see `compose()` below) — the emitted order
+  reverts to the historical per-slot / eviction-key artefact order.
 
 Slot allocation (spec.yaml §slots):
   executive  300
@@ -119,10 +129,25 @@ class ComposedSet:
 # ---------------------------------------------------------------------------
 
 
-def _eviction_key(rec: Any) -> tuple[float, datetime, str]:
+def _eviction_key(
+    rec: Any, relevance_primary: bool = True
+) -> tuple[float, float, datetime, str] | tuple[float, datetime, str]:
     """Return the ascending eviction sort key for *rec*.
 
-    Lowest key = evicted first:
+    Lowest key = evicted first.
+
+    When *relevance_primary* is True (crystalium#36 / FORGE DP-1, the default
+    since v1.9.0 via Config.recall_relevance_primary):
+      (relevance_score↑, importance↑, last_access↑, record_id↑)
+
+    `getattr(rec, "relevance_score", 0.0)` is load-bearing, not defensive style
+    (C-2): a record with no relevance_score attribute — e.g. every hand-built
+    stub in the pre-1.9.0 test suite — ties at relevance 0.0, so the legacy
+    (importance, last_access, id) ordering survives intact as the equal-
+    relevance case.
+
+    When *relevance_primary* is False (pre-1.9.0 behaviour, restored by
+    Config.recall_relevance_primary=False):
       (importance↑, last_access↑, record_id↑)
     """
     last_access = rec.last_access
@@ -131,6 +156,9 @@ def _eviction_key(rec: Any) -> tuple[float, datetime, str]:
     # importance: lower importance → evicted sooner → ascending order → use raw value
     # last_access: older access → evicted sooner → ascending order → use raw datetime
     # record_id: lexicographic tiebreak
+    if relevance_primary:
+        relevance = getattr(rec, "relevance_score", 0.0)
+        return (relevance, rec.importance, last_access, rec.id)
     return (rec.importance, last_access, rec.id)
 
 
@@ -160,9 +188,31 @@ class Composer:
         self,
         config: Config,
         tokenizer: Callable[[str], int] | None = None,
+        recall_relevance_primary: bool | None = None,
     ) -> None:
         self.config = config
         self._tokenize: Callable[[str], int] = tokenizer if tokenizer is not None else _TOKENIZER
+        # crystalium#36 / FORGE DP-2: gates the eviction key (seam 4) and the
+        # final response ordering (seam 5) as one unit with Aetheryte's own
+        # recall_relevance_primary flag (seam 3+3b). Wired from
+        # Config.recall_relevance_primary at server.py's composer construction
+        # site; explicit kwarg (not a bare `self.config` read) so a bare
+        # `Composer(config)` in a test predating this change still gets the
+        # new behaviour without threading the flag through every call site.
+        #
+        # C-16 / DP-R4(iii) (post-verification, D3 sentinel): defaults to
+        # `None`, which falls back to `config.recall_relevance_primary`,
+        # rather than a bare `True`. vigil's D3 finding: a hardcoded `True`
+        # default meant a FUTURE third construction site that forgot the
+        # kwarg would silently run seams 4+5 ON while Aetheryte's seam 3(b)
+        # stayed OFF (a half-gated mode no criterion covers, in which
+        # `Config.recall_relevance_primary=False` is silently ignored). Both
+        # existing production call sites (server.py, __main__.py) keep their
+        # explicit `recall_relevance_primary=config.recall_relevance_primary`
+        # kwarg, so behaviour at each is byte-identical to before this sentinel.
+        self.recall_relevance_primary = (
+            config.recall_relevance_primary if recall_relevance_primary is None else recall_relevance_primary
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -183,9 +233,17 @@ class Composer:
           1. Route each record to a slot (layer mapping + executive override).
           2. Count tokens per record using the configured tokenizer.
           3. For each slot: while slot.tokens > slot.cap, evict the record
-             with the lowest (importance, last_access, record_id) tuple (D9).
+             with the lowest eviction key (D9; crystalium#36 seam 4 — see
+             `_eviction_key` for the relevance-primary vs legacy rule).
           4. Assert total_tokens <= total_cap (G6 invariant).
-          5. Return ComposedSet.
+          5. crystalium#36 seam 5 (`self.recall_relevance_primary` only): sort
+             the surviving records by descending `relevance_score`, `id`
+             ascending as tiebreak — the fused query relevance is now decisive
+             in what ordering the caller sees, not an artefact of per-slot
+             insertion order. Flag off: emit in the pre-1.9.0 artefact order
+             (Pass-1 per-slot append order, or Pass-2's ascending-eviction-key
+             order when the global cap pass fired) — byte-identical to D9.
+          6. Return ComposedSet.
 
         Args:
             records: List of _ComposerRecord (or any object with .id, .layer,
@@ -231,7 +289,10 @@ class Composer:
                 continue
 
             # Sort ascending by eviction key (lowest-key = evicted first), trim front.
-            remaining = sorted(items, key=lambda pair: _eviction_key(pair[0]))
+            remaining = sorted(
+                items,
+                key=lambda pair: _eviction_key(pair[0], self.recall_relevance_primary),
+            )
             running_total = slot_total
             while running_total > cap and remaining:
                 evicted_rec, evicted_tokens = remaining.pop(0)
@@ -253,7 +314,7 @@ class Composer:
         # HIGH: the old code asserted instead of evicting and crashed recall). Evict
         # the globally lowest-eviction-key records across ALL slots until within cap.
         if total_tokens > total_cap:
-            kept.sort(key=lambda triple: _eviction_key(triple[0]))
+            kept.sort(key=lambda triple: _eviction_key(triple[0], self.recall_relevance_primary))
             while total_tokens > total_cap and kept:
                 evicted_rec, evicted_tokens, evicted_slot = kept.pop(0)
                 total_tokens -= evicted_tokens
@@ -263,6 +324,15 @@ class Composer:
                           importance=evicted_rec.importance, tokens=evicted_tokens)
 
         kept_records = [rec for rec, _, _ in kept]
+
+        # crystalium#36 seam 5 (DP-6, gated): descending relevance_score, id
+        # ascending tiebreak. `getattr(..., 0.0)` mirrors the eviction key's
+        # degrade-safe read (C-2). Flag off: kept_records keeps whatever order
+        # the two eviction passes above produced (byte-identical to pre-1.9.0).
+        if self.recall_relevance_primary:
+            kept_records.sort(
+                key=lambda rec: (-getattr(rec, "relevance_score", 0.0), rec.id)
+            )
 
         # G6 post-condition: the two-pass eviction guarantees this holds by
         # construction; kept as a hard invariant tripwire.

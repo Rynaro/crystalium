@@ -43,6 +43,7 @@ class _Rec:
         importance: float,
         last_access: datetime,
         slot_override: str | None = None,
+        relevance_score: float | None = None,
     ) -> None:
         self.id = id
         self.layer = layer
@@ -58,6 +59,14 @@ class _Rec:
         self.validation_state = "validated"
         self.content_ref = None
         self.scope_sensitivity_tag = "none"
+        # crystalium#36 / C-2: relevance_score is only SET when a test explicitly
+        # passes it — every stub that omits it stays attribute-less, so
+        # `_eviction_key`'s `getattr(rec, "relevance_score", 0.0)` degrade-safe
+        # read is what makes it tie at 0.0 (not a value we set here to 0.0
+        # ourselves), which is precisely what keeps the four
+        # TestG6EvictionDeterministic tests meaningful as the equal-relevance case.
+        if relevance_score is not None:
+            self.relevance_score = relevance_score
 
 
 def _make_config(
@@ -96,6 +105,10 @@ def _make_config(
     cfg.rate_limit_per_minute = 200
     cfg.install_ts = None
     cfg.repo_root = None
+    # crystalium#36 / C-8: the new Config field, assigned in the same commit
+    # that adds it (R-3 — an unrelated test must never die with an opaque
+    # AttributeError far from this change).
+    cfg.recall_relevance_primary = True
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     return cfg
 
@@ -205,6 +218,62 @@ class TestG6EvictionDeterministic:
         result = composer.compose(records)
         assert result.evicted_count == 0
         assert len(result.records) == 5
+
+
+# ---------------------------------------------------------------------------
+# crystalium#36 / FORGE DP-1 — relevance-primary eviction key (seam 4)
+# ---------------------------------------------------------------------------
+
+
+class TestRelevancePrimaryEviction:
+    """S-4: _eviction_key is relevance-primary when recall_relevance_primary is
+    True (the Composer default). C-2: getattr(rec, "relevance_score", 0.0) is
+    what keeps every _Rec stub without the attribute (TestG6EvictionDeterministic
+    above) meaningful as the equal-relevance case — these two tests are the
+    UNEQUAL-relevance case."""
+
+    def test_eviction_evicts_least_relevant_first(self) -> None:
+        """A LOW-relevance, HIGH-importance record is evicted before a
+        HIGH-relevance, LOW-importance one — relevance is primary, importance
+        is the secondary/tiebreak signal now (crystalium#36 seam 4)."""
+        cfg = _make_config(episodic_cap=4)  # 3+3=6 words > 4 -> forces exactly one eviction
+        composer = Composer(config=cfg, tokenizer=_word_tokenizer)  # flag ON by default
+
+        low_relevance_high_importance = _Rec(
+            "low-rel", "episodic", "one two three", importance=0.9,
+            last_access=_ts(0), relevance_score=0.01,
+        )
+        high_relevance_low_importance = _Rec(
+            "high-rel", "episodic", "four five six", importance=0.1,
+            last_access=_ts(0), relevance_score=0.9,
+        )
+
+        result = composer.compose([low_relevance_high_importance, high_relevance_low_importance])
+        kept_ids = {r.id for r in result.records}
+
+        assert "high-rel" in kept_ids, "high-relevance record should survive despite low importance"
+        assert "low-rel" not in kept_ids, "low-relevance record should be evicted despite high importance"
+
+    def test_importance_breaks_relevance_ties(self) -> None:
+        """Equal relevance_score -> importance is the tiebreak (the pre-1.9.0
+        rule, preserved as seam 4's secondary key)."""
+        cfg = _make_config(episodic_cap=4)  # 3+3=6 words > 4 -> forces exactly one eviction
+        composer = Composer(config=cfg, tokenizer=_word_tokenizer)
+
+        tied_low_importance = _Rec(
+            "tied-low", "episodic", "one two three", importance=0.1,
+            last_access=_ts(0), relevance_score=0.5,
+        )
+        tied_high_importance = _Rec(
+            "tied-high", "episodic", "four five six", importance=0.9,
+            last_access=_ts(0), relevance_score=0.5,
+        )
+
+        result = composer.compose([tied_low_importance, tied_high_importance])
+        kept_ids = {r.id for r in result.records}
+
+        assert "tied-high" in kept_ids
+        assert "tied-low" not in kept_ids
 
 
 # ---------------------------------------------------------------------------
