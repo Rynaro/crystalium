@@ -6,6 +6,13 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pin `mcp` SDK to `>=1.2.0,<2`.** `mcp` 2.0.0 removed the low-level
+  `Server.list_tools` decorator API; unpinned fresh builds (CI and release
+  images) installed it and broke the server at import. Migration tracked
+  separately.
+
 ## [1.8.1] — 2026-07-17
 
 ### Fixed
