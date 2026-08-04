@@ -520,6 +520,16 @@ def _build_components(
     # completion is on (so OFF arms stay byte-identical to W4).
     recall_cache = RecallCache() if config.recall_prefetch else None
 
+    # crystalium#43: link_cooccurrence is decoupled from recall_completion so a
+    # caller (e.g. evals/retrieval_gate.py) can pin write-time graph edges OFF
+    # without also disabling the recall-time completion faculty. None (the
+    # default) preserves today's wiring exactly.
+    link_cooccurrence = (
+        config.recall_completion
+        if config.link_cooccurrence is None
+        else config.link_cooccurrence
+    )
+
     episodic = EpisodicLayer(
         blob_store=blob_store,
         relational=relational,
@@ -530,7 +540,7 @@ def _build_components(
         importance_fn=importance_fn,
         dedup_merge=config.write_dedup_merge,
         sep_threshold=config.sep_threshold,
-        link_cooccurrence=config.recall_completion,
+        link_cooccurrence=link_cooccurrence,
     )
     semantic = SemanticLayer(
         blob_store=blob_store,
@@ -543,7 +553,7 @@ def _build_components(
         importance_fn=importance_fn,
         dedup_merge=config.write_dedup_merge,
         sep_threshold=config.sep_threshold,
-        link_cooccurrence=config.recall_completion,
+        link_cooccurrence=link_cooccurrence,
         write_conflict_detect=config.write_conflict_detect,
         conflict_tau_lo=config.conflict_tau_lo,
     )
