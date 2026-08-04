@@ -91,6 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_crystals_layer       ON crystals(layer);
 CREATE INDEX IF NOT EXISTS idx_crystals_tier        ON crystals(trust_tier);
 CREATE INDEX IF NOT EXISTS idx_crystals_status      ON crystals(status);
 CREATE INDEX IF NOT EXISTS idx_crystals_importance  ON crystals(importance);
+CREATE INDEX IF NOT EXISTS idx_crystals_created_at  ON crystals(created_at);
 
 CREATE TABLE IF NOT EXISTS pending_promotions (
     id          TEXT PRIMARY KEY,
@@ -648,7 +649,7 @@ class RelationalStore:
                 rows = conn.execute(
                     "SELECT id FROM crystals "
                     "WHERE json_extract(scope, '$.project') = ? AND status='active' AND id != ? "
-                    "ORDER BY created_at DESC LIMIT ?",
+                    "ORDER BY created_at DESC, id ASC LIMIT ?",
                     (project, exclude_id, limit),
                 ).fetchall()
             return [r[0] for r in rows]
