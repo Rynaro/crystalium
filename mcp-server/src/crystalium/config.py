@@ -208,26 +208,38 @@ class Config:
     # Retrieval intelligence (W5, Aetheryte II) — each faculty behind its own flag,
     # default OFF (ablation-or-revert). The recall pipeline + chokepoint are unchanged
     # when all are off.
-    # crystalium#43 (2026-08-04): the "EARNED-ON" claim this field used to
-    # carry here (retrieval_gate F1 0.12->0.18, recall 0.67->1.0) was measured
-    # on a CONFOUNDED gate — evals/retrieval_gate.py pre-fix wired
-    # link_cooccurrence=recall_completion, so the completion arm silently
-    # carried ~150 extra co-occurrence LINKS_TO edges the flat arm did not;
-    # "completion vs flat" was two different graphs, not one faculty
-    # ablation. Deconfounded (edges pinned OFF in every arm via the new
-    # Config.link_cooccurrence above), the measured lift DOES NOT SURVIVE on
-    # this worktree: multihop_f1 completion == flat == 0.30769230769230765
-    # (test_retrieval_gate.py). Note this worktree still carries the
-    # pre-crystalium#41 neighbor_expand first-seed-abort bug (fixed in a
-    # separate campaign unit) — the formal post-#41, 7-seed remeasurement is
+    # crystalium#43 (2026-08-04): the EARNED-ON claim below is justified by a
+    # DECONFOUNDED measurement — evals/retrieval_gate.py pins
+    # link_cooccurrence OFF in every arm (see Config.link_cooccurrence
+    # below) and gives each arm a distinct created_at stamp, so the
+    # completion arm no longer silently inherits extra co-occurrence
+    # LINKS_TO edges the flat arm lacks; "completion vs flat" is one
+    # faculty ablation on one graph, not two different graphs.
+    #
+    # EARNED ON: measured on the fully merged campaign tree — W1
+    # (crystalium#41 neighbor_expand first-seed-abort fix) + W2 + W3 (this
+    # deconfound) + W4 — i.e. AFTER the graph-arm bug that a now-withdrawn
+    # note here once blamed for a missing lift was fixed. Protocol: 7
+    # PYTHONHASHSEED values (0-5 + unset) x 2 runs = 14 runs. Every run
+    # agreed — a single distinct value each, no run-to-run instability:
+    #   multihop_f1  flat 0.30769230769230765 -> completion 0.4615384615384615
+    #   completion_pass true, 14/14
+    # (i.e. flat ~0.3077 -> completion ~0.4615.) See
     # eval-baseline-deconfounded.json (crystalium#43 AC-247), owned by the
-    # release orchestrator, and may revise this finding.
-    # RETRACTED: the EARNED-ON claim above no longer holds as measured.
-    # FORGE's pre-ruling stands regardless: the shipped default stays True
-    # this campaign — flipping it is release-coupled and out of #43's scope.
-    # A follow-up issue re-assessing this default once #41 lands must be
-    # filed (see test_retrieval_gate.py's retraction and BENCH-NOTES §W5(i)).
-    recall_completion: bool = True         # default retained per FORGE ruling; earned-ON claim RETRACTED (crystalium#43) — see comment above
+    # release orchestrator.
+    #
+    # NOT earned: recall_context_match still does NOT lift context rank on
+    # the same 14 runs (context_pass false, 14/14) — that half of the
+    # retrieval-intelligence story stays unproven; recall_context_match
+    # stays OFF below and must not be re-asserted as earned.
+    #
+    # SUPERSEDED / WITHDRAWN: an earlier revision of this comment RETRACTED
+    # the EARNED-ON claim, having measured (deconfounded, but pre-#41) that
+    # the lift did not survive: multihop_f1 completion == flat. That
+    # retraction is WITHDRAWN as of the post-#41 remeasurement above — a
+    # future reader should rely on this note, not re-derive the withdrawn
+    # one from stale figures.
+    recall_completion: bool = True         # EARNED ON (crystalium#43, post-#41 deconfounded, 14/14 stable): multihop_f1 flat 0.3077 -> completion 0.4615 — see comment above
     completion_max_hops: int = 2
     completion_decay: float = 0.5
     # crystalium#43 (retrieval-gate deconfound): decouples the write-time
