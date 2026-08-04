@@ -505,7 +505,23 @@ class Aetheryte:
             # Cheap to track unconditionally; only surfaced when explain=True.
             dense_got_vector = False
 
-            candidate_k = max(k * 3, 10)
+            candidate_k = max(k * 3, FETCH_WIDTH_FLOOR)
+
+            # crystalium#46: embed(query) is loop-invariant (its sole argument
+            # is the bare query string — no per-layer parameter), so it is
+            # hoisted out of the per-layer loop below to a single call.
+            # dense_got_vector is assigned once from this call (previously
+            # re-assigned identically on every truthy iteration); the
+            # embed_skipped warning likewise fires once, carrying `layers`
+            # instead of the no-longer-meaningful per-layer `layer` field.
+            query_vec: list[float] = []
+            try:
+                query_vec = self.vector_store.embed(query)
+            except Exception as exc:
+                log.warning("embed_skipped", layers=list(target_layers), error=str(exc))
+
+            if query_vec:
+                dense_got_vector = True
 
             for layer in target_layers:
                 # Sparse arm: BM25
@@ -519,14 +535,7 @@ class Aetheryte:
                         sparse_ranking.append(cid)
 
                 # Dense arm: ANN
-                query_vec: list[float] = []
-                try:
-                    query_vec = self.vector_store.embed(query)
-                except Exception as exc:
-                    log.warning("embed_skipped", layer=layer, error=str(exc))
-
                 if query_vec:
-                    dense_got_vector = True
                     dense_hits = self.vector_store.dense_search(
                         query_vec=query_vec, layer_filter=layer, k=candidate_k
                     )
