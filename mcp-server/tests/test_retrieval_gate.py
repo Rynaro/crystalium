@@ -8,20 +8,24 @@ path; both are UNMARKED and set `CRYSTALIUM_SKIP_SLOW` themselves (design
 constraint D-1, spec.md §2.5.4(b)/correction S-6) so they are real gates under
 `make test-fast`, not tests the fast suite silently skips.
 
-RETRACTION (crystalium#43, honesty branch — lift did NOT survive deconfounding):
-the previous docstring here claimed "the larger corpus ... completion lifts
-multi-hop recall/F1, so recall_completion is ON". That claim was measured on
-the CONFOUNDED gate (completion arm carried ~150 extra co-occurrence edges the
-flat arm did not — see config.py:211's retraction comment). MEASURED on this
-worktree, deconfounded: multihop_f1 completion == flat == 0.30769230769230765
-— no lift survives. `recall_completion` stays `True` by FORGE's pre-ruling
-(flipping a shipped default is release-coupled and out of #43's scope, and
-this worktree still carries the pre-#41 neighbor_expand first-seed-abort bug
-a separate campaign unit fixes) — but the justification this file asserted is
-gone. A follow-up issue reassessing this default once #41 lands must be filed.
-The formal 7-seed post-#41 remeasurement is eval-baseline-deconfounded.json
-(AC-247), owned by the release orchestrator, and may revise this finding.
-`recall_context_match` still shows no rank lift, so it stays OFF (unchanged).
+REINSTATEMENT (crystalium#43 + #41 — lift DOES survive deconfounding, post-#41):
+an earlier version of this file asserted `multihop_f1.completion ==
+multihop_f1.flat` ("no lift survives deconfounding"). That was measured on a
+worktree that still carried the pre-crystalium#41 `neighbor_expand`
+first-seed-abort bug, so the derived-family multi-hop walk from the top
+`fetch_width` seeds could not reliably reach the seeded hub->spoke1->spoke2
+chain even on the deconfounded (link_cooccurrence-OFF) fixture — the "no
+lift" result was an artifact of the graph-arm bug, not a property of the
+completion arm itself. With #41 fixed and merged, the release orchestrator's
+7-seed remeasurement (PYTHONHASHSEED 0-5 + unset, 2 runs each = 14 runs; see
+eval-baseline-deconfounded.json, AC-247) found a single distinct value across
+all 14 runs: `multihop_f1.flat == 0.30769230769230765` and
+`multihop_f1.completion == 0.4615384615384615` — completion strictly and
+deterministically exceeds flat, and `completion_pass` is `True` 14/14 (the
+verdict is never "confounded" or "inconclusive"). `recall_completion=True`
+is therefore EARNED-ON, not merely a pre-#41 default carried by FORGE
+pre-ruling. `recall_context_match` still shows no rank lift, so it stays OFF
+(unchanged).
 """
 
 from __future__ import annotations
@@ -34,29 +38,39 @@ from evals.retrieval_gate import resolve_verdict, run, run_arm
 
 
 @pytest.mark.slow
-def test_completion_shows_no_measured_lift_when_deconfounded(tmp_path: Path) -> None:
-    """crystalium#43 honesty branch: lift did NOT survive deconfounding.
+def test_completion_lifts_multihop_f1_when_deconfounded(tmp_path: Path) -> None:
+    """crystalium#43 + #41: completion lift IS real on the deconfounded gate.
 
-    Was `test_completion_lifts_multihop_recall_and_f1`, asserting
-    `f1["completion"] > f1["flat"]`. Once `link_cooccurrence` is pinned OFF in
-    every arm (killing the ~150-edge confound) and the `created_at` tie is
-    broken, that assertion is FALSE on this worktree — MEASURED, not assumed:
-    `multihop_f1.completion == multihop_f1.flat == 0.30769230769230765`. This
-    worktree still carries the pre-crystalium#41 `neighbor_expand`
-    first-seed-abort bug (a separate campaign unit fixes it), so the
-    derived-family multi-hop walk from the top `fetch_width` seeds does not
-    reliably reach the seeded hub->spoke1->spoke2 chain. Per FORGE's pre-ruled
-    honesty branch, this asserts the measured relationship — not a fabricated
-    pass — and does NOT flip the shipped `recall_completion=True` default.
+    Was `test_completion_shows_no_measured_lift_when_deconfounded`, asserting
+    `f1["completion"] == approx(f1["flat"])`. That was measured on a worktree
+    that still carried the pre-crystalium#41 `neighbor_expand`
+    first-seed-abort bug: even with `link_cooccurrence` pinned OFF in every
+    arm (no confound) and `created_at` strictly increasing (no tie), the
+    graph-arm bug kept the derived-family multi-hop walk from reliably
+    reaching the seeded hub->spoke1->spoke2 chain, masking the completion
+    arm's real advantage. That "no lift" result was an artifact of the graph
+    bug, not a property of the completion arm.
+
+    With #41 fixed and merged (this worktree), the release orchestrator's
+    7-seed remeasurement (PYTHONHASHSEED 0-5 + unset, x2 runs = 14 runs; see
+    eval-baseline-deconfounded.json, AC-247) found a single distinct value
+    across all 14 runs for each arm:
+        multihop_f1.flat       == 0.30769230769230765
+        multihop_f1.completion == 0.4615384615384615
+    with `completion_pass` True and `context_pass` False on all 14, and the
+    verdict never "confounded" or "inconclusive". The robust, meaningful
+    claim is the strict inequality (completion > flat) — asserting exact
+    equality to either float as the primary check would be reproducing a
+    single measurement rather than the deconfounded relationship it embodies.
     """
     r = run(data_root=str(tmp_path))
     assert r["verdict"] != "confounded"
     assert r["graph_ok"] is True  # real kuzu graph, not the null stub
     f1 = r["axes"]["multihop_f1"]
-    # Deconfounded measurement (this worktree): no lift, and no regression
-    # either — completion never scores WORSE than flat.
-    assert f1["completion"] == pytest.approx(f1["flat"])
-    assert r["completion_pass"] is False
+    # Deconfounded, post-#41 measurement: completion strictly beats flat.
+    assert f1["completion"] > f1["flat"]
+    assert f1["flat"] == pytest.approx(0.30769230769230765)
+    assert r["completion_pass"] is True
 
 
 @pytest.mark.slow
