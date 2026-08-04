@@ -352,7 +352,7 @@ runs at the *same* (unset) `PYTHONHASHSEED` — because crystal ids are
 `uuid4`-fresh per run, so even a fixed hash seed does not pin the graph
 walk's outcome. **A future reader must not treat a stable figure here as
 evidence the fix is complete** — only the *ordering* half is; the
-*membership* half is tracked as follow-up **F-A** (deliberation.md §7,
+*membership* half is tracked as follow-up **F-A = #41** (deliberation.md §7,
 opened before this change's tag per C-13) and will be re-annotated when it
 lands.
 
@@ -391,10 +391,11 @@ retrieval quality improved in general, or that a green AC-124 shows the
 derived-family merge preserves multi-hop *chains* specifically — none of
 those claims are made in this file or in CHANGELOG `[1.10.0]`, and this
 paragraph exists so a future reader does not manufacture one. Follow-up
-**F-C** (opened alongside F-A/F-B/F-D/D-1 before the crystalium#38 tag) owns
+**F-C = #43** (opened alongside F-A=#41 / F-B=#42 / F-D=#44 / D-1=#45 before
+the crystalium#38 tag) owns
 the actual fix: distinct `created_at` stamps per fixture crystal, edge
 seeding decoupled from the arm under test, and the docstring corrected
-either way. Until F-C lands, this gate is valid **only** as the
+either way. Until #43 lands, this gate is valid **only** as the
 non-inferiority tripwire described above — severity is medium-high because
 this is the gate that guards every retrieval-affecting change in the repo,
 and it currently does not mean what its own docstring says.

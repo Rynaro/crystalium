@@ -101,11 +101,11 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   **membership**, not merely ordering, nondeterminism this release does not
   touch (`storage/graph.py` is out of scope for this change). Every
   fusion-gate figure in this release's evidence trail was measured on a
-  one-seed expansion; follow-up **F-A** (deliberation.md §7, opened before
-  this change's tag per C-13) tracks the store-side fix and the re-baseline
-  it requires — F-A's own text mandates re-running #38's AC-124/AC-125/
-  AC-133 against a re-baselined `eval-before.json` once it lands, because
-  repairing membership changes arm composition.
+  one-seed expansion; follow-up **F-A = #41** (deliberation.md §7, opened
+  before this change's tag per C-13) tracks the store-side fix and the
+  re-baseline it requires — #41's own text mandates re-running #38's
+  AC-124/AC-125/AC-133 against a re-baselined `eval-before.json` once it
+  lands, because repairing membership changes arm composition.
 - **`FETCH_WIDTH_FLOOR` remains a shipped constant (`10`); this change does
   not remove it or make it conditional.** Measured (not modelled): with the
   floor artificially lowered to `1` — well below the shipped default — the
@@ -122,7 +122,7 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   `dense_ranking` are still built layer-by-layer in a fixed layer order, so
   with `layers=None` a hit in an earlier-iterated layer can still precede a
   more relevant hit in a later one. `evals/fusion_gate.py`'s multi-layer
-  axis measures this; the fix itself is deferred to follow-up **D-1**
+  axis measures this; the fix itself is deferred to follow-up **D-1 = #45**
   (deliberation.md §7).
 
 ## [1.9.0] — 2026-08-02

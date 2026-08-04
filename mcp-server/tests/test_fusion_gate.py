@@ -76,7 +76,7 @@ class TestFetchWidthFloorInflation:
     fixture is seed-insensitive and AC-138 must be moved, not weakened")
     this test class records the finding rather than asserting a fabricated
     pass. C-14: this is a deviation report for the checker/FORGE, not an
-    implementer's judgement call. Landing F-A (anomaly A's store-side fix)
+    implementer's judgement call. Landing F-A = crystalium#41 (anomaly A's store-side fix)
     alone will NOT flip this xfail -- the blocker on the shipped fixture is
     the tie-break-by-design that keeps AC-125 reliable, a DELIBERATE
     trade-off recorded here, not a bug awaiting a store-side fix.
@@ -95,7 +95,7 @@ class TestFetchWidthFloorInflation:
             "A fixture variant that removes that tie-break DOES show "
             "individual-seed divergence (proving the channel is live) but "
             "regresses AC-125's own reliability, so it does not ship. "
-            "Landing F-A will NOT by itself flip this xfail -- the blocker "
+            "Landing crystalium#41 (F-A) will NOT by itself flip this xfail -- the blocker "
             "here is a deliberate reliability trade-off, not anomaly A "
             "alone. See red-evidence.txt for the full measurement."
         ),
