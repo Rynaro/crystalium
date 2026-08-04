@@ -521,12 +521,28 @@ class TestExplain:
     ) -> None:
         """AC-134 real-stack companion: layers=['procedural'] where the BM25
         conjunction matches every crystal in that layer -> w_sparse == 1.0
-        exactly on the live explain surface."""
+        exactly on the live explain surface.
+
+        vigil F-V2 remediation: the store MUST hold crystals OUTSIDE the
+        searched layer, or a layer-scoped and a GLOBAL denominator are
+        numerically indistinguishable (both were 5 in the original fixture)
+        and this node cannot fail on the defect AC-134 names — replacing
+        `count_for_export(project, layers=target_layers)` with
+        `count_for_export(project)` on both population branches left the
+        node green. 95 unrelated episodic fillers (unmatched by the query)
+        make the two denominators diverge (5 scoped vs 100 global), so a
+        global-denominator mutant resolves `w_sparse` to `1.95`
+        (`1 + 1.0*(1 - 5/100)`) instead of `1.0` — reddening this assertion,
+        confirmed by re-running this test against that mutation."""
         matches = [
             _crystal_dict(id=f"P{i}", layer="procedural", summary="satisfy this exact query text")
             for i in range(5)
         ]
-        for c in matches:
+        other_layer_fillers = [
+            _crystal_dict(id=f"E{i}", layer="episodic", summary=f"unrelated episodic filler {i}")
+            for i in range(95)
+        ]
+        for c in matches + other_layer_fillers:
             tmp_relational_store.insert_crystal(c)
 
         aetheryte = _build_aetheryte(
@@ -538,7 +554,14 @@ class TestExplain:
             Scope(project="fusion-proj", agent_class_visibility="all"),
             "satisfy this exact query text", 10, ["procedural"], Tier.T1, explain=True,
         )
-        assert result.explain["fusion"]["w_sparse"] == 1.0
+        fusion = result.explain["fusion"]
+        assert fusion["w_sparse"] == 1.0
+        assert fusion["n_scoped"] == 5
+        # vigil F-V2 sub-note: explain.fusion.n_scoped_layers must name the
+        # population n_scoped was ACTUALLY drawn from -- a global-denominator
+        # mutant would report n_scoped=100 beside n_scoped_layers=
+        # ["procedural"], a self-contradictory explain surface.
+        assert fusion["n_scoped_layers"] == ["procedural"]
 
 
 # ---------------------------------------------------------------------------
@@ -615,7 +638,45 @@ class TestFlagOff:
 # AC-131 — hash-seed determinism
 # ---------------------------------------------------------------------------
 
-_DETERMINISM_SCRIPT = """
+# AC-131 fixture ids. NOT arbitrary: selected by measuring, over many
+# candidate >=4-distinct-UUID-shaped sets, which ones make the D5-REVERTED
+# (attack D) build actually disagree somewhere inside PYTHONHASHSEED 0..4 --
+# AC-131's own mandated window (its VERIFY names "0 through 4" explicitly,
+# and its frozen text requires recording "the observed disagreeing seed
+# pair from 0..4 that establishes RED"). The previous fixture ids
+# (1111...-4444...) were correctly typed (C-3) but happened to draw a 5-seed
+# window that does not discriminate for THIS derived-arm shape until seed 6
+# (vigil F-V1) -- a fixture-selection gap, not a defect in D5 itself.
+#
+# Measured on THIS id set, D5-reverted build (verification remediation,
+# 2026-08-03): PYTHONHASHSEED 0 and 2 agree; 1 and 3 agree with each other
+# but DIVERGE from 0/2 (positions 1-2 swap); 4 diverges a third way
+# (positions 2-3 swap). Recorded disagreeing pair: **seeds 0 and 1**.
+#
+#   seed 0: [fb6f38da..., ef087731..., d8fb6b35..., 82445783...]
+#   seed 1: [fb6f38da..., d8fb6b35..., ef087731..., 82445783...]   <- diverges from seed 0
+#   seed 2: [fb6f38da..., ef087731..., d8fb6b35..., 82445783...]   (== seed 0)
+#   seed 3: [fb6f38da..., d8fb6b35..., ef087731..., 82445783...]   (== seed 1)
+#   seed 4: [fb6f38da..., ef087731..., 82445783..., d8fb6b35...]   <- diverges from both
+#
+# On the SHIPPED (D5-present) build, all five seeds are byte-identical (the
+# test below). Mechanism (vigil F-V1): `completion_ranking` is a fixed dict
+# whose id0/id1 scores tie at 0.5; the pre-D5 sort's stable tiebreak
+# preserves dict-insertion order for that tie, so `completion_ranking` is
+# itself hash-seed-INDEPENDENT -- all of the variance above comes from
+# `graph_ranking`'s raw (pre-D5) `set` iteration order, merged against that
+# fixed completion order by D2's min-rank merge. Whether that merge changes
+# the overall order is a property of the SPECIFIC hash values these four
+# strings take under each seed, which is why fixture ids are the load-bearing
+# choice, not a detail.
+_DETERMINISM_IDS = [
+    "fb6f38da-ed29-429d-8db1-b7c4772f4dd2",
+    "ef087731-8b91-4b7e-a603-f8e82aadd84c",
+    "d8fb6b35-c1ac-472c-b518-9777e389a9b4",
+    "82445783-adf6-4972-b00c-f667bd06e315",
+]
+
+_DETERMINISM_SCRIPT = f"""
 import json, sys
 sys.path.insert(0, "/app/mcp-server/tests")
 from test_fusion_weighting import _build_aetheryte, _crystal_dict
@@ -626,8 +687,7 @@ import tempfile, pathlib
 
 tmp = pathlib.Path(tempfile.mkdtemp())
 relational = RelationalStore(db_path=tmp / "d.sqlite")
-ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222",
-       "33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444"]
+ids = {_DETERMINISM_IDS!r}
 crystals = [_crystal_dict(id=cid, summary="acme login session token rotation") for cid in ids]
 for c in crystals:
     relational.insert_crystal(c)
@@ -636,7 +696,7 @@ aetheryte = _build_aetheryte(
     tmp, relational,
     dense_hits=ids,
     graph_neighbors=set(ids),
-    completion_walk={ids[0]: 0.5, ids[1]: 0.5, ids[2]: 0.25, ids[3]: 0.1},
+    completion_walk={{ids[0]: 0.5, ids[1]: 0.5, ids[2]: 0.25, ids[3]: 0.1}},
 )
 result = aetheryte.recall(
     Scope(project="fusion-proj", agent_class_visibility="all"),
@@ -655,10 +715,15 @@ class TestDeterminism:
         The mocks return set[str]/dict[str,float] (C-3), mirroring
         GraphStore's real return types, so this is not vacuous.
 
-        `verification.md` note for the checker (per spec.md's mandate): the
-        literal fixture ids used are the four UUID-shaped strings above;
-        `red-evidence.txt` (this change's ESL dir) records the observed
-        disagreeing seed pair at ef42967 for these exact ids."""
+        RED-first, recorded (vigil F-V1 remediation): with D5's two
+        `sorted()` calls reverted, THESE ids disagree between
+        PYTHONHASHSEED 0 and 1 (and again at 4) — see `_DETERMINISM_IDS`'s
+        comment above for the literal orders observed and
+        `red-evidence.txt` (this change's ESL dir) for the full record.
+        This is the "observed disagreeing seed pair from 0..4" AC-131's
+        frozen text requires; the previous fixture ids did not have one in
+        that window (they first diverge at seed 6) and have been replaced,
+        not merely re-ordered."""
         outputs = {}
         for seed in ("0", "1", "2", "3", "4"):
             import os

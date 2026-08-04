@@ -81,7 +81,11 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   weights, the selectivity inputs that produced them (`n_sparse`,
   `n_sparse_cap`, `n_scoped`, `n_scoped_layers`, `n_scoped_status`), and
   `fetch_width`/`candidate_k`/`arm_sizes` — never disagrees with the
-  surfaced `score`.
+  surfaced `score`. Note `n_sparse` (the population-resolved selectivity
+  numerator) and `arm_sizes.sparse` (the raw, unfiltered sparse-arm length)
+  are deliberately DIFFERENT fields and will diverge on any store carrying
+  deprecated/superseded rows — this is by design (DP-9(b)), not a bug in
+  either number.
 - `evals/fusion_gate.py` (`python -m evals fusion-gate`, `--floor` for a
   `FETCH_WIDTH_FLOOR`-overridden single-arm probe): a weighted-vs-unweighted
   A/B over an identical real-`RelationalStore` + real-`GraphStore` corpus,
@@ -97,20 +101,29 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   **membership**, not merely ordering, nondeterminism this release does not
   touch (`storage/graph.py` is out of scope for this change). Every
   fusion-gate figure in this release's evidence trail was measured on a
-  one-seed expansion; a follow-up issue tracks the store-side fix and the
-  re-baseline it requires.
-- **No claim is made that this change replaces the v1.9.0
-  `FETCH_WIDTH_FLOOR` guard.** At very small `k` (below the shipped floor
-  of 10) with the floor artificially lowered, the fix's own thesis test is
-  layered on top of, rather than a replacement for, that guard — recorded
-  as a finding about the change's nature, not a defect, and it does not
-  affect the shipped default (`FETCH_WIDTH_FLOOR` remains the constant `10`
-  in every normal deployment).
+  one-seed expansion; follow-up **F-A** (deliberation.md §7, opened before
+  this change's tag per C-13) tracks the store-side fix and the re-baseline
+  it requires — F-A's own text mandates re-running #38's AC-124/AC-125/
+  AC-133 against a re-baselined `eval-before.json` once it lands, because
+  repairing membership changes arm composition.
+- **`FETCH_WIDTH_FLOOR` remains a shipped constant (`10`); this change does
+  not remove it or make it conditional.** Measured (not modelled): with the
+  floor artificially lowered to `1` — well below the shipped default — the
+  target still holds fused rank 0 at `k` in `{1, 3, 5}`, unanimous across 5
+  independent `PYTHONHASHSEED` values. The mechanism is D4's base-arm
+  reseeding, not the floor: at `fetch_width = 1` the reseeded build's seed
+  set already contains the correct record, where the pre-1.10.0 build's
+  `dense_ranking[:1]`-seeded walk did not (also measured, as the pair's
+  falsifiability precondition). This is evidence toward the deferred
+  corpus-scaling question (`FETCH_WIDTH_FLOOR` stays a constant for eval
+  reproducibility, DP-6) — it is not itself a claim that the floor is
+  redundant at every `k`, fixture, or corpus this change did not test.
 - **Cross-layer rank blocking is unchanged.** `sparse_ranking`/
   `dense_ranking` are still built layer-by-layer in a fixed layer order, so
   with `layers=None` a hit in an earlier-iterated layer can still precede a
   more relevant hit in a later one. `evals/fusion_gate.py`'s multi-layer
-  axis measures this; the fix itself is deferred to a follow-up issue.
+  axis measures this; the fix itself is deferred to follow-up **D-1**
+  (deliberation.md §7).
 
 ## [1.9.0] — 2026-08-02
 

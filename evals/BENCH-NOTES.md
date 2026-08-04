@@ -352,8 +352,52 @@ runs at the *same* (unset) `PYTHONHASHSEED` — because crystal ids are
 `uuid4`-fresh per run, so even a fixed hash seed does not pin the graph
 walk's outcome. **A future reader must not treat a stable figure here as
 evidence the fix is complete** — only the *ordering* half is; the
-*membership* half is tracked as a follow-up issue and will be re-annotated
-when it lands.
+*membership* half is tracked as follow-up **F-A** (deliberation.md §7,
+opened before this change's tag per C-13) and will be re-annotated when it
+lands.
+
+**A THIRD mechanism bears on every number in this section, and it is a
+confound in the FIXTURE, not a nondeterminism at all (crystalium#38
+deliberation.md anomaly C / C-11, vigil F-V3 remediation).** This gate's own
+docstring claims "Edges are seeded in EVERY arm, so the only variable is
+whether the recall walk / re-rank runs — isolating the faculty, not the
+fixture." That claim is FALSE, confirmed by measuring the actual edge
+counts: **flat 2, context 2, completion 142, both 142.** Two causes:
+
+1. `server.py:522,535` sets `link_cooccurrence = config.recall_completion`,
+   so the flag under test ALSO changes the graph at commit time — the
+   "completion vs flat" comparison is not an ablation of one faculty, it is
+   a comparison between two DIFFERENT corpora (2 co-occurrence edges vs 142).
+2. `recent_crystal_ids` (`relational.py`) does `ORDER BY created_at DESC
+   LIMIT 5`, and this fixture stamps every crystal with the identical `_T0`
+   — so "the 5 most recent" resolves, by tie order, to the 5
+   **first-committed** crystals rather than a genuinely-recent window. The
+   measured edge-target histogram is `{spoke1: 30, hub: 30, spoke2: 29,
+   noise1: 27, noise2: 26}` — both ground-truth spokes are direct
+   co-occurrence neighbours of nearly every other crystal in the corpus, so
+   the completion arm's F1 lift is substantially an artifact of
+   `created_at`-tie co-occurrence edges, not of the seeded 2-hop chain this
+   gate is nominally testing.
+
+**What this does and does not invalidate.** It does NOT invalidate AC-124's
+reading of this gate as a non-inferiority tripwire (crystalium#38 C-5): the
+confound is a property of the fixture, and the fixture (`evals/
+retrieval_gate.py`, correctly OUT of #38's declared scope, C-1) is held
+byte-identical between the before/after capture, so "the fusion change did
+not lower `multihop_f1.completion`, on the identical (confounded) fixture"
+remains a valid, narrow claim. It DOES invalidate any broader claim that
+this gate isolates the completion faculty, that AC-124 shows multi-hop
+retrieval quality improved in general, or that a green AC-124 shows the
+derived-family merge preserves multi-hop *chains* specifically — none of
+those claims are made in this file or in CHANGELOG `[1.10.0]`, and this
+paragraph exists so a future reader does not manufacture one. Follow-up
+**F-C** (opened alongside F-A/F-B/F-D/D-1 before the crystalium#38 tag) owns
+the actual fix: distinct `created_at` stamps per fixture crystal, edge
+seeding decoupled from the arm under test, and the docstring corrected
+either way. Until F-C lands, this gate is valid **only** as the
+non-inferiority tripwire described above — severity is medium-high because
+this is the gate that guards every retrieval-affecting change in the repo,
+and it currently does not mean what its own docstring says.
 
 Both F1 numbers roughly double (denominator shrinks from ~31 candidates to a
 real `k=10`), exactly as predicted — this is precision rising mechanically,
