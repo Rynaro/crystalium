@@ -676,9 +676,20 @@ _DETERMINISM_IDS = [
     "82445783-adf6-4972-b00c-f667bd06e315",
 ]
 
+# Layout-agnostic paths for the subprocess harness below (CI portability
+# fix): the local docker-compose identity mount puts the repo root at /app,
+# so mcp-server/tests lives at /app/mcp-server/tests -- but CI's image lays
+# mcp-server's OWN content directly at /app (tests at /app/tests), so a
+# hardcoded "/app/mcp-server/tests" 404s there and the child interpreter
+# dies with ModuleNotFoundError before any fusion code runs. Derive both
+# paths from this file's own location instead, so the harness is correct
+# under either layout.
+TESTS_DIR = Path(__file__).resolve().parent
+SRC_DIR = TESTS_DIR.parent / "src"
+
 _DETERMINISM_SCRIPT = f"""
 import json, sys
-sys.path.insert(0, "/app/mcp-server/tests")
+sys.path.insert(0, {str(TESTS_DIR)!r})
 from test_fusion_weighting import _build_aetheryte, _crystal_dict
 from crystalium.schemas import Scope
 from crystalium.storage.relational import RelationalStore
@@ -729,7 +740,7 @@ class TestDeterminism:
             import os
             env = dict(os.environ)
             env["PYTHONHASHSEED"] = seed
-            env["PYTHONPATH"] = "/app/mcp-server/src:/app"
+            env["PYTHONPATH"] = f"{SRC_DIR}:{TESTS_DIR}"
             proc = subprocess.run(
                 [sys.executable, "-c", _DETERMINISM_SCRIPT],
                 env=env, capture_output=True, text=True, timeout=60,
