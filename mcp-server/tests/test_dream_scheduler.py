@@ -63,6 +63,11 @@ def _make_config(
     # crystalium#36 / C-8: the new Config field, assigned in the same commit
     # that adds it (R-3).
     cfg.recall_relevance_primary = True
+    # crystalium#38 / S-5: the four new fusion config fields, same rationale.
+    cfg.recall_weighted_fusion = True
+    cfg.fusion_weight_dense = 1.0
+    cfg.fusion_weight_derived = 1.0
+    cfg.fusion_sparse_boost_alpha = 1.0
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     return cfg
 

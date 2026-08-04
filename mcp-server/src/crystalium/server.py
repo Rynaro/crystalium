@@ -188,11 +188,22 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                 "v1.9.0 (crystalium#36): query relevance is the primary composition "
                 "signal — `k` is a hard cap on the number of returned records, and "
                 "records are emitted in non-increasing `score` order (id ascending "
-                "tiebreak). Every record carries a non-null `score` (raw hybrid-"
-                "retrieval RRF value) and the response always carries a `budget` "
-                "object (total_cap, slots, k_requested, k_applied, truncated_count). "
-                "Revertible to the pre-1.9.0 behaviour via "
-                "Config.recall_relevance_primary=false."
+                "tiebreak). Every record carries a non-null `score` and the response "
+                "always carries a `budget` object (total_cap, slots, k_requested, "
+                "k_applied, truncated_count). Revertible to the pre-1.9.0 behaviour "
+                "via Config.recall_relevance_primary=false. "
+                "v1.10.0 (crystalium#38): `score` is now a WEIGHTED hybrid-retrieval "
+                "RRF fusion value (previously unweighted) — ordering semantics are "
+                "unchanged (still non-increasing, id-ascending tiebreak) but the "
+                "magnitude and the relative order among candidates can differ from "
+                "1.9.0. The graph and completion arms are collapsed into one "
+                "correlated derived voter and the sparse arm receives a "
+                "query-conditional selectivity boost; explain=true additionally "
+                "surfaces a `fusion` object (per-arm weights + the selectivity "
+                "inputs that produced them). Revertible via "
+                "Config.recall_weighted_fusion=false (subsumed under "
+                "recall_relevance_primary — either flag off restores the "
+                "unweighted fusion)."
             ),
             "inputSchema": {
                 "type": "object",
@@ -567,6 +578,10 @@ def _build_components(
         recall_cache=recall_cache,
         recall_active_only=config.recall_active_only,
         recall_relevance_primary=config.recall_relevance_primary,
+        recall_weighted_fusion=config.recall_weighted_fusion,
+        fusion_weight_dense=config.fusion_weight_dense,
+        fusion_weight_derived=config.fusion_weight_derived,
+        fusion_sparse_boost_alpha=config.fusion_sparse_boost_alpha,
     )
     # Execution layer depends on aetheryte/recall_cache for W5 prefetch warming.
     execution = ExecutionLayer(

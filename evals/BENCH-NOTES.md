@@ -319,6 +319,87 @@ feeds no pass predicate (`completion_ok` compares `comp` vs `flat`;
 is unaffected either way — recorded here as run-varying rather than a single
 number so a future re-run isn't mistaken for drift.
 
+**crystalium#38 update (v1.10.0, 2026-08-03) — the F-V6 figure now has a named
+mechanism, and it is retired only PARTIALLY.** #38's P3 investigation found
+TWO separate causes behind the graph/completion arms' non-reproducibility,
+and this release fixes only one of them:
+
+1. **Consumer-side ordering (FIXED this release).** `neighbor_expand` returns
+   a `set[str]` and `decaying_walk` scores a set comprehension; both were
+   iterated in per-process hash-randomised order before being fused.
+   `retrieve.py` now applies `sorted()` at both consumption points
+   (deterministic, outside the `recall_weighted_fusion` flag). Measured
+   directly (crystalium#38 `red-evidence.txt`): fixed fused order is
+   byte-identical across `PYTHONHASHSEED` 0-4 on a >=4-distinct-UUID derived
+   arm fixture.
+2. **Store-side membership (OPEN, follow-up issue, NOT fixed here).**
+   `GraphStore.neighbor_expand` (`storage/graph.py`, out of scope for #38)
+   wraps its whole seed-loop in one `try`, and the underlying Kuzu driver
+   RAISES at cursor exhaustion instead of returning `None` — so only the
+   FIRST seed's neighbourhood is ever actually explored
+   (`neighbor_expand(seeds) == neighbor_expand([seeds[0]])`). This is a
+   **membership**, not merely ordering, nondeterminism that (1)'s `sorted()`
+   fix cannot reach — WHICH seed happens to be tried first (and therefore
+   which neighbours are found at all) still varies with the graph
+   walk's frontier construction.
+
+**Consequence for `context_rank.both`: it remains run-varying AFTER v1.10.0,
+for the SECOND (still-open) reason above, not the first.** Re-measured on
+the fusion-gate work (crystalium#38 measurement, real `GraphStore`):
+`context_rank.both` observed values now include `{2, 4, 5}` (widening the
+previously-recorded `{4, 5}` set), including a `4 -> 2` variation across two
+runs at the *same* (unset) `PYTHONHASHSEED` — because crystal ids are
+`uuid4`-fresh per run, so even a fixed hash seed does not pin the graph
+walk's outcome. **A future reader must not treat a stable figure here as
+evidence the fix is complete** — only the *ordering* half is; the
+*membership* half is tracked as follow-up **F-A = #41** (deliberation.md §7,
+opened before this change's tag per C-13) and will be re-annotated when it
+lands.
+
+**A THIRD mechanism bears on every number in this section, and it is a
+confound in the FIXTURE, not a nondeterminism at all (crystalium#38
+deliberation.md anomaly C / C-11, vigil F-V3 remediation).** This gate's own
+docstring claims "Edges are seeded in EVERY arm, so the only variable is
+whether the recall walk / re-rank runs — isolating the faculty, not the
+fixture." That claim is FALSE, confirmed by measuring the actual edge
+counts: **flat 2, context 2, completion 142, both 142.** Two causes:
+
+1. `server.py:522,535` sets `link_cooccurrence = config.recall_completion`,
+   so the flag under test ALSO changes the graph at commit time — the
+   "completion vs flat" comparison is not an ablation of one faculty, it is
+   a comparison between two DIFFERENT corpora (2 co-occurrence edges vs 142).
+2. `recent_crystal_ids` (`relational.py`) does `ORDER BY created_at DESC
+   LIMIT 5`, and this fixture stamps every crystal with the identical `_T0`
+   — so "the 5 most recent" resolves, by tie order, to the 5
+   **first-committed** crystals rather than a genuinely-recent window. The
+   measured edge-target histogram is `{spoke1: 30, hub: 30, spoke2: 29,
+   noise1: 27, noise2: 26}` — both ground-truth spokes are direct
+   co-occurrence neighbours of nearly every other crystal in the corpus, so
+   the completion arm's F1 lift is substantially an artifact of
+   `created_at`-tie co-occurrence edges, not of the seeded 2-hop chain this
+   gate is nominally testing.
+
+**What this does and does not invalidate.** It does NOT invalidate AC-124's
+reading of this gate as a non-inferiority tripwire (crystalium#38 C-5): the
+confound is a property of the fixture, and the fixture (`evals/
+retrieval_gate.py`, correctly OUT of #38's declared scope, C-1) is held
+byte-identical between the before/after capture, so "the fusion change did
+not lower `multihop_f1.completion`, on the identical (confounded) fixture"
+remains a valid, narrow claim. It DOES invalidate any broader claim that
+this gate isolates the completion faculty, that AC-124 shows multi-hop
+retrieval quality improved in general, or that a green AC-124 shows the
+derived-family merge preserves multi-hop *chains* specifically — none of
+those claims are made in this file or in CHANGELOG `[1.10.0]`, and this
+paragraph exists so a future reader does not manufacture one. Follow-up
+**F-C = #43** (opened alongside F-A=#41 / F-B=#42 / F-D=#44 / D-1=#45 before
+the crystalium#38 tag) owns
+the actual fix: distinct `created_at` stamps per fixture crystal, edge
+seeding decoupled from the arm under test, and the docstring corrected
+either way. Until #43 lands, this gate is valid **only** as the
+non-inferiority tripwire described above — severity is medium-high because
+this is the gate that guards every retrieval-affecting change in the repo,
+and it currently does not mean what its own docstring says.
+
 Both F1 numbers roughly double (denominator shrinks from ~31 candidates to a
 real `k=10`), exactly as predicted — this is precision rising mechanically,
 not a faculty change. `context_rank.flat`/`.context` are unchanged (rank-

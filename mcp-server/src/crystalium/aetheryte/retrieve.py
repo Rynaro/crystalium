@@ -113,6 +113,156 @@ def rrf_merge(
 
 
 # ---------------------------------------------------------------------------
+# crystalium#38 — weighted RRF fusion (FORGE deliberation.md DP-1(b)/D1).
+#
+# `rrf_merge` / `rrf_merge_scored` above are NOT modified by this change — they
+# keep their documented insertion-order tie-break and remain the flag-off path
+# (test_rrf.py's pre-existing classes stay byte-identical, AC-106). Everything
+# below is new, additive surface gated behind Config.recall_weighted_fusion
+# (subsumed under recall_relevance_primary, D7).
+# ---------------------------------------------------------------------------
+
+
+def weighted_rrf_merge_scored(
+    weighted_rankings: list[tuple[list[str], float]],
+    k_rrf: int = 60,
+) -> list[tuple[str, float]]:
+    """Weighted Reciprocal Rank Fusion — the D1 pure function.
+
+        score(id) = sum over arms of  w_arm / (k_rrf + rank_arm(id))   (rank 1-based)
+
+    Arms in which `id` does not appear contribute nothing to its score. Every
+    arm at `w_arm = 1.0` reduces this to exactly `rrf_merge_scored`'s formula
+    (AC-104) — weighting is a strict generalisation of the unweighted fusion.
+
+    Duplicates within a single ranking accumulate one term PER OCCURRENCE,
+    mirroring `rrf_merge_scored` (`retrieve.py:82-86`) — its own docstring
+    "blesses" the case ("allowed but unusual"), so this function must not
+    silently de-duplicate a caller's ranking (vigil B-4 / AC-104).
+
+    Args:
+        weighted_rankings: List of (ranking, weight) pairs. Iterate the CALLER-
+            SUPPLIED order (the recall pipeline fixes it to sparse, dense,
+            derived — D1) so float summation stays bit-reproducible across
+            runs; this function performs no reordering of its own.
+        k_rrf: RRF smoothing constant (default 60, matching `rrf_merge_scored`).
+
+    Returns:
+        List of (id, score) sorted by `(-score, id)` — descending score,
+        id-ascending as a DETERMINISTIC tiebreak (AC-105). This deliberately
+        differs from `rrf_merge_scored`'s insertion-order tiebreak: with float
+        weights, exact ties are rarer but more dangerous, and P3 (graph/
+        completion arm order was previously hash-seed-dependent) shows
+        insertion order is not a stable tiebreak to inherit. AC-104's
+        multiset-of-`(id, score)` equality against `rrf_merge_scored` holds
+        regardless of this difference; AC-132 pins order-equality on the
+        (larger) domain where no tie exists, where the two tiebreak rules
+        provably cannot diverge.
+    """
+    scores: dict[str, float] = {}
+    for ranking, weight in weighted_rankings:
+        for rank_0, record_id in enumerate(ranking):
+            rank_1 = rank_0 + 1  # 1-based
+            scores[record_id] = scores.get(record_id, 0.0) + weight / (k_rrf + rank_1)
+
+    return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def weighted_rrf_merge(
+    weighted_rankings: list[tuple[list[str], float]],
+    k_rrf: int = 60,
+) -> list[str]:
+    """IDs-only sibling of `weighted_rrf_merge_scored` (D4's `prelim` helper)."""
+    return [cid for cid, _ in weighted_rrf_merge_scored(weighted_rankings, k_rrf)]
+
+
+def derived_family_merge(arms: list[list[str]]) -> list[str]:
+    """D2 — collapse the correlated derived arms (graph, completion) into ONE
+    voter by MIN-RANK, before fusion.
+
+    `seed_ids = prelim[:fetch_width]` seeds BOTH the graph walk and the
+    completion walk (D4) — they are not independent evidence, they are the
+    base arms' own neighbourhood explored twice. Summing them under RRF lets
+    a single opinion vote three times (P2); this merges them into the single
+    voter D1's fusion actually sums.
+
+    A candidate present in both source arms is emitted ONCE, at its BEST
+    (minimum, i.e. best-ranked) position across the two (AC-107). With one
+    of the two arms empty (or absent), this is the IDENTITY transform on the
+    other — re-ranking one arm by its own min-rank does not change it
+    (AC-108's `weighted_rrf_merge_scored`-level identity property; measured
+    bitwise on the real stack, deliberation.md §DP-2).
+
+    Args:
+        arms: The derived-family source rankings, e.g. `[graph_ranking,
+            completion_ranking]`. Order of the input list does not matter —
+            output is by (min-rank, id), not by arm precedence.
+
+    Returns:
+        Merged ranking, ordered by ascending (min_rank, id) — the id-ascending
+        half of the tiebreak matters only for candidates that are NOT present
+        in either source arm at all, which cannot occur; it exists so ties in
+        `min_rank` (an arm's own duplicate defence aside) resolve
+        deterministically rather than by dict-insertion order (P3).
+    """
+    minrank: dict[str, int] = {}
+    for arm in arms:
+        for i, cid in enumerate(arm):
+            rank = i + 1
+            if cid not in minrank or rank < minrank[cid]:
+                minrank[cid] = rank
+    return [cid for cid, _ in sorted(minrank.items(), key=lambda kv: (kv[1], kv[0]))]
+
+
+def resolve_sparse_weight(
+    raw_n_sparse: int,
+    resolved_n_sparse: int,
+    cap: int,
+    n_scoped: int,
+    alpha: float,
+) -> tuple[float, float]:
+    """D3 — the query-conditional sparse-arm weight.
+
+        selectivity = 0.0                                              if raw_n_sparse == 0 or raw_n_sparse >= cap
+                      clamp(1 - resolved_n_sparse / max(1, n_scoped), 0, 1)   otherwise
+        w_sparse    = 1.0 + alpha * selectivity        # in [1.0, 1.0 + alpha]
+
+    Two distinct counts are deliberately taken (C-7, FORGE deliberation.md
+    DP-9): the CENSORING test ("was this fetch truncated by the cap?") is a
+    property of the FETCH, not of any status-filtered subset of it, so it
+    MUST read `raw_n_sparse` (== `len(sparse_ranking)`, before any population
+    filtering) — never the population-resolved count. The selectivity RATIO,
+    once past censoring, uses `resolved_n_sparse` (the population-resolved
+    numerator, DP-9) against `n_scoped` (drawn from the SAME population,
+    DP-3/DP-9/AC-142) — using the raw numerator there would mix populations
+    (the exact defect AC-142 exists to forbid).
+
+    Args:
+        raw_n_sparse:      `len(sparse_ranking)` — unconditional, the CENSORING
+                           signal. `bm25_search` applies no status predicate
+                           (shared method, never filtered).
+        resolved_n_sparse: The population-resolved numerator (DP-9): equals
+                           `raw_n_sparse` under an all-statuses population,
+                           or the active-only count within `sparse_ranking`
+                           under an active-only population.
+        cap:               `candidate_k * len(target_layers)` — the fetch cap,
+                           already search-space-local by construction.
+        n_scoped:          Crystal count over `target_layers`, in the SAME
+                           status population as `resolved_n_sparse`.
+        alpha:             `fusion_sparse_boost_alpha`, >= 0.
+
+    Returns:
+        (w_sparse, selectivity).
+    """
+    if raw_n_sparse == 0 or raw_n_sparse >= cap:
+        selectivity = 0.0
+    else:
+        selectivity = max(0.0, min(1.0, 1.0 - (resolved_n_sparse / max(1, n_scoped))))
+    w_sparse = 1.0 + alpha * selectivity
+    return w_sparse, selectivity
+
+
+# ---------------------------------------------------------------------------
 # Aetheryte
 # ---------------------------------------------------------------------------
 
@@ -157,6 +307,10 @@ class Aetheryte:
         recall_cache: Any = None,
         recall_active_only: bool = False,
         recall_relevance_primary: bool = True,
+        recall_weighted_fusion: bool = True,
+        fusion_weight_dense: float = 1.0,
+        fusion_weight_derived: float = 1.0,
+        fusion_sparse_boost_alpha: float = 1.0,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -193,6 +347,36 @@ class Aetheryte:
         # retrievable), not an ablation win. Off -> seam 3 is skipped entirely;
         # `k` is not a cap (AC-009).
         self.recall_relevance_primary = recall_relevance_primary
+        # crystalium#38 (FORGE deliberation.md DP-1..DP-9): weighted RRF fusion
+        # + the derived-family min-rank merge (D1/D2), replacing unweighted
+        # summation on the gated path. Concrete defaults (not a Config-object
+        # sentinel — Aetheryte holds no `self.config` reference, unlike
+        # Composer) matching D6 exactly, mirroring the existing
+        # `recall_relevance_primary` / `recall_active_only` parameters above;
+        # both production construction sites (server.py, __main__.py) pass
+        # these explicitly from `config.recall_weighted_fusion` etc., so a
+        # bare `Aetheryte(...)` at a hypothetical future third site still
+        # gets the correct, non-foot-gun default (the same protection
+        # DP-R4(iii) introduced for Composer, applied here without a config
+        # object to fall back to since none exists at this layer).
+        self.recall_weighted_fusion = recall_weighted_fusion
+        # D6 — per-arm weights, default 1.0. Deliberately NO
+        # `fusion_weight_sparse`: RRF ordering is invariant to a global
+        # positive scale factor (score values scale, the sort does not), so
+        # pinning the sparse base at 1.0 removes a redundant degree of
+        # freedom (`w_sparse` below is instead the D3 query-conditional
+        # boost, resolved per-recall).
+        self.fusion_weight_dense = fusion_weight_dense
+        self.fusion_weight_derived = fusion_weight_derived
+        self.fusion_sparse_boost_alpha = fusion_sparse_boost_alpha
+        # D7 — subsumption: the weighted path activates ONLY when both flags
+        # are True. `recall_relevance_primary=False` is contractually
+        # byte-identical to pre-1.9.0 (#36 AC-008/AC-009, frozen); an
+        # independent weighting flag would alter the fused order on that
+        # path. Resolved once here (not per-call) since neither flag varies
+        # within a recall. Pinned by AC-120 so the half-gated mode #36
+        # DP-R4(iii) closed cannot reappear as an emergent property here.
+        self._weighted = bool(recall_weighted_fusion and recall_relevance_primary)
 
     # ------------------------------------------------------------------
     # Public recall API
@@ -373,14 +557,119 @@ class Aetheryte:
             # arm-seeding slice stays bare `[:k]`, byte-identical to 323229f.
             fetch_width = max(k, FETCH_WIDTH_FLOOR) if self.recall_relevance_primary else k
 
-            # Graph-expand: neighbours of top fetch_width dense hits (depth=1)
-            seed_ids = dense_ranking[:fetch_width]
+            # W6 defense (recall_active_only): drop deprecated/superseded/expired
+            # crystals so a rejected (deprecated) or superseded fact cannot resurface.
+            # Active := status == "active" AND temporal.t_valid_to is unset. Off ->
+            # always True (byte-identical to W5). Defined here (moved up from its
+            # v1.9.0 position at the scope/status filter, below) so crystalium#38's
+            # DP-9(b) sparse-weight numerator can reuse the SAME predicate the
+            # response applies — population parity by construction, never a second
+            # divergent definition.
+            def _is_active(crystal: dict[str, Any]) -> bool:
+                if not self.recall_active_only:
+                    return True
+                if crystal.get("status", "active") != "active":
+                    return False
+                temporal = crystal.get("temporal") or {}
+                if isinstance(temporal, str):
+                    import json
+                    try:
+                        temporal = json.loads(temporal)
+                    except Exception:
+                        temporal = {}
+                return temporal.get("t_valid_to") is None
+
+            # crystalium#38 (FORGE DP-1..DP-9, D0 pipeline order — load-bearing,
+            # no feedback loop): weights are resolved ONCE per recall, from the
+            # BASE arms only, before any seeding or derived-arm construction.
+            # Unweighted (flag off, either half of the D7 subsumption): every
+            # value below stays at its v1.9.0-equivalent neutral default, and
+            # `seed_ids` is `dense_ranking[:fetch_width]` exactly as ef42967 —
+            # AC-119's byte-identical flag-off contract.
+            w_sparse = 1.0
+            w_dense = self.fusion_weight_dense
+            w_derived = self.fusion_weight_derived
+            selectivity = 0.0
+            cap = candidate_k * len(target_layers)
+            raw_n_sparse = len(sparse_ranking)
+            n_sparse_resolved = raw_n_sparse
+            n_scoped = 0
+            n_scoped_status = "n/a"
+
+            if self._weighted:
+                # D3 — the query-conditional sparse weight, resolved from the
+                # search-space-local selectivity. DP-9(b): the numerator and
+                # denominator are drawn from the SAME status population,
+                # tracking `recall_active_only` (all-statuses when it is
+                # False, matching what the response itself then returns).
+                # C-8(ii)/(iii): the population is resolved ONCE here, as a
+                # PURE-PYTHON filter over the crystal dicts already in hand
+                # (`bm25_search` returns full rows) — never a status predicate
+                # on the shared `bm25_search`, and no extra I/O beyond the one
+                # bounded aggregate below (DP-3, "the existing bounded
+                # aggregate", `count_for_export`; no new public storage
+                # method, per FORGE's ruling).
+                if self.recall_active_only:
+                    n_scoped = self.relational.count_for_export(
+                        getattr(scope, "project", None), layers=target_layers
+                    )
+                    n_scoped_status = "active_only"
+                else:
+                    n_scoped = self.relational.count_for_export(
+                        getattr(scope, "project", None),
+                        layers=target_layers,
+                        include_deprecated=True,
+                        include_superseded=True,
+                        include_quarantined=True,
+                    )
+                    n_scoped_status = "all_statuses"
+                # `_is_active` already returns True unconditionally when
+                # `recall_active_only` is False, so this one expression is
+                # correct under BOTH population choices without a second
+                # helper (it degenerates to `raw_n_sparse` in that branch).
+                n_sparse_resolved = sum(
+                    1 for cid in sparse_ranking if _is_active(all_candidates.get(cid, {}))
+                )
+                # C-7: the CENSORING test below reads `raw_n_sparse` — the
+                # UNFILTERED fetch length — never `n_sparse_resolved`. A fetch
+                # truncated by the cap has an unknown true match count, a
+                # property of the fetch itself, independent of how many of
+                # those raw hits are active.
+                w_sparse, selectivity = resolve_sparse_weight(
+                    raw_n_sparse, n_sparse_resolved, cap, n_scoped,
+                    self.fusion_sparse_boost_alpha,
+                )
+
+                # D4 — seed from a BASE-ARM (sparse + dense) preliminary
+                # fusion, not `dense_ranking` alone. Invariant I-1: `prelim`
+                # reads ONLY sparse_ranking/dense_ranking — never
+                # graph_ranking or completion_ranking, which would create a
+                # feedback loop in which the derived arms influence their own
+                # seeds. `fetch_width` (the seed COUNT) is unchanged; only
+                # seed COMPOSITION differs from v1.9.0 (issue item 2).
+                prelim = weighted_rrf_merge(
+                    [(sparse_ranking, w_sparse), (dense_ranking, w_dense)]
+                )
+                seed_ids = prelim[:fetch_width]
+            else:
+                seed_ids = dense_ranking[:fetch_width]
+
+            # Graph-expand: neighbours of top fetch_width seed hits (depth=1).
             if seed_ids:
                 try:
                     neighbour_ids = self.graph_store.neighbor_expand(
                         seed_ids=seed_ids, depth=1
                     )
-                    for nid in neighbour_ids:
+                    # D5 (P3 determinism fix; deliberately OUTSIDE the
+                    # recall_weighted_fusion flag — see class docstring /
+                    # Risks+Rollback: gating an ORDER-stabilising fix behind a
+                    # flag would leave the flag-off path irreproducible too).
+                    # `neighbor_expand` returns a `set[str]` whose iteration
+                    # order is per-process hash-randomised (P3); `sorted()`
+                    # replaces that with a deterministic total order. This is
+                    # ordering determinism, not relevance ordering —
+                    # `neighbor_expand` has no relevance signal to offer.
+                    for nid in sorted(neighbour_ids):
                         if nid not in all_candidates:
                             full = self.relational.get_crystal(nid)
                             if full:
@@ -394,6 +683,11 @@ class Aetheryte:
             # the top seeds (CA3-analogue). Off -> no 4th arm (byte-identical RRF).
             completion_ranking: list[str] = []
             if self.completion:
+                # `seed_ids or sparse_ranking[:fetch_width]` — this fallback is
+                # near-dead under the weighted path (`prelim` is non-empty
+                # whenever either base arm is non-empty) but kept, free and
+                # defensive, for the unweighted path where `seed_ids` really
+                # can be empty (D4 comment).
                 completion_seeds = seed_ids or sparse_ranking[:fetch_width]
                 if completion_seeds:
                     try:
@@ -402,7 +696,13 @@ class Aetheryte:
                             max_hops=self.completion_max_hops,
                             decay=self.completion_decay,
                         )
-                        for cid, _score in sorted(walked.items(), key=lambda kv: -kv[1]):
+                        # D5: id tiebreak added (score-primary, id-ascending
+                        # within a hop) — keeps the within-hop order stable
+                        # under P3 (a `dict` of scores has no source-order
+                        # guarantee of its own once ties are possible).
+                        for cid, _score in sorted(
+                            walked.items(), key=lambda kv: (-kv[1], kv[0])
+                        ):
                             if cid not in all_candidates:
                                 full = self.relational.get_crystal(cid)
                                 if full:
@@ -412,16 +712,44 @@ class Aetheryte:
                     except Exception as exc:
                         log.warning("completion_walk_skipped", error=str(exc))
 
-            # 4. RRF fusion (completion is a 4th ranked list only when non-empty)
-            rankings = [sparse_ranking, dense_ranking, graph_ranking]
-            if completion_ranking:
-                rankings.append(completion_ranking)
-            # crystalium#36 seam 1: rrf_merge_scored exposes the raw fusion score
-            # rrf_merge itself discarded. rrf_score_by_id is the SOURCE OF TRUTH
-            # for _ComposerRecord.relevance_score / CrystalSummary.score below —
+            # D2 — collapse the correlated derived arms into ONE voter by
+            # min-rank. Computed unconditionally (cheap, pure Python, no I/O)
+            # so `explain.fusion.arm_sizes.derived` is available regardless of
+            # flag state; only the WEIGHTED fusion below actually consumes it.
+            derived_ranking = derived_family_merge([graph_ranking, completion_ranking])
+
+            # 4. RRF fusion.
+            # crystalium#36 seam 1: rrf_merge_scored / weighted_rrf_merge_scored
+            # exposes the raw fusion score rrf_merge itself discarded.
+            # rrf_score_by_id is the SOURCE OF TRUTH for
+            # _ComposerRecord.relevance_score / CrystalSummary.score below —
             # captured here, BEFORE the context_match re-rank, so `score` stays
-            # the raw RRF fusion value (D3) regardless of that re-rank.
-            fused_scored = rrf_merge_scored(rankings, k_rrf=60)
+            # the raw (D3: now weighted, on the gated path) fusion value
+            # regardless of that re-rank.
+            if self._weighted:
+                # D1: fixed arm iteration order (sparse, dense, derived) so
+                # float summation is bit-reproducible. An empty derived_ranking
+                # (no graph/completion candidates) contributes nothing — same
+                # as the legacy path's `if completion_ranking:` guard, just
+                # expressed structurally rather than conditionally, since D2
+                # already collapsed graph+completion into one possibly-empty
+                # arm.
+                fused_scored = weighted_rrf_merge_scored(
+                    [
+                        (sparse_ranking, w_sparse),
+                        (dense_ranking, w_dense),
+                        (derived_ranking, w_derived),
+                    ],
+                    k_rrf=60,
+                )
+            else:
+                # Unweighted (flag off): byte-identical to ef42967 — the
+                # legacy 3/4-arm rrf_merge_scored, completion appended only
+                # when non-empty.
+                rankings = [sparse_ranking, dense_ranking, graph_ranking]
+                if completion_ranking:
+                    rankings.append(completion_ranking)
+                fused_scored = rrf_merge_scored(rankings, k_rrf=60)
             fused_ids = [cid for cid, _ in fused_scored]
             rrf_score_by_id: dict[str, float] = dict(fused_scored)
 
@@ -475,23 +803,9 @@ class Aetheryte:
                         return False
                 return True
 
-            # W6 defense (recall_active_only): drop deprecated/superseded/expired
-            # crystals so a rejected (deprecated) or superseded fact cannot resurface.
-            # Active := status == "active" AND temporal.t_valid_to is unset. Off ->
-            # always True (byte-identical to W5).
-            def _is_active(crystal: dict[str, Any]) -> bool:
-                if not self.recall_active_only:
-                    return True
-                if crystal.get("status", "active") != "active":
-                    return False
-                temporal = crystal.get("temporal") or {}
-                if isinstance(temporal, str):
-                    import json
-                    try:
-                        temporal = json.loads(temporal)
-                    except Exception:
-                        temporal = {}
-                return temporal.get("t_valid_to") is None
+            # _is_active is defined earlier in this method (crystalium#38 /
+            # DP-9(b)), before the weighted-fusion block, so its sparse-weight
+            # numerator and this scope/status filter share the SAME predicate.
 
             # v1.6 explain: waterfall the combined filter into its two stages so a
             # zero-record recall against a non-empty store is diagnosable — each
@@ -754,6 +1068,37 @@ class Aetheryte:
                     # explain and budget never disagree.
                     "k_applied": k_applied_count,
                     "truncated_by_k": truncated_by_k_count,
+                    # crystalium#38 / D8 (FORGE deliberation.md DP-7/C-6): the
+                    # weights and the query signal that produced them.
+                    # `n_sparse` is the POPULATION-RESOLVED numerator (DP-9);
+                    # `arm_sizes.sparse` below is the RAW ranking length and
+                    # may differ from it under an active-only population on a
+                    # mixed-status store (AC-142) — the two are deliberately
+                    # NOT the same field. Present (with `weighted: false` and
+                    # neutral values) even on the unweighted path, so a caller
+                    # comparing explain objects across the flag never sees the
+                    # key appear/disappear.
+                    "fusion": {
+                        "weighted": self._weighted,
+                        "w_sparse": w_sparse,
+                        "w_dense": w_dense,
+                        "w_derived": w_derived,
+                        "selectivity": selectivity,
+                        "n_sparse": n_sparse_resolved,
+                        "n_sparse_cap": cap,
+                        "n_scoped": n_scoped,
+                        "n_scoped_layers": list(target_layers),
+                        "n_scoped_status": n_scoped_status,
+                        "fetch_width": fetch_width,
+                        "candidate_k": candidate_k,
+                        "arm_sizes": {
+                            "sparse": len(sparse_ranking),
+                            "dense": len(dense_ranking),
+                            "graph": len(graph_ranking),
+                            "completion": len(completion_ranking),
+                            "derived": len(derived_ranking),
+                        },
+                    },
                 }
 
             # crystalium#36 / DP-3c (D2.4): the working-set budget, ALWAYS present

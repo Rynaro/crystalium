@@ -7,10 +7,11 @@ Container-first:
   make bench
 
 Subcommands:
-  canary  — legacy memory-on/off A/B headline over the canary suite (run_all)
-  ab      — generalized ablation: ab(flag, missions) -> {axis:(on,off,delta)}
-  axes    — SWE-Bench-CL axes from an accuracy matrix (--demo or --matrix)
-  forget  — selective-forgetting probe summary (reuses selective_forgetting)
+  canary       — legacy memory-on/off A/B headline over the canary suite (run_all)
+  ab           — generalized ablation: ab(flag, missions) -> {axis:(on,off,delta)}
+  axes         — SWE-Bench-CL axes from an accuracy matrix (--demo or --matrix)
+  forget       — selective-forgetting probe summary (reuses selective_forgetting)
+  fusion-gate  — crystalium#38 weighted-vs-unweighted fusion A/B (--floor for AC-138/AC-139)
 """
 
 from __future__ import annotations
@@ -88,6 +89,14 @@ def _cmd_forgetting_gate(args: argparse.Namespace) -> dict[str, Any]:
 def _cmd_retrieval_gate(args: argparse.Namespace) -> dict[str, Any]:
     from evals.retrieval_gate import run
 
+    return run()
+
+
+def _cmd_fusion_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.fusion_gate import run, run_floor_probe
+
+    if args.floor is not None:
+        return run_floor_probe(floor=args.floor, weighted=not args.reverted)
     return run()
 
 
@@ -176,6 +185,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     rg = sub.add_parser("retrieval-gate", help="multi-hop completion + context-match ablation gate (W5 DoD)")
     rg.set_defaults(func=_cmd_retrieval_gate)
+
+    fg = sub.add_parser("fusion-gate", help="crystalium#38 weighted-vs-unweighted fusion A/B gate")
+    fg.add_argument(
+        "--floor", type=int, default=None,
+        help="AC-138/AC-139: override FETCH_WIDTH_FLOOR and run a single arm (default: both arms, unmodified floor)",
+    )
+    fg.add_argument(
+        "--reverted", action="store_true",
+        help="with --floor: run the REVERTED (recall_weighted_fusion=False) arm instead of the fixed one",
+    )
+    fg.set_defaults(func=_cmd_fusion_gate)
 
     ddg = sub.add_parser("dedup-gate", help="pattern-separation write-amplification ablation gate (W5 DoD)")
     ddg.set_defaults(func=_cmd_dedup_gate)

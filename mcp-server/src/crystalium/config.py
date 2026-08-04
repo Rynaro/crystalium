@@ -214,6 +214,54 @@ class Config:
     # composition ordering, k behaviour and result sets (R-1).
     recall_relevance_primary: bool = True
 
+    # crystalium#38 (FORGE deliberation.md DP-1..DP-9): weighted RRF fusion +
+    # derived-family (graph/completion) min-rank merge, replacing unweighted
+    # summation on the gated path. SUBSUMED under recall_relevance_primary
+    # (D7): the weighted path activates only when BOTH are True —
+    # recall_relevance_primary=False stays contractually byte-identical to
+    # pre-1.9.0 (#36 AC-008/AC-009, frozen), so this flag is deliberately NOT
+    # independent of it. Default ON: measured live on the real retrieval
+    # gate (deliberation.md DP-4) to correct a live P1 inversion (a record
+    # with ZERO lexical match outranking the exact BM25+dense match) with no
+    # measured non-regression cost. Ship contingency (AC-136's frozen six —
+    # AC-121, 122, 123, 124, 125, 133): any red on the implementation branch
+    # flips this to False automatically and returns the change to FORGE.
+    recall_weighted_fusion: bool = True
+    # Per-arm fusion weights (D6). Deliberately NO fusion_weight_sparse: RRF
+    # ordering is invariant to a global positive scale factor (score values
+    # scale, the sort does not), so pinning the sparse arm's base weight at
+    # 1.0 removes a redundant degree of freedom — `fusion_sparse_boost_alpha`
+    # below is the sparse arm's only dial, and it is query-conditional
+    # rather than a static weight.
+    fusion_weight_dense: float = 1.0
+    # Graph+completion derived-family weight (D2's min-rank merge).
+    # MEASURED cliff (deliberation.md DP-2, real fusion-gate runs, 7 hash
+    # seeds): 0.90 fails the gate deterministically; 0.95 is a FLAKE — green
+    # at seeds 0-4/unset, RED at PYTHONHASHSEED=5, on a 1.0% score margin
+    # against a completion-arm rank that is hash-nondeterministic because of
+    # the OPEN anomaly-A bug in `neighbor_expand` (crystalium#38 follow-up
+    # F-A; NOT fixed by this change). 1.00 passed 7/7 runs and carries the
+    # §D2 identity property MEASURED BITWISE (20/20 in-process comparisons,
+    # exact 0.0 score diff) — no other value has this property. Values
+    # BELOW 1.0 remain LEGAL config (AC-127 must stay trivially satisfiable,
+    # no validator/clamp) but are OUTSIDE the documented/supported band: they
+    # forfeit the identity property and are flaky on the shipped gate. Values
+    # ABOVE 1.0 re-create P1 (a derived-only record at w/61 can then outrank
+    # a two-base-arm record at 2/61). No test, doc, or CHANGELOG line may
+    # present a sub-1.0 value as a supported "precision dial" (deliberation.md
+    # C-9).
+    fusion_weight_derived: float = 1.0
+    # Sparse-arm selectivity boost (D3): w_sparse resolves to
+    # `1.0 + fusion_sparse_boost_alpha * selectivity`, selectivity in [0, 1]
+    # (a search-space-local measure of how far the lexical arm narrowed the
+    # corpus for THIS query — see aetheryte/retrieve.py::resolve_sparse_weight).
+    # alpha=1.0 is the measured default (deliberation.md DP-3): it is MARGIN,
+    # not the cure — D2's derived-family merge is what fixes the measured
+    # inversion; the sparse boost only widens the margin on selective
+    # queries. Do not raise it chasing headroom the measured fixture does
+    # not need — every increment moves surfaced `score` magnitudes (DP-7).
+    fusion_sparse_boost_alpha: float = 1.0
+
     # Security & integrity hardening (W6) — each defense behind its own flag,
     # default OFF (ablation-or-revert; the poisoning ASR gate is the arbiter).
     # All OFF -> recall pipeline, Dream, and semantic commit are byte-identical to W5.
@@ -316,6 +364,10 @@ class Config:
             sep_threshold=_env_float("CRYSTALIUM_SEP_THRESHOLD", 0.92),
             recall_prefetch=_env_bool("CRYSTALIUM_RECALL_PREFETCH", False),
             recall_relevance_primary=_env_bool("CRYSTALIUM_RECALL_RELEVANCE_PRIMARY", True),
+            recall_weighted_fusion=_env_bool("CRYSTALIUM_RECALL_WEIGHTED_FUSION", True),
+            fusion_weight_dense=_env_float("CRYSTALIUM_FUSION_WEIGHT_DENSE", 1.0),
+            fusion_weight_derived=_env_float("CRYSTALIUM_FUSION_WEIGHT_DERIVED", 1.0),
+            fusion_sparse_boost_alpha=_env_float("CRYSTALIUM_FUSION_SPARSE_BOOST_ALPHA", 1.0),
             drift_detect=_env_bool("CRYSTALIUM_DRIFT_DETECT", False),
             drift_tau_lo=_env_float("CRYSTALIUM_DRIFT_TAU_LO", 0.80),
             drift_tau_hi=_env_float("CRYSTALIUM_DRIFT_TAU_HI", 0.97),
@@ -345,7 +397,7 @@ class Config:
             "forgetting_fsrs",
             "recall_completion", "recall_context_match", "write_dedup_merge", "recall_prefetch",
             "drift_detect", "write_conflict_detect", "recall_active_only",
-            "recall_relevance_primary",
+            "recall_relevance_primary", "recall_weighted_fusion",
         ):
             if bool_field in data:
                 kwargs[bool_field] = bool(data[bool_field])
@@ -389,6 +441,9 @@ class Config:
             "drift_tau_lo",
             "drift_tau_hi",
             "conflict_tau_lo",
+            "fusion_weight_dense",
+            "fusion_weight_derived",
+            "fusion_sparse_boost_alpha",
         ):
             if float_field in data:
                 kwargs[float_field] = float(data[float_field])

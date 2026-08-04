@@ -350,6 +350,10 @@ def recall(
         forgetting_fsrs=False,
         recall_active_only=config.recall_active_only,
         recall_relevance_primary=config.recall_relevance_primary,
+        recall_weighted_fusion=config.recall_weighted_fusion,
+        fusion_weight_dense=config.fusion_weight_dense,
+        fusion_weight_derived=config.fusion_weight_derived,
+        fusion_sparse_boost_alpha=config.fusion_sparse_boost_alpha,
     )
 
     # Parse and validate --layers CSV.
