@@ -53,6 +53,18 @@ def _env_bool(key: str, default: bool) -> bool:
     return val.lower() not in ("0", "false", "no", "")
 
 
+def _env_bool_optional(key: str) -> bool | None:
+    """Tri-state env lookup: unset -> None ("follow the linked flag"); set -> bool.
+
+    Used for `link_cooccurrence` (crystalium#43): `None` is not "false", it is
+    "no opinion — inherit today's `recall_completion`-derived wiring".
+    """
+    val = os.environ.get(key)
+    if val is None:
+        return None
+    return val.lower() not in ("0", "false", "no", "")
+
+
 # ---------------------------------------------------------------------------
 # Caller identity env vars (v1.2.0) — process-level identity for non-ingest
 # MCP calls. These drive server._extract_caller_identity(), not Config fields,
@@ -196,9 +208,37 @@ class Config:
     # Retrieval intelligence (W5, Aetheryte II) — each faculty behind its own flag,
     # default OFF (ablation-or-revert). The recall pipeline + chokepoint are unchanged
     # when all are off.
-    recall_completion: bool = True         # EARNED ON (T2): multi-hop graph walk recovers graph-reachable relevants flat dense recall misses (retrieval_gate F1 0.12→0.18, recall 0.67→1.0). See BENCH-NOTES §W5(i).
+    # crystalium#43 (2026-08-04): the "EARNED-ON" claim this field used to
+    # carry here (retrieval_gate F1 0.12->0.18, recall 0.67->1.0) was measured
+    # on a CONFOUNDED gate — evals/retrieval_gate.py pre-fix wired
+    # link_cooccurrence=recall_completion, so the completion arm silently
+    # carried ~150 extra co-occurrence LINKS_TO edges the flat arm did not;
+    # "completion vs flat" was two different graphs, not one faculty
+    # ablation. Deconfounded (edges pinned OFF in every arm via the new
+    # Config.link_cooccurrence above), the measured lift DOES NOT SURVIVE on
+    # this worktree: multihop_f1 completion == flat == 0.30769230769230765
+    # (test_retrieval_gate.py). Note this worktree still carries the
+    # pre-crystalium#41 neighbor_expand first-seed-abort bug (fixed in a
+    # separate campaign unit) — the formal post-#41, 7-seed remeasurement is
+    # eval-baseline-deconfounded.json (crystalium#43 AC-247), owned by the
+    # release orchestrator, and may revise this finding.
+    # RETRACTED: the EARNED-ON claim above no longer holds as measured.
+    # FORGE's pre-ruling stands regardless: the shipped default stays True
+    # this campaign — flipping it is release-coupled and out of #43's scope.
+    # A follow-up issue re-assessing this default once #41 lands must be
+    # filed (see test_retrieval_gate.py's retraction and BENCH-NOTES §W5(i)).
+    recall_completion: bool = True         # default retained per FORGE ruling; earned-ON claim RETRACTED (crystalium#43) — see comment above
     completion_max_hops: int = 2
     completion_decay: float = 0.5
+    # crystalium#43 (retrieval-gate deconfound): decouples the write-time
+    # co-occurrence LINKS_TO edge flag from the recall_completion faculty
+    # flag under test. None (default) means "follow recall_completion" —
+    # i.e. today's wiring at server.py::_build_components — so this default
+    # is BEHAVIOUR-NEUTRAL for every existing caller; only an explicit
+    # True/False overrides it. Exists so evals/retrieval_gate.py can pin
+    # graph writes OFF in every arm without also disabling the recall-time
+    # completion faculty it is trying to isolate.
+    link_cooccurrence: bool | None = None
     recall_context_match: bool = False     # encoding-specificity: post-RRF context re-rank — stays OFF (T2: no rank lift in the discriminating gate)
     write_dedup_merge: bool = True         # W5 gate PASS (confound-free): merge near-dups at write
     sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
@@ -356,9 +396,10 @@ class Config:
             r_floor=_env_float("CRYSTALIUM_R_FLOOR", 0.7),
             resurface_floor=_env_float("CRYSTALIUM_RESURFACE_FLOOR", 0.85),
             evb_percentile=_env_float("CRYSTALIUM_EVB_PERCENTILE", 0.5),
-            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", True),  # W5(i) earned ON (T2)
+            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", True),  # default retained (crystalium#43 retracted the earned-ON claim; see config.py:211 comment)
             completion_max_hops=_env_int("CRYSTALIUM_COMPLETION_MAX_HOPS", 2),
             completion_decay=_env_float("CRYSTALIUM_COMPLETION_DECAY", 0.5),
+            link_cooccurrence=_env_bool_optional("CRYSTALIUM_LINK_COOCCURRENCE"),  # crystalium#43; None = follow recall_completion
             recall_context_match=_env_bool("CRYSTALIUM_RECALL_CONTEXT_MATCH", False),
             write_dedup_merge=_env_bool("CRYSTALIUM_WRITE_DEDUP_MERGE", True),
             sep_threshold=_env_float("CRYSTALIUM_SEP_THRESHOLD", 0.92),
