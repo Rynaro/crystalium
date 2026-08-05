@@ -60,6 +60,29 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   3-weight x 7-hash-seed sweep is fully degenerate (21/21 green, a single
   distinct `multihop_f1.completion` value across every cell).
 
+### Verification
+
+- The #38 mandate recorded in the 1.10.0 entry below is **discharged**: with
+  #41 landed, **AC-124**, **AC-125** and **AC-133** were re-run against a
+  re-baselined `eval-before.json` captured at the pre-fix SHA `56c8510`, with
+  the post-fix results in `eval-after.json`. **AC-125** (fusion gate):
+  `gate_pass` true 7/7 post-fix. **AC-124** (completion): `completion_pass`
+  true 7/7, median `multihop_f1.completion` unchanged at `0.4615` — not worse
+  than baseline. **AC-133** (context rank): median `context_rank.context`
+  unchanged at `2` — not worse than baseline.
+- The headline determinism result: pre-fix, the reverted floor probes
+  returned two distinct membership sets across seeds (`['N1','target']` and
+  `['Z','target']`); post-fix they return one (`['Z','target']`) on all
+  seven — the #41 membership nondeterminism is eliminated.
+- Both baselines were captured on the same **confounded** retrieval gate
+  (DP-2), deliberately: holding the confound constant on both sides is what
+  makes the differential isolate #41. The separately deconfounded
+  measurement lives in `eval-baseline-deconfounded.json`.
+- Artifacts live in the ESL change record
+  `crystalium-open-issues-sweep-50`: `eval-before.json`, `eval-after.json`,
+  `eval-baseline-deconfounded.json`, `dp2-sweep-postfix.json`,
+  `dp2-control-prefix.json`, `red-evidence.txt`.
+
 ## [1.10.0] — 2026-08-03
 
 ### Changed
