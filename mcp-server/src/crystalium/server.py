@@ -187,7 +187,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
     """
     return [
         {
-            "name": "crystalium.recall",
+            "name": "recall",
             "description": (
                 "Hybrid BM25 + dense + graph recall from CRYSTALIUM memory. "
                 "Returns slot-budgeted, redacted CrystalSummary records. "
@@ -256,7 +256,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "crystalium.commit",
+            "name": "commit",
             "description": (
                 "Commit a crystal to a memory layer. "
                 "T3 callers: Episodic-quarantine only (G1). "
@@ -295,7 +295,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "crystalium.ingest",
+            "name": "ingest",
             "description": (
                 "Ingest a roster ECL handoff envelope (v1.x or v2.x) as a crystal. "
                 "Maps any artifact to crystal.v1 (native payload preserved verbatim in "
@@ -323,7 +323,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "crystalium.update",
+            "name": "update",
             "description": (
                 "Bi-temporal update: invalidate old crystal (t_valid_to=now, superseded_by=new_id), "
                 "write new revision. Never hard-delete (P0-5). "
@@ -343,7 +343,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "crystalium.skill_invoke",
+            "name": "skill_invoke",
             "description": (
                 "Run a procedural verifier skill in a sandboxed subprocess (G3). "
                 "D5 bounds: timeout_s<=30, output_cap_bytes<=8192, "
@@ -366,7 +366,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "crystalium.plan_checkpoint",
+            "name": "plan_checkpoint",
             "description": (
                 "Write a TTL-bound plan checkpoint to the Execution layer. "
                 "T0/T1 only (G1: T2/T3 blocked). "
@@ -388,7 +388,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "crystalium.plan_replan",
+            "name": "plan_replan",
             "description": (
                 "Append a plan replan diff to the Execution layer. "
                 "Bi-temporal: if diff.supersedes_id is set, invalidates the old plan node. "
@@ -406,7 +406,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "crystalium.session_end",
+            "name": "session_end",
             "description": (
                 "Signal end-of-session. Enqueues a Dream consolidation run (G8). "
                 "Returns {enqueued: bool, dream_run_id: str|null}. "
@@ -424,7 +424,7 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "crystalium.graph_export",
+            "name": "graph_export",
             "description": (
                 "Export the scoped memory graph as nodes[]+edges[] "
                 "(JSON canonical, or graphml/cytoscape adapter). "
@@ -783,6 +783,33 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
         name = params.name
         arguments = params.arguments or {}
 
+        # v2.0.0 (crystalium#35, Option B deprecation cushion): the manifest
+        # now advertises single-segment names (recall, commit, ...) — see
+        # build_tool_manifest(). Strip a SINGLE leading "crystalium." or
+        # "crystalium_" prefix off the INCOMING name and dispatch on the
+        # canonical segment, so a caller still sending the pre-rename dotted
+        # or double-prefix-collapsed name (crystalium.recall / crystalium_recall)
+        # keeps working for one deprecation window. IMPORTANT CAVEAT: the MCP
+        # host gates tools/call on the ADVERTISED (tools/list) name before it
+        # ever forwards the request here — a client that re-listed after the
+        # rename will never hit this branch at all. This alias only rescues a
+        # client that cached the OLD wire name from a prior tools/list and
+        # never re-listed; it is a deprecation cushion, not a permanent alias.
+        # FORGE gated eventual alias REMOVAL on this WARN going quiet in logs,
+        # so the strip must stay observable.
+        _incoming_name = name
+        if name.startswith("crystalium."):
+            name = name[len("crystalium."):]
+        elif name.startswith("crystalium_"):
+            name = name[len("crystalium_"):]
+        if name != _incoming_name:
+            log.warning(
+                f"deprecated tool name {_incoming_name!r} normalised to "
+                f"{name!r}; caller should re-list",
+                original_name=_incoming_name,
+                canonical_name=name,
+            )
+
         schema = _tool_schemas.get(name)
         if schema is not None:
             try:
@@ -809,7 +836,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
             # is preserved and nests under this span.
             with tool_span(name, tier=tier_str):
                 performative = "INFORM"
-                if name == "crystalium.recall":
+                if name == "recall":
                     result = _handle_recall(arguments, aetheryte, scheduler, caller_tier, config)
                     scheduler.record_activity()
                     result_bytes = json.dumps(
@@ -818,7 +845,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     ).encode()
                     artifact_kind = "recall-result"
 
-                elif name == "crystalium.commit":
+                elif name == "commit":
                     layer_hint = arguments.get("layer")
                     result = _handle_commit(
                         arguments, episodic, semantic, procedural, execution, caller_tier, config,
@@ -829,7 +856,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "commit-result"
 
-                elif name == "crystalium.ingest":
+                elif name == "ingest":
                     result = _handle_ingest(
                         arguments, episodic, semantic, procedural, execution, config,
                         recall_cache=execution.recall_cache,
@@ -839,19 +866,19 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "ingest-receipt"
 
-                elif name == "crystalium.update":
+                elif name == "update":
                     layer_hint = arguments.get("layer")
                     result = _handle_update(arguments, episodic, semantic, procedural, execution, enforcement, relational, caller_tier)
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "commit-result"
 
-                elif name == "crystalium.skill_invoke":
+                elif name == "skill_invoke":
                     layer_hint = "procedural"
                     result = _handle_skill_invoke(arguments, procedural, enforcement, config, caller_tier)
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "skill-result"
 
-                elif name == "crystalium.plan_checkpoint":
+                elif name == "plan_checkpoint":
                     layer_hint = "execution"
                     result = execution.checkpoint(
                         state=arguments.get("state", {}),
@@ -860,7 +887,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "plan-checkpoint"
 
-                elif name == "crystalium.plan_replan":
+                elif name == "plan_replan":
                     layer_hint = "execution"
                     result = execution.replan(
                         diff=arguments.get("diff", {}),
@@ -869,7 +896,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "plan-replan"
 
-                elif name == "crystalium.session_end":
+                elif name == "session_end":
                     result = _handle_session_end(arguments, scheduler)
                     result_bytes = json.dumps(result, default=str).encode()
                     artifact_kind = "session-end-receipt"
@@ -878,7 +905,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                     # recall p95 (W8 SLO) at the close of the session.
                     emit_latency_panel()
 
-                elif name == "crystalium.graph_export":
+                elif name == "graph_export":
                     # W-GE5: read op — universally allowed; inherits assert_rate_limit above.
                     # NO assert_tier_allowed for a commit (never writes crystals).
                     result = _handle_graph_export(arguments, exporter, aetheryte.redactor, caller_tier)
@@ -900,8 +927,14 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
 
                 else:
                     from crystalium.enforcement import CrystaliumEnforcementError
+                    # Report the caller's ORIGINAL wire name, not the
+                    # post-strip fragment — "crystalium.bogus" stripped to
+                    # "bogus" is still unknown, and the error should name
+                    # what the caller actually sent (also keeps this message
+                    # byte-identical to pre-#35 for a caller that never used
+                    # the crystalium. prefix in the first place).
                     raise CrystaliumEnforcementError(
-                        f"Unknown tool {name!r}.",
+                        f"Unknown tool {_incoming_name!r}.",
                         reason_code="UNKNOWN_TOOL",
                     )
 
@@ -934,11 +967,20 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
             advice = getattr(exc, "advice", "")
             if advice:
                 err_payload["advice"] = advice
-            # v2.0.0 (crystalium#35, OUT OF SCOPE for #39): crystalium's own error
-            # path deliberately does NOT set is_error=True here — today it returns
-            # the error as ordinary content (isError: false). Preserved byte-for-
-            # byte across the SDK migration; fixing this is a separate, later change.
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(err_payload, indent=2))])
+            # v2.0.0 (crystalium#35): crystalium's own error path now sets
+            # is_error=True — previously it returned the error as ordinary
+            # content (isError: false), so a client checking isError (rather
+            # than parsing content) would read an enforcement rejection or an
+            # UNKNOWN_TOOL as success. The payload TEXT is unchanged byte-for-
+            # byte (same err_payload/json.dumps shape as before) — only the
+            # isError flag flips, so a content-parsing client keeps working
+            # and a client that switches to checking isError starts getting
+            # the truth. Kept as its own commit so a client that broke on
+            # isError is bisectable from the rename/alias commits above.
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps(err_payload, indent=2))],
+                is_error=True,
+            )
 
     server.add_request_handler("tools/list", PaginatedRequestParams, _list_tools)
     server.add_request_handler("tools/call", CallToolRequestParams, _call_tool)

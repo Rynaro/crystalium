@@ -930,7 +930,7 @@ class TestOversizedSummary:
 class TestDX:
     def test_commit_description_lists_provenance_sources(self) -> None:
         tools = {t["name"]: t for t in build_tool_manifest()}
-        prov_desc = tools["crystalium.commit"]["inputSchema"]["properties"]["provenance"]["description"]
+        prov_desc = tools["commit"]["inputSchema"]["properties"]["provenance"]["description"]
         for source in _VALID_PROVENANCE_SOURCES:
             assert source in prov_desc, f"{source!r} missing from provenance description"
 

@@ -1004,7 +1004,7 @@ class TestSparseWeight:
 class TestDX:
     def test_manifest_describes_weighted_score(self) -> None:
         manifest = build_tool_manifest()
-        recall_tool = next(t for t in manifest if t["name"] == "crystalium.recall")
+        recall_tool = next(t for t in manifest if t["name"] == "recall")
         desc = recall_tool["description"]
         assert "raw hybrid-retrieval RRF value" not in desc, (
             "the v1.9.0 unqualified phrase must not survive unqualified into v1.10.0"

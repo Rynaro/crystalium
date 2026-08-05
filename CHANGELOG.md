@@ -6,6 +6,79 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-08-05 — **BREAKING**
+
+### Changed
+
+- **#35, #33** renamed all 9 advertised MCP tool names from dotted
+  (`crystalium.<tool>`) to single-segment (`<tool>`). MCP tool names cannot
+  contain `.`, so the host sanitises `.`->`_` AND namespaces the server,
+  producing the double-prefixed `mcp__crystalium__crystalium_recall` — a
+  caller reaching for the intuitive `mcp__crystalium__recall` got
+  "No such tool available" (root cause of #33). Every sibling MCP
+  (`mcp__tonberry__list`, `mcp__atomos__compose_handoff`, ...) already used
+  single-segment names; crystalium was the lone outlier.
+
+  | Old (v1.x)                     | New (v2.0.0)       |
+  |---------------------------------|---------------------|
+  | `crystalium.recall`             | `recall`             |
+  | `crystalium.commit`             | `commit`             |
+  | `crystalium.ingest`             | `ingest`             |
+  | `crystalium.update`             | `update`             |
+  | `crystalium.skill_invoke`       | `skill_invoke`       |
+  | `crystalium.plan_checkpoint`    | `plan_checkpoint`    |
+  | `crystalium.plan_replan`        | `plan_replan`        |
+  | `crystalium.session_end`        | `session_end`        |
+  | `crystalium.graph_export`       | `graph_export`       |
+
+  **Migration:** glob grants (`mcp__crystalium__*`) are rename-transparent
+  and keep working unchanged. Only callers pinned to the explicit
+  double-prefixed wire name (`mcp__crystalium__crystalium_recall`, etc.)
+  are affected — those callers should re-list tools and pick up the new
+  advertised (single-prefixed) name, `mcp__crystalium__recall`.
+
+- Added a `tools/call` dispatch alias (Option B deprecation cushion): a
+  caller still sending the pre-rename dotted name (`crystalium.recall`) or
+  the double-prefix-collapsed name (`crystalium_recall`) is still routed
+  to the canonical handler, with an observable deprecation WARN on every
+  strip. This only rescues a client that cached the old wire name from a
+  prior `tools/list` — a client that re-lists after the rename never
+  reaches the alias at all, since the host gates `tools/call` on the
+  advertised name before forwarding. It is a deprecation cushion for one
+  window, not a permanent alias; FORGE gates eventual alias removal on the
+  warning going quiet in logs.
+
+### Fixed
+
+- crystalium's own error path (enforcement rejections, `UNKNOWN_TOOL`, and
+  any other exception crystalium raises inside `tools/call`) now sets
+  `isError: true`. Previously the error came back as ordinary content
+  (`isError: false`), so a client checking `isError` (rather than parsing
+  content) read an enforcement rejection or an unknown tool as success.
+  The payload TEXT is unchanged byte-for-byte — a client parsing content
+  keeps working; a client checking `isError` starts getting the truth.
+
+- **#35 fix-forward:** the tool rename above moved the telemetry SLO key
+  out from under itself. `server.py`'s dispatch calls
+  `record_call(tool=name, ...)` with the post-rename runtime name
+  (`recall`), but `telemetry.py`'s `availability()` / `recall_p95()` still
+  defaulted to the pre-rename dotted `"crystalium.recall"` — every recall
+  call landed in a bucket nothing ever read again. The `session_end` SLO
+  panel would have silently emitted an empty `recall_p95`/availability
+  reading forever, with no error and no log line. `telemetry.py` now
+  exports a single canonical `RECALL_TOOL` constant that `availability()`,
+  `recall_p95()`, and the SLO panel all read from, so a future rename
+  can't desync them the same way again (wiring `server.py`'s manifest to
+  the same constant is a follow-up; out of scope here).
+  The guarding test (`test_recall_p95_panel_metric`) could not have caught
+  this: it recorded a call and asserted against the *same* hardcoded
+  literal it just wrote, so it stayed green regardless of what the
+  dispatcher actually recorded under. A new regression test
+  (`test_recall_slo_key_matches_dispatch_tool_name`) derives the recorded
+  tool name from the production manifest (`build_tool_manifest()`) instead
+  of a literal, so it goes red if telemetry's key and the dispatcher's
+  name ever diverge again.
+
 ## [1.12.0] — 2026-08-05
 
 ### Changed
