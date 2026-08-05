@@ -6,6 +6,88 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-08-05
+
+### Fixed
+
+- **#35 fix-forward** — a post-release independent check caught two
+  defects the #35 tool-rename left behind in v2.0.0:
+
+  1. **Telemetry double-write on `recall`.** `Aetheryte.recall()`
+     (`aetheryte/retrieve.py`) recorded its own telemetry row in a
+     `finally:` block that fired on every call — success AND failure —
+     under the pre-#35 dotted tool name (`"crystalium.recall"`), in
+     addition to `server.py`'s `_call_tool` dispatcher recording the SAME
+     call under the canonical name (`"recall"`) the manifest was renamed
+     to. Every recall therefore wrote TWO rows to `tool_calls`: one
+     stale-keyed duplicate, one canonical. The inner write carried no
+     information the outer one lacks for this tool (`op="recall"` is
+     identical to the tool name, and `layer=None` matches the outer's
+     `layer_hint` for recall in every case), so it was removed rather than
+     repointed.
+
+  2. **`DreamWorker._orient()` read the stale key.** Its `total_recalls`
+     query still filtered `tool_calls WHERE tool='crystalium.recall'` — the
+     same pre-#35 name. It only appeared to "work" because the double-write
+     above kept that stale bucket alive as an orphaned duplicate stream;
+     `_orient()` was silently counting the wrong stream, not the canonical
+     per-`tools/call` one. Repointed to `telemetry.RECALL_TOOL` (imported,
+     not repeated as a literal) via a parameterized query.
+
+  A sweep of `mcp-server/src/` for the same class of stale
+  `"crystalium.<tool>"` literal feeding a telemetry write turned up five
+  more layer-adapter call sites left over from #35 (each layer adapter
+  records its own telemetry in a `finally:` block, independently of
+  `server.py`'s dispatcher — a pre-existing pattern, not new in #35):
+
+  - `layers/episodic.py` `commit()` and `layers/procedural.py` `commit()`:
+    same shape as the recall fix — the inner write was 100% redundant with
+    the outer dispatcher's (the layer argument is dispatcher-required, so
+    `layer_hint` always agrees; `op` always equals the tool name for these
+    two). **Removed.**
+  - `layers/procedural.py` `invoke()` (`skill_invoke`), `layers/semantic.py`
+    `commit()` and `update()`, `layers/execution.py` `checkpoint()`
+    (`plan_checkpoint`) and `replan()` (`plan_replan`): the stale dotted
+    literal was **repointed** to the canonical tool name, but the write
+    itself was **kept** — each of these carries a field the outer
+    dispatcher's write genuinely lacks and cannot reconstruct: a failed
+    verifier or promotion-gate rejection sets `outcome="rejected"` /
+    `"pending"` without raising an exception (the outer dispatcher
+    hardcodes `result="ok"` for any non-raising return, so it can never see
+    this), `update`'s caller-supplied schema has no `layer` field at all
+    (the outer's `layer_hint` is always `None` for it — only the inner
+    write records the real target layer), and `plan_checkpoint`/
+    `plan_replan`'s `op="commit"` (the D1 tier-matrix bucket) genuinely
+    differs from the tool name, a distinction the outer dispatcher never
+    records for any tool. These five sites are still a duplicate WRITE
+    (one extra row per call) but not a duplicate of INFORMATION — deleting
+    them would have dropped real audit-trail signal, not just de-duped a
+    row.
+
+  A `server.py`-level double-write was also found during the sweep — its
+  `_call_tool` exception handler calls both `enforcement.record(...)` and
+  `record_call(...)` back-to-back for every tool's error path — but it
+  predates #35 by several releases, affects the outer dispatcher itself
+  rather than a stale tool-name literal, and is left for its own dedicated
+  fix-forward.
+
+- Added a regression test (`test_server.py`
+  `test_recall_writes_exactly_one_tool_calls_row`) driving a real recall
+  through the dispatcher and asserting exactly one `tool_calls` row keyed
+  under `telemetry.RECALL_TOOL`, plus
+  `test_dream_orient_counts_recalls_via_canonical_key` proving
+  `DreamWorker._orient()` now counts that same canonical stream.
+  Red-checked against the pre-fix code (2 rows / stale-key miscount) before
+  the fix landed.
+- Added a parametrized test (`test_server.py`
+  `test_schema_violation_is_error_with_no_side_effect`) covering the
+  hand-rolled `jsonschema` input validation added in v1.12.0, which had no
+  coverage in `mcp-server/tests/` (only in an external script CI never
+  runs). Derives the tool list from `build_tool_manifest()` — not a
+  hardcoded list — and for each tool asserts a schema-violating call sets
+  `isError=True`, its message starts with `"Input validation error:"`, and
+  it has no side effect (no `tool_calls` row, no `runs/` artifact).
+
 ## [2.0.0] — 2026-08-05 — **BREAKING**
 
 ### Changed
