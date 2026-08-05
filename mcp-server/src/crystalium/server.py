@@ -967,11 +967,20 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
             advice = getattr(exc, "advice", "")
             if advice:
                 err_payload["advice"] = advice
-            # v2.0.0 (crystalium#35, OUT OF SCOPE for #39): crystalium's own error
-            # path deliberately does NOT set is_error=True here — today it returns
-            # the error as ordinary content (isError: false). Preserved byte-for-
-            # byte across the SDK migration; fixing this is a separate, later change.
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(err_payload, indent=2))])
+            # v2.0.0 (crystalium#35): crystalium's own error path now sets
+            # is_error=True — previously it returned the error as ordinary
+            # content (isError: false), so a client checking isError (rather
+            # than parsing content) would read an enforcement rejection or an
+            # UNKNOWN_TOOL as success. The payload TEXT is unchanged byte-for-
+            # byte (same err_payload/json.dumps shape as before) — only the
+            # isError flag flips, so a content-parsing client keeps working
+            # and a client that switches to checking isError starts getting
+            # the truth. Kept as its own commit so a client that broke on
+            # isError is bisectable from the rename/alias commits above.
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps(err_payload, indent=2))],
+                is_error=True,
+            )
 
     server.add_request_handler("tools/list", PaginatedRequestParams, _list_tools)
     server.add_request_handler("tools/call", CallToolRequestParams, _call_tool)

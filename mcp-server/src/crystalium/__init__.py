@@ -5,7 +5,7 @@ from __future__ import annotations
 #: Fallback literal — kept in sync with [project].version in pyproject.toml.
 #: Used only when the package isn't installed with metadata (e.g. a raw
 #: PYTHONPATH=src dev checkout that never ran `pip install`/`uv sync`).
-_FALLBACK_VERSION = "1.12.0"
+_FALLBACK_VERSION = "2.0.0"
 
 try:
     # v1.6 (item 6 housekeeping): single-source from installed package metadata

@@ -377,6 +377,43 @@ def test_dispatch_unknown_tool_name_still_unknown(tmp_path: Path, monkeypatch) -
 
 
 # ---------------------------------------------------------------------------
+# v2.0.0 (crystalium#35) — is_error=True on crystalium's own error path
+#
+# Pre-v2.0.0, crystalium's UNKNOWN_TOOL / enforcement-rejection error path
+# returned isError: false (errors masquerading as success). The payload TEXT
+# is unchanged byte-for-byte; only the isError flag flips.
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_tool_sets_is_error_true(tmp_path: Path, monkeypatch) -> None:
+    """v2.0.0 (crystalium#35): the UNKNOWN_TOOL path now sets is_error=True."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, _scheduler = _build_server(Config(data_dir=tmp_path / "error-path-unknown"))
+    result = _drive_call_tool(server, "not_a_tool", {})
+    assert result.is_error is True
+
+
+def test_unknown_tool_error_content_text_unchanged(tmp_path: Path, monkeypatch) -> None:
+    """v2.0.0 (crystalium#35): flipping is_error does not change the payload
+    TEXT — same err_payload/json.dumps shape (error/message keys) as before,
+    so a client that parses content (rather than isError) keeps working."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, _scheduler = _build_server(Config(data_dir=tmp_path / "error-path-content"))
+    result = _drive_call_tool(server, "not_a_tool", {})
+    payload = json.loads(result.content[0].text)
+    assert payload == {
+        "error": "UNKNOWN_TOOL",
+        "message": "Unknown tool 'not_a_tool'.",
+    }
+
+
+# ---------------------------------------------------------------------------
 # test_caller_identity_falls_back_to_unknown_t2
 # ---------------------------------------------------------------------------
 
