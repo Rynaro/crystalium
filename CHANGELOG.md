@@ -58,6 +58,27 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   The payload TEXT is unchanged byte-for-byte — a client parsing content
   keeps working; a client checking `isError` starts getting the truth.
 
+- **#35 fix-forward:** the tool rename above moved the telemetry SLO key
+  out from under itself. `server.py`'s dispatch calls
+  `record_call(tool=name, ...)` with the post-rename runtime name
+  (`recall`), but `telemetry.py`'s `availability()` / `recall_p95()` still
+  defaulted to the pre-rename dotted `"crystalium.recall"` — every recall
+  call landed in a bucket nothing ever read again. The `session_end` SLO
+  panel would have silently emitted an empty `recall_p95`/availability
+  reading forever, with no error and no log line. `telemetry.py` now
+  exports a single canonical `RECALL_TOOL` constant that `availability()`,
+  `recall_p95()`, and the SLO panel all read from, so a future rename
+  can't desync them the same way again (wiring `server.py`'s manifest to
+  the same constant is a follow-up; out of scope here).
+  The guarding test (`test_recall_p95_panel_metric`) could not have caught
+  this: it recorded a call and asserted against the *same* hardcoded
+  literal it just wrote, so it stayed green regardless of what the
+  dispatcher actually recorded under. A new regression test
+  (`test_recall_slo_key_matches_dispatch_tool_name`) derives the recorded
+  tool name from the production manifest (`build_tool_manifest()`) instead
+  of a literal, so it goes red if telemetry's key and the dispatcher's
+  name ever diverge again.
+
 ## [1.12.0] — 2026-08-05
 
 ### Changed

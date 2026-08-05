@@ -55,6 +55,34 @@ log = structlog.get_logger("crystalium.telemetry")
 
 
 # ---------------------------------------------------------------------------
+# Canonical recall tool name — single source of truth for the SLO lookup key
+# (crystalium#35 fix-forward)
+#
+# crystalium#35 renamed the advertised MCP tool from the dotted
+# "crystalium.recall" to the single-segment "recall" (see server.py's
+# build_tool_manifest()). server.py's dispatch calls
+# record_call(tool=name, ...) with the RUNTIME name it receives off
+# tools/call — that is now "recall". Any telemetry lookup that targets the
+# recall tool specifically (availability(), recall_p95(), the SLO panel)
+# MUST key off that same string or the bucket it reads is permanently
+# empty with no error — which is exactly what happened: this module kept
+# its own hardcoded "crystalium.recall" after the rename, silently
+# desyncing from what the dispatcher actually writes.
+#
+# Placement: server.py already imports FROM telemetry.py (never the
+# reverse), so telemetry.py is the low-level module in that edge and can
+# safely hold this constant — importing it the other way (telemetry.py
+# importing server.py) would create a cycle. Wiring build_tool_manifest()/
+# the dispatch table in server.py to import RECALL_TOOL instead of
+# repeating the "recall" literal would close the loop fully, but that file
+# is out of scope for this change (frozen per crystalium#35 fix-forward
+# boundary) — tracked as a follow-up, not done here.
+# ---------------------------------------------------------------------------
+
+RECALL_TOOL = "recall"
+
+
+# ---------------------------------------------------------------------------
 # OpenTelemetry span helpers
 # ---------------------------------------------------------------------------
 
@@ -81,7 +109,7 @@ def tool_span(
     Falls back to a no-op if opentelemetry-sdk is not available.
 
     Usage:
-        with tool_span("crystalium.recall", layer="semantic", tier="T1"):
+        with tool_span("recall", layer="semantic", tier="T1"):
             result = await do_recall(...)
     """
     tracer = _get_tracer()
@@ -139,7 +167,7 @@ def record_call(
     """Emit one structured telemetry record for a tool call.
 
     Args:
-        tool:         Tool name (e.g. 'crystalium.recall').
+        tool:         Tool name (e.g. 'recall').
         layer:        Memory layer involved, if any.
         tier:         Caller trust tier (T0..T3), if known.
         op:           Operation type (commit / recall / propose_promote / force_promote).
@@ -220,7 +248,7 @@ def _record_availability(tool: str, result: str) -> None:
         a["successes"] += 1
 
 
-def availability(tool: str = "crystalium.recall") -> float | None:
+def availability(tool: str = RECALL_TOOL) -> float | None:
     """Availability = successes / attempts for *tool* (W8 SLO; target >= 0.99).
 
     None when the tool was never called (undefined, not 0.0)."""
@@ -250,7 +278,7 @@ def latency_percentile(tool: str, p: float) -> float | None:
 
 def recall_p95() -> float | None:
     """Recall p95 latency (ms) — the W8 availability-SLO panel metric."""
-    return latency_percentile("crystalium.recall", 95)
+    return latency_percentile(RECALL_TOOL, 95)
 
 
 def latency_panel() -> dict[str, dict[str, Any]]:
@@ -274,7 +302,7 @@ def emit_latency_panel() -> dict[str, dict[str, Any]]:
     panel = latency_panel()
     log.info(
         "latency_panel", panel=panel,
-        recall_p95_ms=recall_p95(), recall_availability=availability("crystalium.recall"),
+        recall_p95_ms=recall_p95(), recall_availability=availability(RECALL_TOOL),
     )
     return panel
 

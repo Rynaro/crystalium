@@ -43,10 +43,57 @@ def test_percentile_empty_is_none():
 
 
 def test_recall_p95_panel_metric():
+    # Written under telemetry.RECALL_TOOL (the canonical constant recall_p95()
+    # reads from internally), not the pre-#35 dotted literal — see
+    # test_recall_slo_key_matches_dispatch_tool_name for the regression guard
+    # that actually cross-checks this constant against the dispatcher's tool
+    # surface.
     for ms in range(1, 21):  # 1..20
-        telemetry.record_call(tool="crystalium.recall", latency_ms=float(ms))
+        telemetry.record_call(tool=telemetry.RECALL_TOOL, latency_ms=float(ms))
     # nearest-rank p95 of 20 samples -> rank ceil(0.95*20)=19 -> 19th value = 19.0
     assert telemetry.recall_p95() == 19.0
+
+
+def test_recall_slo_key_matches_dispatch_tool_name():
+    """Regression guard for crystalium#35.
+
+    server.py's dispatch calls record_call(tool=name, ...) where `name` is
+    the RUNTIME tool name off tools/call — for a client that has re-listed,
+    that is exactly the name build_tool_manifest() advertises for recall.
+    telemetry.availability()/recall_p95() must read the SAME key or the
+    bucket they look up is permanently empty with no error (the exact
+    silent failure #35 introduced: telemetry kept the pre-rename dotted
+    "crystalium.recall" as its lookup key after the manifest moved to the
+    single-segment "recall").
+
+    Unlike test_recall_p95_panel_metric (which writes and reads via the same
+    telemetry.RECALL_TOOL symbol and is therefore self-consistent by
+    construction), this test anchors the recorded name to the PRODUCTION
+    manifest — crystalium.server.build_tool_manifest() — rather than to a
+    literal this test invented. If telemetry's SLO key and the manifest's
+    advertised tool name ever diverge again, this goes red instead of
+    passing vacuously.
+    """
+    from crystalium.server import build_tool_manifest
+
+    manifest_names = {t["name"] for t in build_tool_manifest()}
+    # telemetry.RECALL_TOOL must itself be a name the dispatcher advertises —
+    # if a future rename moves the manifest's name without updating the
+    # constant, this line catches it before the SLO assertions below even run.
+    assert telemetry.RECALL_TOOL in manifest_names, (
+        f"telemetry.RECALL_TOOL={telemetry.RECALL_TOOL!r} is not among the "
+        f"tool names build_tool_manifest() advertises ({sorted(manifest_names)}); "
+        "telemetry's SLO key has desynced from the dispatcher's tool surface."
+    )
+
+    # Simulate exactly what the dispatcher writes for a real recall call:
+    # record_call(tool=<manifest's advertised recall name>, ...).
+    dispatch_tool_name = next(
+        t["name"] for t in build_tool_manifest() if t["name"] == telemetry.RECALL_TOOL
+    )
+    telemetry.record_call(tool=dispatch_tool_name, latency_ms=42.0)
+    assert telemetry.recall_p95() == 42.0
+    assert telemetry.availability() == 1.0
 
 
 def test_latency_panel_per_tool():
