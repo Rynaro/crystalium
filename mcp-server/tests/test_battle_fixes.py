@@ -395,20 +395,28 @@ def test_tool_calls_populated_via_telemetry(tmp_path: Path) -> None:
 
 
 def test_tool_calls_readable_by_orient(tmp_path: Path) -> None:
-    """G1.3: DreamWorker._orient() reads the tool_calls count from a populated table."""
+    """G1.3: DreamWorker._orient() reads the tool_calls count from a populated table.
+
+    crystalium#35 fix-forward (v2.0.1): written under telemetry.RECALL_TOOL
+    (the canonical dispatch name), not the pre-#35 stale dotted literal —
+    _orient()'s own query was repointed to the same canonical key (see
+    test_server.py's test_dream_orient_counts_recalls_via_canonical_key for
+    the end-to-end regression guard that drives this through the real
+    dispatcher instead of writing directly here).
+    """
     import datetime as _dt
 
     from crystalium.dream.worker import DreamWorker
-    from crystalium.telemetry import record_call, register_relational_store, reset_latency_samples
+    from crystalium.telemetry import RECALL_TOOL, record_call, register_relational_store, reset_latency_samples
 
     store = RelationalStore(db_path=tmp_path / "orient.sqlite")
     register_relational_store(store)
     try:
         reset_latency_samples()
         # Write two recall calls into the audit table
-        record_call(tool="crystalium.recall", layer=None, tier="T1",
+        record_call(tool=RECALL_TOOL, layer=None, tier="T1",
                     op="recall", result="ok", latency_ms=55.0)
-        record_call(tool="crystalium.recall", layer=None, tier="T1",
+        record_call(tool=RECALL_TOOL, layer=None, tier="T1",
                     op="recall", result="ok", latency_ms=60.0)
 
         worker = DreamWorker(

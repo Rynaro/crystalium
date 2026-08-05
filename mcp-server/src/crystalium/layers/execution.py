@@ -295,8 +295,17 @@ class ExecutionLayer:
             raise
 
         finally:
+            # crystalium#35 fix-forward (v2.0.1): repointed the stale dotted
+            # tool literal ("crystalium.plan_checkpoint") to the canonical
+            # name ("plan_checkpoint"). KEPT (not deleted): op="commit" here
+            # is the D1 tier-matrix bucket this write is governed by, NOT the
+            # tool name — the two genuinely differ for this tool (unlike
+            # commit/update/skill_invoke, where op always equals the tool
+            # name) — and server.py's `_call_tool` dispatcher never records
+            # `op` for any tool. Deleting this write would drop that
+            # (tool, op) pairing from the audit trail entirely.
             self.enforcement.record(
-                "crystalium.plan_checkpoint",
+                "plan_checkpoint",
                 "execution",
                 caller_tier,
                 "commit",
@@ -430,8 +439,14 @@ class ExecutionLayer:
             raise
 
         finally:
+            # crystalium#35 fix-forward (v2.0.1): repointed the stale dotted
+            # tool literal ("crystalium.plan_replan") to the canonical name
+            # ("plan_replan"). KEPT for the same reason as checkpoint()
+            # above: op="commit" is the D1 tier-matrix bucket, genuinely
+            # distinct from the tool name, and the outer dispatcher never
+            # records `op` at all.
             self.enforcement.record(
-                "crystalium.plan_replan",
+                "plan_replan",
                 "execution",
                 caller_tier,
                 "commit",

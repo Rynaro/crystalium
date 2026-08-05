@@ -4,7 +4,9 @@ T3 callers land as quarantined (enforcement-side _MARK_QUARANTINE flag).
 Bi-temporal updates: invalidate old → write new (never hard-delete, P0-5).
 
 All writes funnel through enforcement.assert_tier_allowed() before any store call.
-record() is called in finally blocks for telemetry (P0-7).
+Telemetry (P0-7) is recorded once, by server.py's `_call_tool` dispatcher —
+commit() no longer duplicates that write in its own finally block
+(crystalium#35 fix-forward, v2.0.1: removed a stale-keyed double-write).
 
 Source: spec.md §4 (tier matrix row: Episodic), FORGE D1.
 """
@@ -21,7 +23,6 @@ from crystalium.enforcement import Enforcement
 from crystalium.aetheryte.redact import Redactor
 from crystalium.importance import initial_importance
 from crystalium.schemas import Provenance
-from crystalium.telemetry import now_ms
 from crystalium.trust import Tier
 
 log = structlog.get_logger("crystalium.layers.episodic")
@@ -131,10 +132,6 @@ class EpisodicLayer:
         Returns:
             CommitResult dict with status, id, layer, validation_state, importance.
         """
-        t0 = now_ms()
-        outcome = "ok"
-        error_code: str | None = None
-
         try:
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
@@ -283,21 +280,19 @@ class EpisodicLayer:
                 "content_ref": content_ref,
             }
 
-        except Exception as exc:
-            outcome = "error" if not hasattr(exc, "reason_code") else "rejected"
-            error_code = getattr(exc, "reason_code", type(exc).__name__)
+        except Exception:
+            # crystalium#35 fix-forward (v2.0.1): this used to record its own
+            # telemetry row here (stale dotted "crystalium.commit") in a
+            # `finally:` block on every call. server.py's `_call_tool`
+            # dispatcher already records the SAME call under the canonical
+            # name ("commit") — including layer, which the dispatcher reads
+            # from the caller-supplied (schema-required) `layer` argument that
+            # routed here in the first place, so it is never out of sync with
+            # the "episodic" literal this block used to hardcode. op="commit"
+            # carried no information the outer write lacks (the enforcement
+            # matrix's op key IS the tool name here). Bare re-raise preserves
+            # commit()'s exception semantics unchanged.
             raise
-
-        finally:
-            self.enforcement.record(
-                "crystalium.commit",
-                "episodic",
-                caller_tier,
-                "commit",
-                outcome,
-                now_ms() - t0,
-                error=error_code,
-            )
 
     # ------------------------------------------------------------------
     # recall (universally allowed, D1)

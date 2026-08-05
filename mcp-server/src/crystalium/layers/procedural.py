@@ -4,7 +4,11 @@ T2 callers land as 'candidate'; T0/T1 with passing verifier-result land as 'shar
 skill_invoke runs a subprocess inside the container (D5 sandbox contract).
 
 All writes funnel through enforcement.assert_tier_allowed() before any store call.
-record() called in finally blocks.
+commit() no longer records its own telemetry row (server.py's `_call_tool`
+dispatcher already does, crystalium#35 fix-forward v2.0.1 — removed a stale-
+keyed double-write). invoke() still calls record() in a finally block: a
+failed verifier sets outcome="rejected" without raising, a signal the outer
+dispatcher's blanket result="ok" (any non-raising return) cannot see.
 
 Source: spec.md §4 (Procedural row), FORGE D1, D5; gates G2, G3.
 """
@@ -93,10 +97,6 @@ class ProceduralLayer:
         Returns:
             CommitResult dict.
         """
-        t0 = now_ms()
-        outcome = "ok"
-        error_code: str | None = None
-
         try:
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
@@ -203,21 +203,19 @@ class ProceduralLayer:
 
             return result
 
-        except Exception as exc:
-            outcome = "error" if not hasattr(exc, "reason_code") else "rejected"
-            error_code = getattr(exc, "reason_code", type(exc).__name__)
+        except Exception:
+            # crystalium#35 fix-forward (v2.0.1): removed the redundant inner
+            # telemetry write here (stale dotted "crystalium.commit") — same
+            # reasoning as episodic.commit()/Aetheryte.recall(): server.py's
+            # `_call_tool` dispatcher already records this call under the
+            # canonical name ("commit"), with the caller-supplied (schema-
+            # required) `layer` argument that routed here, and procedural.
+            # commit() has no soft-reject return path (a T2 caller landing as
+            # 'candidate' is still telemetry-outcome "ok") — unlike invoke()
+            # below, there is no VERIFIER_FAIL-style signal the outer write
+            # would miss. Bare re-raise preserves commit()'s exception
+            # semantics unchanged.
             raise
-
-        finally:
-            self.enforcement.record(
-                "crystalium.commit",
-                "procedural",
-                caller_tier,
-                "commit",
-                outcome,
-                now_ms() - t0,
-                error=error_code,
-            )
 
     # ------------------------------------------------------------------
     # invoke — D5 sandbox (G3)
@@ -341,8 +339,21 @@ class ProceduralLayer:
             raise
 
         finally:
+            # crystalium#35 fix-forward (v2.0.1): repointed the stale dotted
+            # tool literal ("crystalium.skill_invoke") to the canonical
+            # single-segment name ("skill_invoke") advertised by
+            # build_tool_manifest() since #35 — this call is KEPT (not
+            # deleted like the commit()/recall() sibling call sites above):
+            # a verifier that runs but fails sets outcome="rejected" /
+            # error_code="VERIFIER_FAIL" above WITHOUT raising (invoke()
+            # returns a SkillResult normally), and server.py's `_call_tool`
+            # dispatcher hardcodes result="ok" for any non-raising return —
+            # it can never see VERIFIER_FAIL. Deleting this write would
+            # silently drop that outcome from the audit trail entirely, not
+            # just de-duplicate it. Still a genuine duplicate WRITE (a second
+            # row per call) but not a genuine duplicate of INFORMATION.
             self.enforcement.record(
-                "crystalium.skill_invoke",
+                "skill_invoke",
                 "procedural",
                 caller_tier,
                 "skill_invoke",
