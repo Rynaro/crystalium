@@ -246,7 +246,7 @@ def test_record_activity_called_on_commit(tmp_path: Path, monkeypatch) -> None:
     orig = scheduler.record_activity
     monkeypatch.setattr(scheduler, "record_activity", lambda: (calls.append(1), orig()) and None)
 
-    _drive_call_tool(server, "crystalium.commit", {
+    _drive_call_tool(server, "commit", {
         "layer": "episodic",
         "payload": {"summary": "dispatch test",
                     "scope": {"project": "t", "agent_class_visibility": "all"}},
@@ -264,7 +264,7 @@ def test_record_activity_called_on_recall(tmp_path: Path, monkeypatch) -> None:
     server, scheduler = _build_server(Config(data_dir=tmp_path / "ra-recall"))
     before = scheduler._last_activity
 
-    _drive_call_tool(server, "crystalium.recall",
+    _drive_call_tool(server, "recall",
                      {"scope": {"project": "t"}, "query": "anything", "k": 3})
     assert scheduler._last_activity > before, (
         "dispatch must advance scheduler._last_activity via record_activity() on recall"
@@ -330,22 +330,44 @@ def test_build_tool_manifest_returns_9_tools() -> None:
 
 
 def test_build_tool_manifest_has_required_tool_names() -> None:
-    """All 9 tool names are present (the 8 original + W-GE5 crystalium.graph_export)."""
+    """All 9 tool names are present (the 8 original + W-GE5 graph_export).
+
+    v2.0.0 (crystalium#35): advertised names are single-segment — the host
+    already namespaces (mcp__crystalium__<name>) and sanitises '.'->'_', so
+    a dotted name here used to produce the double-prefixed
+    mcp__crystalium__crystalium_recall (root cause of #33).
+    """
     from crystalium.server import build_tool_manifest
     tools = build_tool_manifest()
     names = {t["name"] for t in tools}
     expected = {
-        "crystalium.recall",
-        "crystalium.commit",
-        "crystalium.ingest",
-        "crystalium.update",
-        "crystalium.skill_invoke",
-        "crystalium.plan_checkpoint",
-        "crystalium.plan_replan",
-        "crystalium.session_end",
-        "crystalium.graph_export",
+        "recall",
+        "commit",
+        "ingest",
+        "update",
+        "skill_invoke",
+        "plan_checkpoint",
+        "plan_replan",
+        "session_end",
+        "graph_export",
     }
     assert names == expected, f"Tool manifest mismatch: {names ^ expected}"
+
+
+def test_build_tool_manifest_names_are_single_segment() -> None:
+    """v2.0.0 (crystalium#35): every advertised name matches ^[a-z_]+$ — no
+    dots, no leftover 'crystalium_' prefix. This is the exact criterion that
+    would have caught the original double-prefix bug (crystalium#33)."""
+    import re
+
+    from crystalium.server import build_tool_manifest
+
+    names = [t["name"] for t in build_tool_manifest()]
+    assert names, "manifest returned no tools"
+    for n in names:
+        assert re.fullmatch(r"[a-z_]+", n), f"tool name {n!r} is not single-segment ^[a-z_]+$"
+        assert not n.startswith("crystalium_"), f"tool name {n!r} still carries the crystalium_ prefix"
+        assert "." not in n, f"tool name {n!r} contains a dot"
 
 
 def test_build_tool_manifest_each_has_input_schema() -> None:

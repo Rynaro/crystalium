@@ -835,14 +835,18 @@ class TestGGE6CliMcpParity:
         assert result["generated_from"]["caller_tier"] == "T1"
 
     def test_g_ge6_manifest_includes_graph_export(self) -> None:
-        """build_tool_manifest() must include crystalium.graph_export as the 9th tool."""
+        """build_tool_manifest() must include graph_export as the 9th tool.
+
+        v2.0.0 (crystalium#35): advertised name is single-segment (graph_export,
+        not crystalium.graph_export).
+        """
         from crystalium.server import build_tool_manifest
         tools = build_tool_manifest()
         names = [t["name"] for t in tools]
-        assert "crystalium.graph_export" in names, (
-            f"crystalium.graph_export missing from manifest: {names}"
+        assert "graph_export" in names, (
+            f"graph_export missing from manifest: {names}"
         )
-        ge = next(t for t in tools if t["name"] == "crystalium.graph_export")
+        ge = next(t for t in tools if t["name"] == "graph_export")
         assert ge["inputSchema"]["required"] == ["scope"]
         assert "format" in ge["inputSchema"]["properties"]
         assert "json" in ge["inputSchema"]["properties"]["format"]["enum"]
