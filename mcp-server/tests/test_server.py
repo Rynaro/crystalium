@@ -12,6 +12,7 @@ Container-first: run via
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 import uuid
@@ -269,6 +270,110 @@ def test_record_activity_called_on_recall(tmp_path: Path, monkeypatch) -> None:
     assert scheduler._last_activity > before, (
         "dispatch must advance scheduler._last_activity via record_activity() on recall"
     )
+
+
+# ---------------------------------------------------------------------------
+# v2.0.0 (crystalium#35) — dispatch aliases + deprecation WARN (Option B)
+#
+# The manifest advertises single-segment names (commit 1 above). This
+# normalisation is a CUSHION for a client that cached the pre-rename wire
+# name from an earlier tools/list and never re-listed — a client that DID
+# re-list only ever sees the new advertised name and never reaches this
+# branch (the MCP host gates tools/call on the advertised name before
+# forwarding). It is not a permanent alias.
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_alias_dotted_name_routes_to_recall(tmp_path: Path, monkeypatch) -> None:
+    """A cached caller sending the pre-rename dotted name still gets routed."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, _scheduler = _build_server(Config(data_dir=tmp_path / "alias-dotted"))
+    result = _drive_call_tool(
+        server, "crystalium.recall",
+        {"scope": {"project": "t"}, "query": "anything", "k": 3},
+    )
+    assert result.is_error is not True, result.content[0].text
+
+
+def test_dispatch_alias_underscored_name_routes_to_recall(tmp_path: Path, monkeypatch) -> None:
+    """A cached caller sending the double-prefix-collapsed name (crystalium_recall,
+    the shape a host produces from mcp__crystalium__crystalium_recall's inner
+    segment) still gets routed to the canonical `recall` handler."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, _scheduler = _build_server(Config(data_dir=tmp_path / "alias-underscored"))
+    result = _drive_call_tool(
+        server, "crystalium_recall",
+        {"scope": {"project": "t"}, "query": "anything", "k": 3},
+    )
+    assert result.is_error is not True, result.content[0].text
+
+
+def test_dispatch_alias_both_forms_and_canonical_all_agree(tmp_path: Path, monkeypatch) -> None:
+    """recall, crystalium.recall, and crystalium_recall all route identically
+    (same result shape) to the canonical `recall` handler."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, _scheduler = _build_server(Config(data_dir=tmp_path / "alias-parity"))
+    args = {"scope": {"project": "t"}, "query": "anything", "k": 3}
+
+    results = [
+        _drive_call_tool(server, n, args)
+        for n in ("recall", "crystalium.recall", "crystalium_recall")
+    ]
+    for r in results:
+        assert r.is_error is not True, r.content[0].text
+    # Same handler, same shape (schema_version + records key, whatever the
+    # real recall payload emits) — parse and compare a stable subset.
+    payloads = [json.loads(r.content[0].text) for r in results]
+    keysets = [set(p.keys()) for p in payloads]
+    assert keysets[0] == keysets[1] == keysets[2], (
+        f"alias routing produced divergent result shapes: {keysets}"
+    )
+
+
+def test_dispatch_alias_emits_deprecation_warn(tmp_path: Path, monkeypatch) -> None:
+    """Stripping the crystalium./crystalium_ prefix emits an observable WARN
+    (FORGE gated eventual alias REMOVAL on this warning being absent from
+    logs)."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, _scheduler = _build_server(Config(data_dir=tmp_path / "alias-warn"))
+    args = {"scope": {"project": "t"}, "query": "anything", "k": 3}
+
+    import structlog
+
+    with structlog.testing.capture_logs() as cap:
+        _drive_call_tool(server, "crystalium.recall", args)
+        _drive_call_tool(server, "crystalium_recall", args)
+        # A caller using the canonical name must NOT trigger the warning.
+        _drive_call_tool(server, "recall", args)
+
+    warn_events = [e for e in cap if e.get("log_level") == "warning" and "deprecated" in str(e.get("event", ""))]
+    assert len(warn_events) == 2, f"expected exactly 2 deprecation WARNs (dotted + underscored); got: {warn_events}"
+    assert "crystalium.recall" in warn_events[0]["event"]
+    assert "crystalium_recall" in warn_events[1]["event"]
+
+
+def test_dispatch_unknown_tool_name_still_unknown(tmp_path: Path, monkeypatch) -> None:
+    """A genuinely unknown tool name (no crystalium./crystalium_ prefix to
+    strip) still errors with UNKNOWN_TOOL, alias normalisation notwithstanding."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    server, _scheduler = _build_server(Config(data_dir=tmp_path / "alias-unknown"))
+    result = _drive_call_tool(server, "not_a_tool", {})
+    assert "UNKNOWN_TOOL" in result.content[0].text
 
 
 # ---------------------------------------------------------------------------

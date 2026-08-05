@@ -783,6 +783,33 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
         name = params.name
         arguments = params.arguments or {}
 
+        # v2.0.0 (crystalium#35, Option B deprecation cushion): the manifest
+        # now advertises single-segment names (recall, commit, ...) — see
+        # build_tool_manifest(). Strip a SINGLE leading "crystalium." or
+        # "crystalium_" prefix off the INCOMING name and dispatch on the
+        # canonical segment, so a caller still sending the pre-rename dotted
+        # or double-prefix-collapsed name (crystalium.recall / crystalium_recall)
+        # keeps working for one deprecation window. IMPORTANT CAVEAT: the MCP
+        # host gates tools/call on the ADVERTISED (tools/list) name before it
+        # ever forwards the request here — a client that re-listed after the
+        # rename will never hit this branch at all. This alias only rescues a
+        # client that cached the OLD wire name from a prior tools/list and
+        # never re-listed; it is a deprecation cushion, not a permanent alias.
+        # FORGE gated eventual alias REMOVAL on this WARN going quiet in logs,
+        # so the strip must stay observable.
+        _incoming_name = name
+        if name.startswith("crystalium."):
+            name = name[len("crystalium."):]
+        elif name.startswith("crystalium_"):
+            name = name[len("crystalium_"):]
+        if name != _incoming_name:
+            log.warning(
+                f"deprecated tool name {_incoming_name!r} normalised to "
+                f"{name!r}; caller should re-list",
+                original_name=_incoming_name,
+                canonical_name=name,
+            )
+
         schema = _tool_schemas.get(name)
         if schema is not None:
             try:
@@ -900,8 +927,14 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
 
                 else:
                     from crystalium.enforcement import CrystaliumEnforcementError
+                    # Report the caller's ORIGINAL wire name, not the
+                    # post-strip fragment — "crystalium.bogus" stripped to
+                    # "bogus" is still unknown, and the error should name
+                    # what the caller actually sent (also keeps this message
+                    # byte-identical to pre-#35 for a caller that never used
+                    # the crystalium. prefix in the first place).
                     raise CrystaliumEnforcementError(
-                        f"Unknown tool {name!r}.",
+                        f"Unknown tool {_incoming_name!r}.",
                         reason_code="UNKNOWN_TOOL",
                     )
 
