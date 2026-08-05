@@ -40,7 +40,7 @@ from typing import Any, Callable, TYPE_CHECKING
 import structlog
 
 from crystalium.enforcement import Enforcement
-from crystalium.telemetry import now_ms, record_call
+from crystalium.telemetry import RECALL_TOOL, now_ms, record_call
 from crystalium.trust import Tier
 
 if TYPE_CHECKING:
@@ -322,9 +322,20 @@ class DreamWorker:
                 ).fetchone()
                 recent_episodic = rows[0] if rows else 0
 
-                # Total recall calls from telemetry
+                # Total recall calls from telemetry. crystalium#35 fix-forward
+                # (v2.0.1): this used to hardcode the pre-#35 dotted tool name
+                # ("crystalium.recall") — #35 renamed the advertised/dispatched
+                # tool to "recall", so this count was reading a bucket the
+                # dispatcher stopped writing to, and only kept "working" because
+                # a second, independent bug (the aetheryte.recall() double-write
+                # fixed alongside this one) kept the stale key alive as a
+                # duplicate stream. Import telemetry.RECALL_TOOL — the single
+                # canonical source for this key (see telemetry.py) — instead of
+                # repeating a literal here, and bind it as a parameter rather
+                # than string-formatting it into the SQL.
                 recall_rows = conn.execute(
-                    "SELECT count(*) FROM tool_calls WHERE tool='crystalium.recall'"
+                    "SELECT count(*) FROM tool_calls WHERE tool=?",
+                    (RECALL_TOOL,),
                 ).fetchone()
                 total_recalls = recall_rows[0] if recall_rows else 0
 

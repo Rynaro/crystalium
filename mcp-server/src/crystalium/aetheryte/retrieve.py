@@ -30,7 +30,6 @@ import structlog
 from crystalium.enforcement import Enforcement
 from crystalium.aetheryte.redact import Redactor
 from crystalium.schemas import Budget, RecallResult, SlotBreakdown, CrystalSummary, Scope
-from crystalium.telemetry import now_ms, record_call
 from crystalium.trust import Tier
 
 if TYPE_CHECKING:
@@ -471,10 +470,6 @@ class Aetheryte:
             and budget (ALWAYS present: total_cap, slots, k_requested, k_applied,
             truncated_count — crystalium#36 / DP-3c).
         """
-        t0 = now_ms()
-        outcome = "ok"
-        error_code: str | None = None
-
         try:
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
@@ -1166,21 +1161,21 @@ class Aetheryte:
 
             return result
 
-        except Exception as exc:
-            outcome = "error" if not hasattr(exc, "reason_code") else "rejected"
-            error_code = getattr(exc, "reason_code", type(exc).__name__)
+        except Exception:
+            # crystalium#35 fix-forward (v2.0.1): this method used to record its
+            # own telemetry row here (tool="crystalium.recall", the pre-#35
+            # dotted name) in a `finally:` block that fired on every call —
+            # success AND failure. server.py's `_call_tool` dispatcher already
+            # records the SAME call under the canonical name ("recall", matching
+            # what tools/call actually received) on both its success and
+            # exception paths, so every recall was double-written to
+            # `tool_calls`: once under the stale dotted key from here, once
+            # under the canonical key from the dispatcher. op="recall" carried
+            # no information the outer write lacks (the enforcement matrix's op
+            # key for this tool IS the tool name), so removing this write drops
+            # a redundant duplicate, not real signal. Bare re-raise preserves
+            # recall()'s exception semantics unchanged (no swallow, no wrap).
             raise
-
-        finally:
-            record_call(
-                tool="crystalium.recall",
-                layer=None,
-                tier=str(caller_tier),
-                op="recall",
-                result=outcome,
-                latency_ms=now_ms() - t0,
-                error=error_code,
-            )
 
 
 class _AccessStub:

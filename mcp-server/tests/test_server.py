@@ -26,6 +26,7 @@ from crystalium.server import (
     _handle_session_end,
     _handle_commit,
     _DEFAULT_CALLER,
+    build_tool_manifest,
 )
 from crystalium.trust import Tier
 
@@ -270,6 +271,89 @@ def test_record_activity_called_on_recall(tmp_path: Path, monkeypatch) -> None:
     assert scheduler._last_activity > before, (
         "dispatch must advance scheduler._last_activity via record_activity() on recall"
     )
+
+
+# ---------------------------------------------------------------------------
+# crystalium#35 fix-forward (v2.0.1) — recall no longer double-writes
+# tool_calls, and DreamWorker._orient() reads the canonical stream
+#
+# Pre-fix: Aetheryte.recall() (aetheryte/retrieve.py) recorded its OWN
+# telemetry row in a `finally:` block that fired on every call — success AND
+# failure — under the pre-#35 dotted tool name ("crystalium.recall"), IN
+# ADDITION to server.py's `_call_tool` dispatcher recording the SAME call
+# under the canonical name ("recall") that #35 actually renamed the manifest
+# to. A single recall therefore wrote TWO rows: one stale-keyed duplicate
+# from retrieve.py, one canonical row from the dispatcher. Separately,
+# dream/worker.py's `_orient()` queried `tool_calls WHERE
+# tool='crystalium.recall'` — the SAME stale key — so it silently counted
+# the orphaned duplicate stream rather than the canonical one; the two
+# staleness bugs canceled out and made total_recalls "work" by accident.
+# ---------------------------------------------------------------------------
+
+
+def test_recall_writes_exactly_one_tool_calls_row(tmp_path: Path, monkeypatch) -> None:
+    """A single recall must write exactly ONE tool_calls row, under the
+    canonical dispatch name (telemetry.RECALL_TOOL), not two."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    import sqlite3
+
+    from crystalium import telemetry
+    from crystalium.config import Config
+    from crystalium.server import _build_server
+
+    cfg = Config(data_dir=tmp_path / "recall-single-write")
+    server, _scheduler = _build_server(cfg)
+
+    result = _drive_call_tool(
+        server, "recall", {"scope": {"project": "t"}, "query": "anything", "k": 3},
+    )
+    assert result.is_error is not True, result.content[0].text
+
+    with sqlite3.connect(str(cfg.sqlite_path)) as conn:
+        rows = conn.execute("SELECT tool FROM tool_calls").fetchall()
+
+    assert len(rows) == 1, (
+        f"expected exactly ONE tool_calls row for a single recall; got {rows!r} — "
+        "a resurrected inner record_call() in Aetheryte.recall() would double-write here"
+    )
+    assert rows[0][0] == telemetry.RECALL_TOOL, (
+        f"tool_calls row must be keyed under the canonical dispatch name "
+        f"telemetry.RECALL_TOOL={telemetry.RECALL_TOOL!r}; got {rows[0][0]!r}"
+    )
+
+
+def test_dream_orient_counts_recalls_via_canonical_key(tmp_path: Path, monkeypatch) -> None:
+    """DreamWorker._orient() must read total_recalls from the SAME canonical
+    key the dispatcher writes under — not the pre-#35 stale dotted key."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    import datetime as _dt
+
+    from crystalium.config import Config
+    from crystalium.dream.worker import DreamWorker
+    from crystalium.server import _build_server
+    from crystalium.storage.relational import RelationalStore
+
+    cfg = Config(data_dir=tmp_path / "orient-canonical")
+    server, _scheduler = _build_server(cfg)
+
+    for query in ("anything", "something else"):
+        result = _drive_call_tool(
+            server, "recall", {"scope": {"project": "t"}, "query": query, "k": 3},
+        )
+        assert result.is_error is not True, result.content[0].text
+
+    # Reuse the SAME sqlite file the dispatcher's RelationalStore wrote to.
+    store = RelationalStore(db_path=cfg.sqlite_path)
+    worker = DreamWorker(
+        relational=store,
+        vector_store=MagicMock(),
+        graph_store=MagicMock(),
+        enforcement=MagicMock(),
+        gate=MagicMock(),
+        importance_fn=lambda **k: 0.0,
+    )
+    summary = worker._orient(now=_dt.datetime.now(_dt.timezone.utc))
+    assert "total_recalls=2" in summary, f"_orient did not report 2 recalls: {summary!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -780,3 +864,100 @@ class TestAdvisoryObservable:
         assert len(adv) == 2
         fields = {item["field"] for item in adv}
         assert fields == {"source", "created_at"}
+
+
+# ---------------------------------------------------------------------------
+# crystalium#39 fix-forward (v2.0.1) — hand-rolled jsonschema input validation
+# has no test coverage in mcp-server/tests/ (only in an external script CI
+# never runs). v1.12.0 added this check to replay, for each tool's own
+# advertised inputSchema, behaviour the mcp SDK 1.x @server.call_tool
+# (validate_input=True) decorator provided implicitly and the 2.x migration
+# dropped (see server.py's _tool_schemas / jsonschema.validate call site,
+# just above _call_tool's dispatch if-chain).
+#
+# Tool list is DERIVED from build_tool_manifest() — never hardcoded — so a
+# future tool addition is covered automatically without touching this file.
+# ---------------------------------------------------------------------------
+
+
+def _violating_arguments(schema: dict) -> dict:
+    """Build a minimal argument dict that violates *schema* (a tool's
+    advertised inputSchema).
+
+    Prefers omitting every required property (the "required" keyword) —
+    every current tool but session_end declares at least one. Falls back to
+    a type violation on the first declared property for a schema with no
+    required fields (session_end: {"reason": {"type": "string"}} only).
+    """
+    required = schema.get("required") or []
+    if required:
+        return {}
+
+    properties = schema.get("properties") or {}
+    _WRONG_BY_TYPE = {
+        "string": 12345,
+        "integer": "not-an-integer",
+        "number": "not-a-number",
+        "boolean": "not-a-boolean",
+        "object": "not-an-object",
+        "array": "not-an-array",
+    }
+    for name, prop_schema in properties.items():
+        wrong = _WRONG_BY_TYPE.get(prop_schema.get("type"))
+        if wrong is not None:
+            return {name: wrong}
+
+    pytest.fail(
+        f"schema has neither a 'required' field nor a typed property to "
+        f"violate — cannot construct an invalid instance: {schema!r}"
+    )
+
+
+@pytest.mark.parametrize(
+    "tool", build_tool_manifest(), ids=lambda t: t["name"],
+)
+def test_schema_violation_is_error_with_no_side_effect(
+    tmp_path: Path, monkeypatch, tool: dict,
+) -> None:
+    """Every advertised tool's inputSchema is actually enforced: a violating
+    call (a) sets isError=True, (b) the message starts with 'Input
+    validation error:', and (c) has NO side effect — no tool_calls row, no
+    runs/ artifact. Deliberately NOT marked slow: schema validation runs
+    before any handler/embedder code, so this has no reason to be slow and
+    must run under `make test-ci`.
+    """
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    import sqlite3
+
+    from crystalium.server import _build_server
+
+    cfg = Config(data_dir=tmp_path / f"schema-violation-{tool['name']}")
+    server, _scheduler = _build_server(cfg)
+
+    bad_args = _violating_arguments(tool["inputSchema"])
+    result = _drive_call_tool(server, tool["name"], bad_args)
+
+    assert result.is_error is True, (
+        f"{tool['name']}: a schema-violating call must set isError=True "
+        f"(args={bad_args!r}); got {result!r}"
+    )
+    text = result.content[0].text
+    assert text.startswith("Input validation error:"), (
+        f"{tool['name']}: expected an 'Input validation error:' message "
+        f"(args={bad_args!r}); got {text!r}"
+    )
+
+    # No side effect: zero tool_calls rows...
+    with sqlite3.connect(str(cfg.sqlite_path)) as conn:
+        (n_rows,) = conn.execute("SELECT COUNT(*) FROM tool_calls").fetchone()
+    assert n_rows == 0, (
+        f"{tool['name']}: a rejected-by-schema call must not write a "
+        f"tool_calls row (args={bad_args!r}); got {n_rows} row(s)"
+    )
+
+    # ...and no runs/ artifact (the ECL sidecar directory).
+    runs_dir = cfg.data_dir / "runs"
+    assert not runs_dir.exists() or not any(runs_dir.iterdir()), (
+        f"{tool['name']}: a rejected-by-schema call must not create a "
+        f"runs/ artifact (args={bad_args!r})"
+    )

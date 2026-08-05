@@ -404,8 +404,18 @@ class SemanticLayer:
             raise
 
         finally:
+            # crystalium#35 fix-forward (v2.0.1): repointed the stale dotted
+            # tool literal ("crystalium.commit") to the canonical name
+            # ("commit"). KEPT (not deleted, unlike episodic.commit()/
+            # procedural.commit()): the G5/D8 promotion gate above can set
+            # outcome="pending"/"rejected" WITHOUT raising (a `return` inside
+            # the try, not an exception), and server.py's `_call_tool`
+            # dispatcher hardcodes result="ok" for any non-raising return —
+            # it never sees those. Deleting this write would drop the
+            # pending/rejected outcome from the audit trail, not just
+            # de-duplicate a row.
             self.enforcement.record(
-                "crystalium.commit",
+                "commit",
                 "semantic",
                 caller_tier,
                 "commit",
@@ -548,8 +558,18 @@ class SemanticLayer:
             raise
 
         finally:
+            # crystalium#35 fix-forward (v2.0.1): repointed the stale dotted
+            # tool literal ("crystalium.update") to the canonical name
+            # ("update"). KEPT (not deleted): the `update` tool's inputSchema
+            # (build_tool_manifest()) takes {id, patch, reason} — the caller
+            # never supplies a `layer`, so server.py's `_call_tool` dispatcher
+            # sets layer_hint=arguments.get("layer") which is ALWAYS None for
+            # this tool. Only this inner call (which knows it dispatched to
+            # the "semantic" layer adapter specifically) ever records the
+            # real target layer for an update; deleting it would make every
+            # update's audit row lose its layer, not just de-duplicate one.
             self.enforcement.record(
-                "crystalium.update",
+                "update",
                 "semantic",
                 caller_tier,
                 "update",
