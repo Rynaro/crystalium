@@ -5,7 +5,7 @@
 
 [project]
 name = "crystalium"
-version = "1.11.0"
+version = "1.12.0"
 description = "Portable memory harness for the Eidolons — MCP-compatible, self-hosted, vendor-agnostic"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,7 +15,7 @@ authors = [
 ]
 
 dependencies = [
-    "mcp>=1.2.0,<2",
+    "mcp>=2,<3",
     "pydantic>=2.6",
     "lancedb>=0.6",
     "kuzu>=0.4",

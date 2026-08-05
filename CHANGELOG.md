@@ -6,6 +6,40 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.12.0] — 2026-08-05
+
+### Changed
+
+- **#39** migrated the MCP server to SDK 2.x (`mcp>=2,<3`). `mcp.server.lowlevel
+  .Server` dropped the `@server.list_tools()` / `@server.call_tool()` decorator
+  API in 2.x; `server.py` now registers `tools/list` and `tools/call` via the
+  replacement `Server.add_request_handler(method, params_type, handler)`. Every
+  other surface used by `server.py` (`Server(name, version=...)`, `Server.run`,
+  `Server.create_initialization_options`, `mcp.server.stdio.stdio_server`,
+  `mcp.server.streamable_http_manager.StreamableHTTPSessionManager`, and
+  `mcp.types.{Tool,TextContent}` with the manifest's camelCase `inputSchema`)
+  is unchanged.
+- 2.x's low-level `Server` no longer performs the 1.x decorator's implicit
+  jsonschema validation of `tools/call` arguments against the tool's
+  advertised `inputSchema` before invoking the handler — that behaviour is
+  now replicated explicitly inside the `tools/call` handler (same
+  `"Input validation error: <message>"` / `isError: true` shape) so the wire
+  output stays byte-identical to v1.11.0 for a schema-violating call.
+- Added a startup log field (`mcp_sdk_version`) and a fast (non-`slow`) test
+  asserting the resolved `mcp` distribution is on the 2.x major line
+  (`importlib.metadata.version("mcp")`), so a stale venv/cached image that
+  still resolves `mcp` 1.x fails loudly instead of silently re-running the
+  old decorator codepath (crystalium#39; same lesson as the v1.9.0
+  cached-image gate).
+
+### No client-observable change
+
+- This is a MINOR release: the wire protocol (`initialize`, `tools/list`,
+  `tools/call` — success, SDK schema-violation, and crystalium's own
+  `UNKNOWN_TOOL` error paths) is byte-identical to v1.11.0 modulo
+  `serverInfo.version` and per-call volatile record ids/timestamps, verified
+  by re-capturing the MCP wire against the v1.11.0 golden baseline.
+
 ## [1.11.0] — 2026-08-04
 
 ### Fixed
