@@ -26,6 +26,18 @@ verdict is never "confounded" or "inconclusive"). `recall_completion=True`
 is therefore EARNED-ON, not merely a pre-#41 default carried by FORGE
 pre-ruling. `recall_context_match` still shows no rank lift, so it stays OFF
 (unchanged).
+
+CI GAP (fix/gate-tests-require-embeddings, PR #56): `.github/workflows/ci.yml`
+runs `pytest tests/ -v` with `CRYSTALIUM_SKIP_SLOW=1` but WITHOUT
+`-m "not slow"`, so the two @pytest.mark.slow tests above still get collected
+there — with the dense arm unreachable, `run()` correctly short-circuits to
+verdict "inconclusive" (crystalium#54) and both tests fail asserting real
+numbers against an all-`None` response. `_skip_unless_embeddings_available()`
+probes the same precondition `run()` itself checks and SKIPs (never weakens
+the assertions) when it is unmet. `TestResolveVerdict` and
+`TestEmbeddingsUnavailable` are deliberately NOT given this guard — they are
+the tests that prove the inconclusive short-circuit itself works, and must
+keep running whenever CRYSTALIUM_SKIP_SLOW is in effect.
 """
 
 from __future__ import annotations
@@ -34,7 +46,35 @@ from pathlib import Path
 
 import pytest
 
-from evals.retrieval_gate import resolve_verdict, run, run_arm
+from evals.retrieval_gate import _embeddings_available, resolve_verdict, run, run_arm
+
+
+def _skip_unless_embeddings_available(data_root: str) -> None:
+    """Skip (never fail) a test that asserts real measured numbers when the
+    dense-embedding backend cannot be probed.
+
+    Uses `_embeddings_available()` — the exact same probe `run()` itself
+    calls before deciding whether to short-circuit to verdict "inconclusive"
+    (crystalium#54, N-5) — rather than sniffing `CRYSTALIUM_SKIP_SLOW`
+    directly, so this precondition can never drift from the gate's own
+    definition of "the dense arm works".
+
+    CI's `pytest tests/ -v` runs with `CRYSTALIUM_SKIP_SLOW=1` but WITHOUT
+    `-m "not slow"`, so these @pytest.mark.slow tests still get collected
+    and executed there. With embeddings unreachable, `run()` correctly
+    returns no numbers at all (every axis `None`) — asserting real measured
+    values against that response is not a false negative in the test, it's
+    a missing precondition, so SKIP rather than weaken the assertions
+    (crystalium#43: a gate that cannot fail on the confound it names is not
+    a gate — the fix here is the same principle applied to the tests that
+    exercise the gate).
+    """
+    if not _embeddings_available(data_root):
+        pytest.skip(
+            "requires a working dense arm; embeddings unavailable "
+            "(CRYSTALIUM_SKIP_SLOW) — the gate correctly returns "
+            "inconclusive, see crystalium#54"
+        )
 
 
 @pytest.mark.slow
@@ -63,6 +103,7 @@ def test_completion_lifts_multihop_f1_when_deconfounded(tmp_path: Path) -> None:
     equality to either float as the primary check would be reproducing a
     single measurement rather than the deconfounded relationship it embodies.
     """
+    _skip_unless_embeddings_available(str(tmp_path))
     r = run(data_root=str(tmp_path))
     assert r["verdict"] != "confounded"
     assert r["graph_ok"] is True  # real kuzu graph, not the null stub
@@ -75,6 +116,7 @@ def test_completion_lifts_multihop_f1_when_deconfounded(tmp_path: Path) -> None:
 
 @pytest.mark.slow
 def test_context_match_shows_no_rank_lift_stays_off(tmp_path: Path) -> None:
+    _skip_unless_embeddings_available(str(tmp_path))
     r = run(data_root=str(tmp_path))
     assert r["verdict"] != "confounded"
     # The context-matching crystal already ranks first in both arms — no lift.

@@ -16,7 +16,7 @@ VARIANT ?= cpu
 # Primary targets
 # ---------------------------------------------------------------------------
 
-.PHONY: build test test-fast test-schemas test-storage test-w1 bench bench-axes lint typecheck clean shell help
+.PHONY: build test test-fast test-ci test-schemas test-storage test-w1 bench bench-axes lint typecheck clean shell help
 
 ## build: Build the crystalium container image (VARIANT=cpu|gpu, default cpu)
 build:
@@ -29,6 +29,10 @@ test:
 ## test-fast: Run test suite skipping slow (model download) tests
 test-fast:
 	$(RUN) env CRYSTALIUM_SKIP_SLOW=1 pytest mcp-server/tests/ -v -m "not slow"
+
+## test-ci: Reproduce CI exactly (SKIP_SLOW=1 with slow tests still SELECTED)
+test-ci:
+	$(RUN) env CRYSTALIUM_SKIP_SLOW=1 pytest mcp-server/tests/ -v
 
 ## test-schemas: Run only schema + Pydantic tests (W1 fast subset)
 test-schemas:
