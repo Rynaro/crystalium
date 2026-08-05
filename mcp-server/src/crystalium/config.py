@@ -286,22 +286,30 @@ class Config:
     # below is the sparse arm's only dial, and it is query-conditional
     # rather than a static weight.
     fusion_weight_dense: float = 1.0
-    # Graph+completion derived-family weight (D2's min-rank merge).
-    # MEASURED cliff (deliberation.md DP-2, real fusion-gate runs, 7 hash
-    # seeds): 0.90 fails the gate deterministically; 0.95 is a FLAKE — green
-    # at seeds 0-4/unset, RED at PYTHONHASHSEED=5, on a 1.0% score margin
-    # against a completion-arm rank that is hash-nondeterministic because of
-    # the OPEN anomaly-A bug in `neighbor_expand` (crystalium#38 follow-up
-    # F-A; NOT fixed by this change). 1.00 passed 7/7 runs and carries the
-    # §D2 identity property MEASURED BITWISE (20/20 in-process comparisons,
-    # exact 0.0 score diff) — no other value has this property. Values
-    # BELOW 1.0 remain LEGAL config (AC-127 must stay trivially satisfiable,
-    # no validator/clamp) but are OUTSIDE the documented/supported band: they
-    # forfeit the identity property and are flaky on the shipped gate. Values
-    # ABOVE 1.0 re-create P1 (a derived-only record at w/61 can then outrank
-    # a two-base-arm record at 2/61). No test, doc, or CHANGELOG line may
-    # present a sub-1.0 value as a supported "precision dial" (deliberation.md
-    # C-9).
+    # fusion_weight_derived — weight on the single family-merged derived voter (#38 DP-1b).
+    #
+    # DEFAULT AND ONLY SUPPORTED VALUE: 1.0.
+    #  - 1.0 uniquely carries the §D2 identity property (bitwise: 20/20 in-process
+    #    comparisons, exact 0.0 score diff, measured on the #38 tree). The property is
+    #    combiner-arithmetic, not fixture-dependent, and is unaffected by the #41
+    #    graph-arm fix.
+    #  - Values ABOVE 1.0 re-create P1: a derived-only record at w/61 can outrank a
+    #    record backed by two base arms. This ceiling is rank arithmetic and stands
+    #    independent of any gate.
+    #  - Values BELOW 1.0 are LEGAL config but UNSUPPORTED because they are
+    #    UNCHARACTERIZED: post-#41 (+ the deconfounded retrieval fixture), the shipped
+    #    gates no longer distinguish weights at all — a 3-weight x 7-hash-seed sweep is
+    #    fully degenerate (21/21 green, single distinct multihop_f1). No shipped
+    #    measurement validates OR falsifies any sub-1.0 value.
+    #  - HISTORICAL (pre-#41 tree, 56c8510): the retrieval gate showed a real cliff
+    #    (0.90 deterministically RED, 0.95 seed-flaky, 1.00 green 7/7). That cliff was
+    #    an artifact of the one-seed neighbor_expand bug (#41). The recorded
+    #    seed->outcome mapping and the "1.0% margin" figure were never stable
+    #    quantities (ids are uuid4-fresh per run) — treat them as historical only.
+    #  - C-9 (reaffirmed post-#41): no test, doc, or CHANGELOG line may present a
+    #    sub-1.0 value as a supported "precision dial" — no shipped gate measures what
+    #    such a dial does. NOTE for future sweeps: the FUSION gate cannot express
+    #    weight sensitivity (target/Z at k=2); only the retrieval gate is informative.
     fusion_weight_derived: float = 1.0
     # Sparse-arm selectivity boost (D3): w_sparse resolves to
     # `1.0 + fusion_sparse_boost_alpha * selectivity`, selectivity in [0, 1]
