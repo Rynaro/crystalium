@@ -6,6 +6,83 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-08-04
+
+### Fixed
+
+- **#41** `GraphStore.neighbor_expand` aborted the whole multi-seed loop at
+  the first seed's Kuzu cursor exhaustion — the driver RAISES there rather
+  than returning `None`, so the `row is None` branch was dead code, and
+  `neighbor_expand(seeds) == neighbor_expand([seeds[0]])`. An edge-less
+  FIRST seed returned the empty set even when later seeds had neighbours.
+  Fixed with a per-seed `try` + `has_next()` idiom.
+- **#50** `all_edges` used the same dead-cursor idiom as `neighbor_expand`;
+  it was correct only by accident of where its inner `try` was placed.
+- **#53** `neighbor_expand(depth>=2)` bound every hop to the same Cypher
+  variable, so it matched only self-loops. Reimplemented as iterative
+  depth-1 frontier expansion. Latent — every shipped caller used
+  `depth=1`.
+- **#51** `recent_crystal_ids` had no `id ASC` tiebreak under
+  `ORDER BY created_at DESC` (unlike its sibling query) and no index on
+  `created_at`; this runs on every commit at production defaults.
+- **#43** the retrieval gate's isolation docstring was false —
+  `link_cooccurrence` was wired to the arm flag under test, so the two
+  arms differed by ~150 co-occurrence edges, and a uniform `_T0` made "5
+  most recent" a total tie. Added a tri-state `Config.link_cooccurrence`
+  (`None` = today's behaviour, so default-neutral), a uniform link policy
+  across arms, strictly-increasing `created_at`, and an isolation
+  self-check that returns a `confounded` verdict rather than numbers when
+  independence doesn't hold.
+- **#54** the retrieval gate emitted confident numbers with an EMPTY dense
+  arm under `CRYSTALIUM_SKIP_SLOW`; it now returns an `inconclusive`
+  verdict and no numbers.
+- **#46** `embed(query)` was called once per layer in a loop-invariant
+  position; hoisted to a single call. NOTE: `VectorStore` caches by text,
+  so calls 2-4 were already dict lookups — this is a cosmetic cleanup,
+  **not** a 4x latency win. No speedup is claimed.
+- **#47** `candidate_k` used a bare literal `10` unlinked to
+  `FETCH_WIDTH_FLOOR`; the two are now linked. No-op at shipped defaults.
+
+### Changed
+
+- `recall_completion`'s EARNED-ON justification was re-measured on the
+  deconfounded gate after #41: `multihop_f1` flat `0.3077` ->
+  `completion` `0.4615`, stable across 14 runs (7 hash seeds x 2). The
+  previous `0.12->0.18` / `recall 0.67->1.0` figures were measured on the
+  confounded fixture (#43) and are withdrawn. `recall_context_match` still
+  shows no rank lift and stays OFF.
+- DP-2: the #38 `fusion_weight_derived` cliff figures (0.90 deterministic
+  fail, 0.95 flake, "1.0% margin") are HISTORICAL to the pre-#41 tree
+  (`56c8510`) — the cliff was an artifact of the one-seed `neighbor_expand`
+  bug (#41). The supported band is re-grounded on the §D2 identity
+  property and the P1 ceiling; sub-1.0 remains unsupported, now because it
+  is **uncharacterized** rather than because it is flaky. Post-#41, a
+  3-weight x 7-hash-seed sweep is fully degenerate (21/21 green, a single
+  distinct `multihop_f1.completion` value across every cell).
+
+### Verification
+
+- The #38 mandate recorded in the 1.10.0 entry below is **discharged**: with
+  #41 landed, **AC-124**, **AC-125** and **AC-133** were re-run against a
+  re-baselined `eval-before.json` captured at the pre-fix SHA `56c8510`, with
+  the post-fix results in `eval-after.json`. **AC-125** (fusion gate):
+  `gate_pass` true 7/7 post-fix. **AC-124** (completion): `completion_pass`
+  true 7/7, median `multihop_f1.completion` unchanged at `0.4615` — not worse
+  than baseline. **AC-133** (context rank): median `context_rank.context`
+  unchanged at `2` — not worse than baseline.
+- The headline determinism result: pre-fix, the reverted floor probes
+  returned two distinct membership sets across seeds (`['N1','target']` and
+  `['Z','target']`); post-fix they return one (`['Z','target']`) on all
+  seven — the #41 membership nondeterminism is eliminated.
+- Both baselines were captured on the same **confounded** retrieval gate
+  (DP-2), deliberately: holding the confound constant on both sides is what
+  makes the differential isolate #41. The separately deconfounded
+  measurement lives in `eval-baseline-deconfounded.json`.
+- Artifacts live in the ESL change record
+  `crystalium-open-issues-sweep-50`: `eval-before.json`, `eval-after.json`,
+  `eval-baseline-deconfounded.json`, `dp2-sweep-postfix.json`,
+  `dp2-control-prefix.json`, `red-evidence.txt`.
+
 ## [1.10.0] — 2026-08-03
 
 ### Changed
@@ -73,8 +150,9 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   deterministically, 0.95 is a flake tied to an open store-side determinism
   bug, 1.00 carries a bitwise-measured identity property no other value
   has; values outside `[1.0, ...]` remain legal config but are outside the
-  documented/supported band), `Config.fusion_sparse_boost_alpha` (default
-  `1.0`). All four are env-var- and `crystalium.yaml`-configurable.
+  documented/supported band) `[superseded in 1.11.0 — this cliff was an
+  artifact of #41; see 1.11.0 notes]`, `Config.fusion_sparse_boost_alpha`
+  (default `1.0`). All four are env-var- and `crystalium.yaml`-configurable.
   Deliberately no `fusion_weight_sparse`: RRF ordering is invariant to a
   global positive scale factor.
 - `result.explain.fusion` (only when `explain=true`): the three arm

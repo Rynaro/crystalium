@@ -7,6 +7,7 @@ Container-first: run via:
 from __future__ import annotations
 
 import pytest
+from structlog.testing import capture_logs
 
 from crystalium.storage.graph import GraphStore
 
@@ -103,6 +104,158 @@ class TestNeighborExpand:
 
 
 # ---------------------------------------------------------------------------
+# crystalium#41 (+N-1, +N-4): neighbor_expand/all_edges cursor-exhaustion +
+# depth>1 pattern repair. These tests are the campaign's red-check (AC-210):
+# the kuzu driver RAISES RuntimeError at cursor exhaustion instead of
+# returning None from get_next(), and the pre-fix exception boundary sits
+# OUTSIDE the per-seed loop, so the first seed's exhaustion unwinds the
+# whole loop and seeds 2..N are never queried.
+# ---------------------------------------------------------------------------
+
+
+class TestNeighborExpandMultiSeed:
+    """Real-GraphStore, >=2-seed coverage. AC-211..214, AC-217.
+
+    Every existing neighbor_expand test in this file passes a single seed
+    (see TestNeighborExpand above) and every other call site in the repo is
+    a MagicMock, so the suite was structurally blind to the first-seed-abort
+    defect (scout-measured: 27 passed on the buggy code). These tests are
+    the ones that must go red on unmodified graph.py before the fix lands.
+    """
+
+    def test_multi_seed_expansion_is_union_minus_seeds(
+        self, tmp_graph_store: GraphStore
+    ) -> None:
+        """expand(S) == (union of expand([s]) for s in S) - set(S).
+
+        Not the naive union: graph.py:251's seed-exclusion filter stands
+        (#42 is REPORT, out of scope here), so the correct identity
+        subtracts the seed set. No seed-to-seed edge in this fixture.
+        """
+        tmp_graph_store.add_node("ms-a", "semantic")
+        tmp_graph_store.add_node("ms-b", "semantic")
+        tmp_graph_store.add_node("ms-x", "semantic")
+        tmp_graph_store.add_node("ms-y", "semantic")
+        tmp_graph_store.add_node("ms-shared", "semantic")
+        tmp_graph_store.add_edge("ms-a", "ms-x", "LINKS_TO")
+        tmp_graph_store.add_edge("ms-a", "ms-shared", "LINKS_TO")
+        tmp_graph_store.add_edge("ms-b", "ms-y", "LINKS_TO")
+        tmp_graph_store.add_edge("ms-b", "ms-shared", "LINKS_TO")
+
+        seeds = ["ms-a", "ms-b"]
+        multi = tmp_graph_store.neighbor_expand(seeds, depth=1)
+
+        per_seed_union: set[str] = set()
+        for seed in seeds:
+            per_seed_union |= tmp_graph_store.neighbor_expand([seed], depth=1)
+        expected = per_seed_union - set(seeds)
+
+        assert multi == expected
+        assert multi == {"ms-x", "ms-y", "ms-shared"}
+
+    def test_edgeless_first_seed_does_not_abort_later_seeds(
+        self, tmp_graph_store: GraphStore
+    ) -> None:
+        """An edge-less FIRST seed must not zero out later seeds' neighbours.
+
+        Scout-measured at 56c8510: expand([e0, s1, s2]) == [] even though s1
+        and s2 have real out-edges — worse than "explores one seed", it is
+        "aborts at the first cursor exhaustion, whatever that seed yielded".
+        """
+        tmp_graph_store.add_node("efs-e0", "semantic")  # no out-edges
+        tmp_graph_store.add_node("efs-s1", "semantic")
+        tmp_graph_store.add_node("efs-s2", "semantic")
+        tmp_graph_store.add_node("efs-n1", "semantic")
+        tmp_graph_store.add_node("efs-n2", "semantic")
+        tmp_graph_store.add_edge("efs-s1", "efs-n1", "LINKS_TO")
+        tmp_graph_store.add_edge("efs-s2", "efs-n2", "LINKS_TO")
+
+        result = tmp_graph_store.neighbor_expand(
+            ["efs-e0", "efs-s1", "efs-s2"], depth=1
+        )
+
+        assert result != set()
+        assert result == {"efs-n1", "efs-n2"}
+
+    def test_multi_seed_differs_from_first_seed_alone(
+        self, tmp_graph_store: GraphStore
+    ) -> None:
+        """expand(seeds) != expand([seeds[0]]) on a discriminating fixture.
+
+        Directly negates CHANGELOG.md's recorded symptom
+        neighbor_expand(seeds) == neighbor_expand([seeds[0]]).
+        """
+        tmp_graph_store.add_node("df-a", "semantic")
+        tmp_graph_store.add_node("df-b", "semantic")
+        tmp_graph_store.add_node("df-only-a", "semantic")
+        tmp_graph_store.add_node("df-only-b", "semantic")
+        tmp_graph_store.add_edge("df-a", "df-only-a", "LINKS_TO")
+        tmp_graph_store.add_edge("df-b", "df-only-b", "LINKS_TO")
+
+        seeds = ["df-a", "df-b"]
+        multi = tmp_graph_store.neighbor_expand(seeds, depth=1)
+        first_only = tmp_graph_store.neighbor_expand([seeds[0]], depth=1)
+
+        assert multi != first_only
+        assert "df-only-b" in multi
+        assert "df-only-b" not in first_only
+
+    def test_depth_2_chain_returns_both_hops(
+        self, tmp_graph_store: GraphStore
+    ) -> None:
+        """A plain chain a -> b -> c, no self-loops: depth=2 from [a] is {b, c}.
+
+        N-4: at 56c8510 the chained-pattern query binds every hop to the
+        same Cypher variable `b` (pattern.replace('()', '(b:Crystal)')
+        rewrites every '()'), matching only self-loops -- this fixture has
+        none, so pre-fix this returns set() (or a caught binder error),
+        never {"dc-b", "dc-c"}.
+        """
+        tmp_graph_store.add_node("dc-a", "semantic")
+        tmp_graph_store.add_node("dc-b", "semantic")
+        tmp_graph_store.add_node("dc-c", "semantic")
+        tmp_graph_store.add_edge("dc-a", "dc-b", "LINKS_TO")
+        tmp_graph_store.add_edge("dc-b", "dc-c", "LINKS_TO")
+
+        result = tmp_graph_store.neighbor_expand(["dc-a"], depth=2)
+
+        assert result == {"dc-b", "dc-c"}
+
+    def test_decaying_walk_is_hashseed_invariant(
+        self, tmp_graph_store: GraphStore
+    ) -> None:
+        """decaying_walk must be identical under PYTHONHASHSEED 0 and 5.
+
+        graph.py:278 passes list(frontier) from a `set`, whose iteration
+        order is per-process hash-randomised. The hop-2 frontier below has
+        two members (dw-s1, dw-s2), each with a distinct hop-2 neighbour --
+        exactly the shape that exposes both the hash-random order AND the
+        first-seed-abort defect: pre-fix, only one branch is ever explored,
+        regardless of which PYTHONHASHSEED landed it first. Invoked twice
+        (PYTHONHASHSEED=0 and =5) by AC-217's VERIFY line; this single
+        assertion must hold under both.
+        """
+        tmp_graph_store.add_node("dw-seed", "semantic")
+        tmp_graph_store.add_node("dw-s1", "semantic")
+        tmp_graph_store.add_node("dw-s2", "semantic")
+        tmp_graph_store.add_node("dw-n1", "semantic")
+        tmp_graph_store.add_node("dw-n2", "semantic")
+        tmp_graph_store.add_edge("dw-seed", "dw-s1", "LINKS_TO")
+        tmp_graph_store.add_edge("dw-seed", "dw-s2", "LINKS_TO")
+        tmp_graph_store.add_edge("dw-s1", "dw-n1", "LINKS_TO")
+        tmp_graph_store.add_edge("dw-s2", "dw-n2", "LINKS_TO")
+
+        scores = tmp_graph_store.decaying_walk(["dw-seed"], max_hops=2, decay=0.5)
+
+        assert scores == {
+            "dw-s1": 0.5,
+            "dw-s2": 0.5,
+            "dw-n1": 0.25,
+            "dw-n2": 0.25,
+        }
+
+
+# ---------------------------------------------------------------------------
 # W-GE1: GraphStore.all_edges tests
 # ---------------------------------------------------------------------------
 
@@ -179,3 +332,60 @@ class TestAllEdges:
         assert null_store.all_edges() == []
         assert null_store.all_edges(rel_filter="LINKS_TO") == []
         assert null_store.all_edges(rel_filter="LINKS_TO", limit=100) == []
+
+
+# ---------------------------------------------------------------------------
+# crystalium#41 N-1: all_edges cursor-exhaustion idiom. AC-215, AC-216.
+# ---------------------------------------------------------------------------
+
+
+class TestAllEdgesCursor:
+    """all_edges must use the has_next() idiom, not the dead `is None` check.
+
+    N-1: at 56c8510 all_edges survives only by accident -- its try is
+    per-rel-type *inside* the outer loop, so each rel's rows are fully
+    collected before that rel's own cursor-exhaustion raise. Correctness
+    is one refactor away from breaking, and every healthy call logs one
+    spurious `all_edges_rel_error` warning per rel type queried.
+    """
+
+    def test_all_edges_complete_across_rel_types(
+        self, tmp_graph_store: GraphStore
+    ) -> None:
+        """>=2 distinct rel types: every edge of every queried type comes back."""
+        tmp_graph_store.add_node("aec-a", "semantic")
+        tmp_graph_store.add_node("aec-b", "semantic")
+        tmp_graph_store.add_node("aec-c", "semantic")
+        tmp_graph_store.add_edge("aec-a", "aec-b", "LINKS_TO")
+        tmp_graph_store.add_edge("aec-a", "aec-c", "CITES")
+        tmp_graph_store.add_edge("aec-b", "aec-c", "SUPERSEDES")
+
+        edges = tmp_graph_store.all_edges()
+        edge_set = set(edges)
+
+        assert len(edges) == 3
+        assert ("aec-a", "aec-b", "LINKS_TO") in edge_set
+        assert ("aec-a", "aec-c", "CITES") in edge_set
+        assert ("aec-b", "aec-c", "SUPERSEDES") in edge_set
+
+    def test_all_edges_emits_no_rel_error_on_healthy_path(
+        self, tmp_graph_store: GraphStore
+    ) -> None:
+        """A fully healthy all_edges() call must log no all_edges_rel_error.
+
+        At 56c8510, `graph.py:333-339`'s `is None` check never fires (kuzu
+        raises instead of returning None), so exhaustion always raises into
+        the per-rel `except`, which logs `all_edges_rel_error` on *every*
+        rel type queried -- even when every sub-query succeeded.
+        """
+        tmp_graph_store.add_node("aen-a", "semantic")
+        tmp_graph_store.add_node("aen-b", "semantic")
+        tmp_graph_store.add_edge("aen-a", "aen-b", "LINKS_TO")
+        tmp_graph_store.add_edge("aen-a", "aen-b", "CITES")
+
+        with capture_logs() as logs:
+            edges = tmp_graph_store.all_edges()
+
+        assert len(edges) == 2
+        rel_error_events = [e for e in logs if e.get("event") == "all_edges_rel_error"]
+        assert rel_error_events == []

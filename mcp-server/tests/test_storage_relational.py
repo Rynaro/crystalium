@@ -375,3 +375,119 @@ class TestListForExport:
         count_default = tmp_relational_store.count_for_export(project)
         count_with_quar = tmp_relational_store.count_for_export(project, include_quarantined=True)
         assert count_with_quar > count_default
+
+
+# ---------------------------------------------------------------------------
+# N-2 (issue #51): recent_crystal_ids recency-tie determinism
+# ---------------------------------------------------------------------------
+
+
+class TestRecentCrystalIds:
+    """Tests for RelationalStore.recent_crystal_ids (relational.py:640-656).
+
+    N-2 (#51): the ORDER BY at relational.py:651 has no `id ASC` tiebreak,
+    unlike the sibling query at relational.py:919 (list_for_export). When
+    created_at values tie — as they do in the retrieval-gate fixture (#43) —
+    SQLite's row order for the tie is a scan artefact, not a contract.
+    """
+
+    def test_recent_crystal_ids_ties_break_by_id_ascending(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        """AC-250. Several active crystals share an identical created_at.
+
+        Insert them in an order that is DELIBERATELY NOT id-ascending (a
+        scrambled order), so that a naive "whatever the scan happens to
+        produce" tie order would very likely disagree with sorted(ids). The
+        fix must force `ORDER BY created_at DESC, id ASC` so the tie always
+        resolves to id-ascending, regardless of insertion order, and stays
+        identical across repeated calls / separate connections.
+        """
+        tied_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        project = "tie-project"
+        # Insertion order is the REVERSE of id-ascending order. If the query's
+        # tie order tracked insertion/rowid order (a plausible SQLite scan
+        # artefact with no id tiebreak), this would return ["zeta", "mu",
+        # "beta", "alpha"] instead of the required id-ascending
+        # ["alpha", "beta", "mu", "zeta"].
+        insertion_order = ["zeta", "mu", "beta", "alpha"]
+        for cid in insertion_order:
+            c = sample_crystal(layer="semantic", crystal_id=cid, now=tied_at)
+            c["scope"]["project"] = project
+            tmp_relational_store.insert_crystal(c)
+
+        expected = sorted(insertion_order)
+
+        # "Across separate connections": recent_crystal_ids opens its own
+        # connection via self._connect() on every call (relational.py:647), so
+        # calling it twice already exercises two distinct sqlite3.Connection
+        # objects against the same on-disk database.
+        result1 = tmp_relational_store.recent_crystal_ids(
+            project, exclude_id="__no-such-id__", limit=10
+        )
+        result2 = tmp_relational_store.recent_crystal_ids(
+            project, exclude_id="__no-such-id__", limit=10
+        )
+
+        assert result1 == result2, "recent_crystal_ids must be deterministic across calls"
+        assert result1 == expected, (
+            "ties must break by id ASC regardless of insertion order; got "
+            f"{result1!r}, expected {expected!r}"
+        )
+
+    def test_recent_crystal_ids_preserves_order_for_distinct_timestamps(
+        self, tmp_relational_store: RelationalStore, sample_crystal
+    ) -> None:
+        """AC-251. Strictly distinct created_at values must still order by
+        created_at DESC (most-recent first) — the id-ASC tiebreak must never
+        override a real timestamp difference."""
+        project = "distinct-ts-project"
+        base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        # Deliberately give the ids an order that is the OPPOSITE of both
+        # insertion order and id-ascending order, so a passing result can only
+        # be explained by created_at ordering, not by an id or insertion
+        # artefact.
+        specs = [
+            ("zzz-oldest", 0),
+            ("aaa-middle", 1),
+            ("mmm-newest", 2),
+        ]
+        for cid, offset_minutes in specs:
+            c = sample_crystal(
+                layer="semantic",
+                crystal_id=cid,
+                now=datetime(2026, 1, 1, 12, offset_minutes, 0, tzinfo=timezone.utc),
+            )
+            c["scope"]["project"] = project
+            tmp_relational_store.insert_crystal(c)
+
+        result = tmp_relational_store.recent_crystal_ids(
+            project, exclude_id="__no-such-id__", limit=10
+        )
+        assert result == ["mmm-newest", "aaa-middle", "zzz-oldest"]
+
+    def test_created_at_index_exists_and_is_idempotent(
+        self, tmp_path
+    ) -> None:
+        """AC-252. idx_crystals_created_at exists after DDL creation, and
+        re-opening an existing database (running the DDL a second time) does
+        not raise and does not duplicate the index."""
+        db_path = tmp_path / "reopen-test.sqlite"
+
+        store1 = RelationalStore(db_path=db_path)
+        with store1._connect() as conn:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND name='idx_crystals_created_at'"
+            ).fetchall()
+        assert len(rows) == 1
+
+        # Re-open the same on-disk database — this re-runs the DDL/migration
+        # path (RelationalStore.__init__ -> _init_db) against an EXISTING db.
+        store2 = RelationalStore(db_path=db_path)
+        with store2._connect() as conn:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND name='idx_crystals_created_at'"
+            ).fetchall()
+        assert len(rows) == 1

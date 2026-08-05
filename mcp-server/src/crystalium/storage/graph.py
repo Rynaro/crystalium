@@ -197,6 +197,38 @@ class GraphStore:
             {"src": src, "dst": dst},
         )
 
+    def _neighbor_expand_one_hop(
+        self, seed_ids: list[str], rel_filter: str | None
+    ) -> set[str]:
+        """Single depth-1 expansion over *seed_ids*, excluding *seed_ids* itself.
+
+        Uses the repo's own has_next()-guarded idiom (graph.py:185-186, the
+        add_edge path at :187-192) instead of the dead `is None` check: the
+        kuzu driver RAISES RuntimeError at cursor exhaustion, it never
+        returns None from get_next(). The try/except is per-seed so one
+        failing seed cannot abort the remaining seeds in the caller's loop.
+        """
+        conn = self._get_conn()
+        result_ids: set[str] = set()
+        rel_clause = f"[r:{rel_filter}]" if rel_filter else "[r]"
+
+        for seed_id in seed_ids:
+            query = (
+                f"MATCH (a:Crystal {{id: $seed}})-{rel_clause}->(b:Crystal) "
+                f"RETURN DISTINCT b.id"
+            )
+            try:
+                result = conn.execute(query, {"seed": seed_id})
+                while result.has_next():
+                    row = result.get_next()
+                    neighbor_id = row[0]
+                    if neighbor_id not in seed_ids:
+                        result_ids.add(neighbor_id)
+            except Exception as exc:
+                log.warning("neighbor_expand_error", error=str(exc), seed_id=seed_id)
+
+        return result_ids
+
     def neighbor_expand(
         self,
         seed_ids: list[str],
@@ -217,41 +249,33 @@ class GraphStore:
         if not seed_ids:
             return set()
 
-        conn = self._get_conn()
-        result_ids: set[str] = set()
-
         if rel_filter is not None and rel_filter not in VALID_RELATIONS:
             raise ValueError(f"Invalid rel_filter: {rel_filter!r}")
 
-        # Build Cypher query — KuzuDB supports fixed-depth patterns
-        rel_pattern = f":{rel_filter}" if rel_filter else ""
-        # For depth > 1, chain multiple hops (simple fixed-depth expansion)
-        hops = "-[{rel}]->()".format(rel=rel_pattern)
-        pattern = "".join([hops] * depth)
+        original_seeds = set(seed_ids)
 
-        try:
-            for seed_id in seed_ids:
-                query = (
-                    f"MATCH (a:Crystal {{id: $seed}}){pattern.replace('()', '(b:Crystal)')}"
-                    f" RETURN DISTINCT b.id"
-                )
-                # Simple depth-1 shorthand (covers 90% of use cases)
-                if depth == 1:
-                    rel_clause = f"[r:{rel_filter}]" if rel_filter else "[r]"
-                    query = (
-                        f"MATCH (a:Crystal {{id: $seed}})-{rel_clause}->(b:Crystal) "
-                        f"RETURN DISTINCT b.id"
-                    )
-                result = conn.execute(query, {"seed": seed_id})
-                while True:
-                    row = result.get_next()
-                    if row is None:
-                        break
-                    neighbor_id = row[0]
-                    if neighbor_id not in seed_ids:
-                        result_ids.add(neighbor_id)
-        except Exception as exc:
-            log.warning("neighbor_expand_error", error=str(exc), seed_ids=seed_ids)
+        # depth > 1: iterative depth-1 frontier expansion (crystalium#41 N-4).
+        # The chained fixed-depth Cypher pattern used to bind every hop to the
+        # same variable (pattern.replace('()', '(b:Crystal)') rewrote every
+        # '()'), matching only self-loops. Walking the frontier one hop at a
+        # time reuses the same has_next()-guarded query at every hop and
+        # keeps the original seeds excluded at every hop, not just the first
+        # (graph.py's public contract: "excludes the seeds themselves").
+        result_ids: set[str] = set()
+        frontier = list(dict.fromkeys(seed_ids))
+        visited = set(frontier)
+
+        for _hop in range(depth):
+            if not frontier:
+                break
+            hop_ids = self._neighbor_expand_one_hop(frontier, rel_filter)
+            hop_ids -= original_seeds
+            result_ids |= hop_ids
+            new_frontier = hop_ids - visited
+            if not new_frontier:
+                break
+            visited |= new_frontier
+            frontier = list(new_frontier)
 
         return result_ids
 
@@ -268,6 +292,9 @@ class GraphStore:
         (first time seen in a BFS frontier). Empty dict if the graph is edgeless.
         Reuses the reliable depth-1 neighbor_expand per frontier so hop count is
         tracked honestly (unlike the fixed-depth pattern which collapses distance).
+        The frontier (a set) is walked in sorted() order so the query sequence —
+        and therefore the result — is deterministic across PYTHONHASHSEED values
+        (crystalium#41 follow-up).
         """
         if not seed_ids or max_hops < 1:
             return {}
@@ -275,7 +302,7 @@ class GraphStore:
         visited: set[str] = set(seed_ids)
         frontier: set[str] = set(seed_ids)
         for hop in range(1, max_hops + 1):
-            nxt = self.neighbor_expand(list(frontier), depth=1)
+            nxt = self.neighbor_expand(sorted(frontier), depth=1)
             new = {n for n in nxt if n not in visited}
             if not new:
                 break
@@ -302,7 +329,9 @@ class GraphStore:
         Cypher: MATCH (a:Crystal)-[r:REL_TYPE]->(b:Crystal) RETURN a.id, b.id, type(r)
         One query per rel type when rel_filter is None (kuzu REL tables are typed
         separately — graph.py:93-99). Paginated via SKIP/LIMIT. Returns [] on any
-        kuzu error (mirrors neighbor_expand's defensive try/except, graph.py:253).
+        kuzu error (mirrors neighbor_expand's defensive try/except). Uses the
+        has_next()-guarded idiom (graph.py:185-186) so a fully healthy call
+        emits no cursor-exhaustion warning (crystalium#41 N-1).
 
         Args:
             rel_filter: None = all VALID_RELATIONS; else one specific type.
@@ -330,10 +359,8 @@ class GraphStore:
                         f"SKIP {offset} LIMIT {limit}"
                     )
                     result = conn.execute(query)
-                    while True:
+                    while result.has_next():
                         row = result.get_next()
-                        if row is None:
-                            break
                         results.append((str(row[0]), str(row[1]), rel))
                 except Exception as exc:  # noqa: BLE001
                     log.warning("all_edges_rel_error", rel=rel, error=str(exc))

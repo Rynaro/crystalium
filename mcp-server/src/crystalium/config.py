@@ -53,6 +53,18 @@ def _env_bool(key: str, default: bool) -> bool:
     return val.lower() not in ("0", "false", "no", "")
 
 
+def _env_bool_optional(key: str) -> bool | None:
+    """Tri-state env lookup: unset -> None ("follow the linked flag"); set -> bool.
+
+    Used for `link_cooccurrence` (crystalium#43): `None` is not "false", it is
+    "no opinion — inherit today's `recall_completion`-derived wiring".
+    """
+    val = os.environ.get(key)
+    if val is None:
+        return None
+    return val.lower() not in ("0", "false", "no", "")
+
+
 # ---------------------------------------------------------------------------
 # Caller identity env vars (v1.2.0) — process-level identity for non-ingest
 # MCP calls. These drive server._extract_caller_identity(), not Config fields,
@@ -196,9 +208,49 @@ class Config:
     # Retrieval intelligence (W5, Aetheryte II) — each faculty behind its own flag,
     # default OFF (ablation-or-revert). The recall pipeline + chokepoint are unchanged
     # when all are off.
-    recall_completion: bool = True         # EARNED ON (T2): multi-hop graph walk recovers graph-reachable relevants flat dense recall misses (retrieval_gate F1 0.12→0.18, recall 0.67→1.0). See BENCH-NOTES §W5(i).
+    # crystalium#43 (2026-08-04): the EARNED-ON claim below is justified by a
+    # DECONFOUNDED measurement — evals/retrieval_gate.py pins
+    # link_cooccurrence OFF in every arm (see Config.link_cooccurrence
+    # below) and gives each arm a distinct created_at stamp, so the
+    # completion arm no longer silently inherits extra co-occurrence
+    # LINKS_TO edges the flat arm lacks; "completion vs flat" is one
+    # faculty ablation on one graph, not two different graphs.
+    #
+    # EARNED ON: measured on the fully merged campaign tree — W1
+    # (crystalium#41 neighbor_expand first-seed-abort fix) + W2 + W3 (this
+    # deconfound) + W4 — i.e. AFTER the graph-arm bug that a now-withdrawn
+    # note here once blamed for a missing lift was fixed. Protocol: 7
+    # PYTHONHASHSEED values (0-5 + unset) x 2 runs = 14 runs. Every run
+    # agreed — a single distinct value each, no run-to-run instability:
+    #   multihop_f1  flat 0.30769230769230765 -> completion 0.4615384615384615
+    #   completion_pass true, 14/14
+    # (i.e. flat ~0.3077 -> completion ~0.4615.) See
+    # eval-baseline-deconfounded.json (crystalium#43 AC-247), owned by the
+    # release orchestrator.
+    #
+    # NOT earned: recall_context_match still does NOT lift context rank on
+    # the same 14 runs (context_pass false, 14/14) — that half of the
+    # retrieval-intelligence story stays unproven; recall_context_match
+    # stays OFF below and must not be re-asserted as earned.
+    #
+    # SUPERSEDED / WITHDRAWN: an earlier revision of this comment RETRACTED
+    # the EARNED-ON claim, having measured (deconfounded, but pre-#41) that
+    # the lift did not survive: multihop_f1 completion == flat. That
+    # retraction is WITHDRAWN as of the post-#41 remeasurement above — a
+    # future reader should rely on this note, not re-derive the withdrawn
+    # one from stale figures.
+    recall_completion: bool = True         # EARNED ON (crystalium#43, post-#41 deconfounded, 14/14 stable): multihop_f1 flat 0.3077 -> completion 0.4615 — see comment above
     completion_max_hops: int = 2
     completion_decay: float = 0.5
+    # crystalium#43 (retrieval-gate deconfound): decouples the write-time
+    # co-occurrence LINKS_TO edge flag from the recall_completion faculty
+    # flag under test. None (default) means "follow recall_completion" —
+    # i.e. today's wiring at server.py::_build_components — so this default
+    # is BEHAVIOUR-NEUTRAL for every existing caller; only an explicit
+    # True/False overrides it. Exists so evals/retrieval_gate.py can pin
+    # graph writes OFF in every arm without also disabling the recall-time
+    # completion faculty it is trying to isolate.
+    link_cooccurrence: bool | None = None
     recall_context_match: bool = False     # encoding-specificity: post-RRF context re-rank — stays OFF (T2: no rank lift in the discriminating gate)
     write_dedup_merge: bool = True         # W5 gate PASS (confound-free): merge near-dups at write
     sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
@@ -234,22 +286,30 @@ class Config:
     # below is the sparse arm's only dial, and it is query-conditional
     # rather than a static weight.
     fusion_weight_dense: float = 1.0
-    # Graph+completion derived-family weight (D2's min-rank merge).
-    # MEASURED cliff (deliberation.md DP-2, real fusion-gate runs, 7 hash
-    # seeds): 0.90 fails the gate deterministically; 0.95 is a FLAKE — green
-    # at seeds 0-4/unset, RED at PYTHONHASHSEED=5, on a 1.0% score margin
-    # against a completion-arm rank that is hash-nondeterministic because of
-    # the OPEN anomaly-A bug in `neighbor_expand` (crystalium#38 follow-up
-    # F-A; NOT fixed by this change). 1.00 passed 7/7 runs and carries the
-    # §D2 identity property MEASURED BITWISE (20/20 in-process comparisons,
-    # exact 0.0 score diff) — no other value has this property. Values
-    # BELOW 1.0 remain LEGAL config (AC-127 must stay trivially satisfiable,
-    # no validator/clamp) but are OUTSIDE the documented/supported band: they
-    # forfeit the identity property and are flaky on the shipped gate. Values
-    # ABOVE 1.0 re-create P1 (a derived-only record at w/61 can then outrank
-    # a two-base-arm record at 2/61). No test, doc, or CHANGELOG line may
-    # present a sub-1.0 value as a supported "precision dial" (deliberation.md
-    # C-9).
+    # fusion_weight_derived — weight on the single family-merged derived voter (#38 DP-1b).
+    #
+    # DEFAULT AND ONLY SUPPORTED VALUE: 1.0.
+    #  - 1.0 uniquely carries the §D2 identity property (bitwise: 20/20 in-process
+    #    comparisons, exact 0.0 score diff, measured on the #38 tree). The property is
+    #    combiner-arithmetic, not fixture-dependent, and is unaffected by the #41
+    #    graph-arm fix.
+    #  - Values ABOVE 1.0 re-create P1: a derived-only record at w/61 can outrank a
+    #    record backed by two base arms. This ceiling is rank arithmetic and stands
+    #    independent of any gate.
+    #  - Values BELOW 1.0 are LEGAL config but UNSUPPORTED because they are
+    #    UNCHARACTERIZED: post-#41 (+ the deconfounded retrieval fixture), the shipped
+    #    gates no longer distinguish weights at all — a 3-weight x 7-hash-seed sweep is
+    #    fully degenerate (21/21 green, single distinct multihop_f1). No shipped
+    #    measurement validates OR falsifies any sub-1.0 value.
+    #  - HISTORICAL (pre-#41 tree, 56c8510): the retrieval gate showed a real cliff
+    #    (0.90 deterministically RED, 0.95 seed-flaky, 1.00 green 7/7). That cliff was
+    #    an artifact of the one-seed neighbor_expand bug (#41). The recorded
+    #    seed->outcome mapping and the "1.0% margin" figure were never stable
+    #    quantities (ids are uuid4-fresh per run) — treat them as historical only.
+    #  - C-9 (reaffirmed post-#41): no test, doc, or CHANGELOG line may present a
+    #    sub-1.0 value as a supported "precision dial" — no shipped gate measures what
+    #    such a dial does. NOTE for future sweeps: the FUSION gate cannot express
+    #    weight sensitivity (target/Z at k=2); only the retrieval gate is informative.
     fusion_weight_derived: float = 1.0
     # Sparse-arm selectivity boost (D3): w_sparse resolves to
     # `1.0 + fusion_sparse_boost_alpha * selectivity`, selectivity in [0, 1]
@@ -356,9 +416,10 @@ class Config:
             r_floor=_env_float("CRYSTALIUM_R_FLOOR", 0.7),
             resurface_floor=_env_float("CRYSTALIUM_RESURFACE_FLOOR", 0.85),
             evb_percentile=_env_float("CRYSTALIUM_EVB_PERCENTILE", 0.5),
-            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", True),  # W5(i) earned ON (T2)
+            recall_completion=_env_bool("CRYSTALIUM_RECALL_COMPLETION", True),  # default retained (crystalium#43 retracted the earned-ON claim; see config.py:211 comment)
             completion_max_hops=_env_int("CRYSTALIUM_COMPLETION_MAX_HOPS", 2),
             completion_decay=_env_float("CRYSTALIUM_COMPLETION_DECAY", 0.5),
+            link_cooccurrence=_env_bool_optional("CRYSTALIUM_LINK_COOCCURRENCE"),  # crystalium#43; None = follow recall_completion
             recall_context_match=_env_bool("CRYSTALIUM_RECALL_CONTEXT_MATCH", False),
             write_dedup_merge=_env_bool("CRYSTALIUM_WRITE_DEDUP_MERGE", True),
             sep_threshold=_env_float("CRYSTALIUM_SEP_THRESHOLD", 0.92),
