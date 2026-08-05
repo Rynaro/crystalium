@@ -30,6 +30,31 @@ from crystalium.trust import Tier
 
 
 # ---------------------------------------------------------------------------
+# crystalium#39 — mcp SDK 2.x env-skew assertion
+#
+# Deliberately NOT marked slow (`make test-ci` runs SKIP_SLOW=1 WITH slow
+# tests still selected, so a `slow`-marked test would still run there — but
+# this check has no reason to be slow and belongs in the fast/default lane
+# too). Reads installed package METADATA, not `mcp.__version__` (may not
+# exist), so a stale venv or a cached image that still resolves mcp 1.x fails
+# this loudly instead of silently re-running the removed decorator codepath
+# (same lesson as the v1.9.0 cached-image gate).
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_sdk_is_2x() -> None:
+    """The resolved `mcp` distribution is on the 2.x major line (crystalium#39)."""
+    import importlib.metadata
+
+    resolved = importlib.metadata.version("mcp")
+    major = int(resolved.split(".")[0])
+    assert major == 2, (
+        f"expected mcp SDK major version 2, got {resolved!r} (major={major}) — "
+        "a stale venv or cached image is still resolving mcp 1.x"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -187,22 +212,27 @@ def test_http_caller_identity_no_escalation() -> None:
 
 
 def _drive_call_tool(server, name: str, arguments: dict):
-    """Invoke the REAL registered @server.call_tool dispatch handler (not a mock).
+    """Invoke the REAL registered tools/call dispatch handler (not a mock).
 
     Battle-test fix (MEDIUM): the old record_activity tests called the scheduler mock
     themselves and asserted it — exercising zero dispatch code. These now go through
-    the actual CallToolRequest handler so the assertion proves the dispatcher wires
-    scheduler.record_activity()."""
+    the actual tools/call handler so the assertion proves the dispatcher wires
+    scheduler.record_activity().
+
+    crystalium#39 (mcp SDK 2.x): the low-level Server no longer keys handlers by
+    request TYPE on a public `request_handlers` dict — Server.add_request_handler
+    registers by METHOD STRING on the private `_request_handlers`, retrievable via
+    `Server.get_request_handler`, and the handler signature is `(ctx, params)`. The
+    dispatch under test (crystalium's own _call_tool) never reads `ctx`, so a bare
+    `None` stands in for the ServerRequestContext a live connection would build.
+    """
     import asyncio
 
     import mcp.types as mt
 
-    handler = server.request_handlers[mt.CallToolRequest]
-    req = mt.CallToolRequest(
-        method="tools/call",
-        params=mt.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    return asyncio.run(handler(req))
+    entry = server.get_request_handler("tools/call")
+    params = mt.CallToolRequestParams(name=name, arguments=arguments)
+    return asyncio.run(entry.handler(None, params))
 
 
 def test_record_activity_called_on_commit(tmp_path: Path, monkeypatch) -> None:

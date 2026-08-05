@@ -6,7 +6,9 @@ chokepoint before any storage layer is touched.
 
 Design anchors:
   D2: stdio is the default transport; Streamable-HTTP (run_http) added in v0.2.
-      Both transports share _build_server + the @server.call_tool dispatch.
+      Both transports share _build_server + the tools/call dispatch (mcp 2.x
+      Server.add_request_handler; crystalium#39, was the @server.call_tool()
+      decorator pre-v1.12.0).
   D3: session_end triggers DreamScheduler.on_session_end() (enqueues; never inline).
   D4: every tool result emits ECL v2.0 sidecar via ecl.build_for_tool_result() +
       ecl.emit_sidecar().
@@ -22,16 +24,25 @@ Pattern mirrors atlas-aci/mcp-server/src/atlas_aci/server.py (FINDING-001).
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
+import jsonschema
 import structlog
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 
 from crystalium import __version__
 from crystalium.aetheryte.cache import RecallCache
@@ -722,8 +733,9 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
 
     Transport-agnostic: shared verbatim by both run_stdio and run_http (D2,
     v0.2). The caller is responsible for starting the scheduler and running the
-    chosen transport. Components (_build_components) and the @server.call_tool
-    dispatch are reused as-is across transports.
+    chosen transport. Components (_build_components) and the tools/call
+    dispatch (registered via Server.add_request_handler, crystalium#39) are
+    reused as-is across transports.
     """
     # v1.6: pass version=__version__ explicitly. Without it, mcp.server.lowlevel
     # .Server.create_initialization_options() falls back to the installed `mcp`
@@ -751,12 +763,36 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
     # graph_store is not returned from _build_components but is stored on aetheryte.
     exporter = GraphExporter(relational_store=relational, graph_store=aetheryte.graph_store)
 
-    @server.list_tools()
-    async def _list_tools() -> list[Tool]:
-        return [Tool(**t) for t in build_tool_manifest()]
+    # crystalium#39: mcp 2.x's Server.add_request_handler validates params
+    # BEFORE the handler runs but only against the RPC envelope shape
+    # (CallToolRequestParams: name/arguments) — it does NOT replay the 1.x
+    # @server.call_tool(validate_input=True) decorator's per-tool jsonschema
+    # check against each tool's own advertised inputSchema. That check is
+    # replicated below so a schema-violating call keeps its 1.x wire shape
+    # (isError=true, "Input validation error: <message>") byte-identically.
+    _tool_schemas: dict[str, dict[str, Any]] = {
+        t["name"]: t["inputSchema"] for t in build_tool_manifest()
+    }
 
-    @server.call_tool()
-    async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    async def _list_tools(
+        _ctx: Any, _params: PaginatedRequestParams
+    ) -> ListToolsResult:
+        return ListToolsResult(tools=[Tool(**t) for t in build_tool_manifest()])
+
+    async def _call_tool(_ctx: Any, params: CallToolRequestParams) -> CallToolResult:
+        name = params.name
+        arguments = params.arguments or {}
+
+        schema = _tool_schemas.get(name)
+        if schema is not None:
+            try:
+                jsonschema.validate(instance=arguments, schema=schema)
+            except jsonschema.ValidationError as exc:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"Input validation error: {exc.message}")],
+                    is_error=True,
+                )
+
         caller = _extract_caller_identity()
         caller_tier = _caller_tier(caller)
         tier_str = getattr(caller_tier, "name", str(caller_tier))
@@ -879,7 +915,7 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                 tool=name, layer=layer_hint, tier=tier_str,
                 result="ok", latency_ms=latency_ms,
             )
-            return [TextContent(type="text", text=result_bytes.decode())]
+            return CallToolResult(content=[TextContent(type="text", text=result_bytes.decode())])
 
         except Exception as exc:
             latency_ms = (time.monotonic() - t0) * 1000
@@ -898,9 +934,29 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
             advice = getattr(exc, "advice", "")
             if advice:
                 err_payload["advice"] = advice
-            return [TextContent(type="text", text=json.dumps(err_payload, indent=2))]
+            # v2.0.0 (crystalium#35, OUT OF SCOPE for #39): crystalium's own error
+            # path deliberately does NOT set is_error=True here — today it returns
+            # the error as ordinary content (isError: false). Preserved byte-for-
+            # byte across the SDK migration; fixing this is a separate, later change.
+            return CallToolResult(content=[TextContent(type="text", text=json.dumps(err_payload, indent=2))])
+
+    server.add_request_handler("tools/list", PaginatedRequestParams, _list_tools)
+    server.add_request_handler("tools/call", CallToolRequestParams, _call_tool)
 
     return server, scheduler
+
+
+def _resolved_mcp_sdk_version() -> str:
+    """Return the installed `mcp` SDK distribution version (crystalium#39).
+
+    Reads package METADATA via importlib.metadata rather than `mcp.__version__`
+    — the SDK does not reliably expose that attribute at runtime, and METADATA
+    is also what a cached image can silently disagree with source (the v1.9.0
+    "cached images hide dependency breaks" lesson): this is the env-skew
+    assertion that fails loudly next to server_starting instead of quietly
+    running the old SDK's codepath.
+    """
+    return importlib.metadata.version("mcp")
 
 
 async def run_stdio(config: Config) -> None:
@@ -912,6 +968,7 @@ async def run_stdio(config: Config) -> None:
         transport="stdio",
         data_dir=str(config.data_dir),
         version=__version__,
+        mcp_sdk_version=_resolved_mcp_sdk_version(),
     )
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
@@ -928,7 +985,7 @@ def build_http_app(config: Config):
     the caller (run_http) starts the scheduler and serves the app — so tests can
     drive the app through an ASGI test client without a live socket or the
     APScheduler daemon. Every tool result still flows through the shared
-    @server.call_tool dispatch, so the ECL v2.0 sidecar is emitted over HTTP too.
+    tools/call dispatch, so the ECL v2.0 sidecar is emitted over HTTP too.
     """
     import contextlib
 
@@ -974,6 +1031,7 @@ async def run_http(config: Config) -> None:
         path=config.http_path,
         data_dir=str(config.data_dir),
         version=__version__,
+        mcp_sdk_version=_resolved_mcp_sdk_version(),
     )
     uv = uvicorn.Server(
         uvicorn.Config(
