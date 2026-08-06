@@ -29,14 +29,21 @@ class TestFusionGate:
         assert result["gate_pass"] is True, result
 
     def test_cross_layer_axis_present(self, tmp_path: Path) -> None:
-        """AC-126: the multi-layer fixture reports the target's sparse-arm
-        rank for each searched layer (episodic AND semantic)."""
+        """AC-126: `sparse_arm_per_layer_probe` (renamed from `cross_layer`
+        by crystalium#52 item 2) reports the target's PER-LAYER
+        `bm25_search` rank for each searched layer (episodic AND semantic).
+        This is a per-layer sparse-arm sanity probe -- it calls
+        `relational.bm25_search` directly and never reaches
+        `Aetheryte.recall`, so it cannot detect crystalium#45 (cross-layer
+        rank blocking) by construction. `evals/cross_layer_gate.py`
+        (W-G-XL, `test_cross_layer_gate.py`) is the gate that measures the
+        fused rank THROUGH `recall`."""
         result = run(data_root=str(tmp_path / "fusion-gate-cl"))
-        cross_layer = result["cross_layer"]
-        assert "episodic" in cross_layer
-        assert "semantic" in cross_layer
-        assert cross_layer["episodic"] == 0  # sole sparse hit in that layer
-        assert cross_layer["semantic"] == 0  # sole sparse hit in that layer
+        sparse_arm_per_layer_probe = result["sparse_arm_per_layer_probe"]
+        assert "episodic" in sparse_arm_per_layer_probe
+        assert "semantic" in sparse_arm_per_layer_probe
+        assert sparse_arm_per_layer_probe["episodic"] == 0  # sole sparse hit in that layer
+        assert sparse_arm_per_layer_probe["semantic"] == 0  # sole sparse hit in that layer
 
 
 class TestFetchWidthFloorInflation:
