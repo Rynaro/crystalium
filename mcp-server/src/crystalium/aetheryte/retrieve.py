@@ -229,23 +229,34 @@ def resolve_sparse_weight(
     Two distinct counts are deliberately taken (C-7, FORGE deliberation.md
     DP-9): the CENSORING test ("was this fetch truncated by the cap?") is a
     property of the FETCH, not of any status-filtered subset of it, so it
-    MUST read `raw_n_sparse` (== `len(sparse_ranking)`, before any population
-    filtering) — never the population-resolved count. The selectivity RATIO,
-    once past censoring, uses `resolved_n_sparse` (the population-resolved
-    numerator, DP-9) against `n_scoped` (drawn from the SAME population,
-    DP-3/DP-9/AC-142) — using the raw numerator there would mix populations
-    (the exact defect AC-142 exists to forbid).
+    MUST read `raw_n_sparse` — before any population filtering — never the
+    population-resolved count. The selectivity RATIO, once past censoring,
+    uses `resolved_n_sparse` (the population-resolved numerator, DP-9)
+    against `n_scoped` (drawn from the SAME population, DP-3/DP-9/AC-142) —
+    using the raw numerator there would mix populations (the exact defect
+    AC-142 exists to forbid).
 
     Args:
-        raw_n_sparse:      `len(sparse_ranking)` — unconditional, the CENSORING
+        raw_n_sparse:      The raw row count of the fetch that PRODUCES the
+                           censoring signal (crystalium#45 / spec.amend-03.md
+                           §10, K-C-N13): the global call's row count on the
+                           default and strict-subset paths, or the single
+                           filtered call's row count on the single-layer
+                           path — NEVER `len(sparse_ranking)` directly, which
+                           on the strict-subset path also holds starvation-
+                           backstop rows from OTHER fetches (§B.3.1) and
+                           would conflate the signal. Unconditional, the CENSORING
                            signal. `bm25_search` applies no status predicate
                            (shared method, never filtered).
         resolved_n_sparse: The population-resolved numerator (DP-9): equals
                            `raw_n_sparse` under an all-statuses population,
                            or the active-only count within `sparse_ranking`
                            under an active-only population.
-        cap:               `candidate_k * len(target_layers)` — the fetch cap,
-                           already search-space-local by construction.
+        cap:               The requested `k` of the SAME fetch `raw_n_sparse`
+                           was read from: `candidate_k * len(_ALL_LAYERS)` on
+                           the default/strict-subset (global) paths,
+                           `candidate_k` on the single-layer path
+                           (crystalium#45 / spec.amend-03.md §10).
         n_scoped:          Crystal count over `target_layers`, in the SAME
                            status population as `resolved_n_sparse`.
         alpha:             `fusion_sparse_boost_alpha`, >= 0.
@@ -518,34 +529,139 @@ class Aetheryte:
             if query_vec:
                 dense_got_vector = True
 
-            for layer in target_layers:
-                # Sparse arm: BM25
-                bm25_hits = self.relational.bm25_search(
-                    query, layer_filter=layer, k=candidate_k
+            # crystalium#45 (FORGE D3; spec.amend-01.md §B.3, spec.amend-03.md
+            # §10/§15.4): the three-case fetch shape, sparse AND dense (dense
+            # mirrors sparse — `vector.py:174-199` supports `layer_filter=None`
+            # exactly as `bm25_search` does). Path classification is by SET
+            # membership — "nothing excluded" is the operative semantics of
+            # the default (`layers=None`) path, never literal list-order
+            # equality, so an explicit `layers=[...]` naming all four layers
+            # (in any order) still takes the score-space global path.
+            _all_layers_set = set(_ALL_LAYERS)
+            _target_layer_set = set(target_layers)
+            _is_no_exclusion = _target_layer_set == _all_layers_set
+            _is_single_layer = len(target_layers) == 1
+
+            # Per-fetch raw-count capture (K-C-N13 / AC-377 / spec.amend-03.md
+            # §15.4 — W-45 owns this so #44's top-up, W-44, can read, AT THE
+            # CALL SITE, the row count each `bm25_search` call actually
+            # returned and the `k` it requested. `len(sparse_ranking)` is NOT
+            # this signal on the strict-subset path (head + backstop tail).
+            sparse_fetches: list[dict[str, Any]] = []
+
+            def _record_sparse_fetch(
+                label: str, k_requested: int, hits: list[dict[str, Any]]
+            ) -> None:
+                sparse_fetches.append(
+                    {"fetch": label, "k_requested": k_requested, "n_returned": len(hits)}
                 )
-                for hit in bm25_hits:
+
+            def _ingest_sparse_hits(hits: list[dict[str, Any]]) -> None:
+                for hit in hits:
                     cid = hit["id"]
                     all_candidates[cid] = hit
                     if cid not in sparse_ranking:
                         sparse_ranking.append(cid)
 
-                # Dense arm: ANN
+            def _ingest_dense_hits(hits: list[dict[str, Any]]) -> None:
+                # Dense hits from LanceDB carry 'id' (or metadata id) and '_distance'
+                for hit in hits:
+                    cid = hit.get("id", "")
+                    if not cid:
+                        continue
+                    if cid not in all_candidates:
+                        # Fetch full record from relational if not already loaded
+                        full = self.relational.get_crystal(cid)
+                        if full:
+                            all_candidates[cid] = full
+                    if cid not in dense_ranking:
+                        dense_ranking.append(cid)
+
+            if _is_no_exclusion:
+                # Default path (layers=None, or an explicit all-four subset):
+                # ONE global call per arm. Score-space by construction --
+                # relational.py:531-541 orders globally by bm25(crystals_fts)
+                # with no layer filter -- so no post-filter is needed: nothing
+                # is excluded (spec.amend-01.md §B.3.1).
+                global_k = candidate_k * len(_ALL_LAYERS)
+                bm25_hits = self.relational.bm25_search(query, layer_filter=None, k=global_k)
+                _record_sparse_fetch("head", global_k, bm25_hits)
+                _ingest_sparse_hits(bm25_hits)
+                raw_n_sparse_signal = len(bm25_hits)
+                cap_signal = global_k
+                sparse_fetch_shape = "global"
+
+                if query_vec:
+                    dense_hits = self.vector_store.dense_search(
+                        query_vec=query_vec, layer_filter=None, k=global_k
+                    )
+                    _ingest_dense_hits(dense_hits)
+
+            elif _is_single_layer:
+                # Single-layer path -- today's per-layer call, already
+                # score-space within the layer. Byte-preserving.
+                layer = target_layers[0]
+                bm25_hits = self.relational.bm25_search(query, layer_filter=layer, k=candidate_k)
+                _record_sparse_fetch("head", candidate_k, bm25_hits)
+                _ingest_sparse_hits(bm25_hits)
+                raw_n_sparse_signal = len(bm25_hits)
+                cap_signal = candidate_k
+                sparse_fetch_shape = "single-layer"
+
                 if query_vec:
                     dense_hits = self.vector_store.dense_search(
                         query_vec=query_vec, layer_filter=layer, k=candidate_k
                     )
-                    # Dense hits from LanceDB carry 'id' (or metadata id) and '_distance'
-                    for hit in dense_hits:
-                        cid = hit.get("id", "")
-                        if not cid:
-                            continue
-                        if cid not in all_candidates:
-                            # Fetch full record from relational if not already loaded
-                            full = self.relational.get_crystal(cid)
-                            if full:
-                                all_candidates[cid] = full
-                        if cid not in dense_ranking:
-                            dense_ranking.append(cid)
+                    _ingest_dense_hits(dense_hits)
+
+            else:
+                # Strict subset, len(target_layers) >= 2: global call
+                # (score-space) + post-filter to target_layers, plus a
+                # starvation backstop (K-N12) -- global dominance by EXCLUDED
+                # layers is noise for an explicit subset, never signal. The
+                # censoring signal (raw_n_sparse_signal/cap_signal) is the
+                # HEAD's alone (K-C-N13, spec.amend-03.md §10/§15.1) --
+                # backstop rows never touch it ("coverage appendages").
+                global_k = candidate_k * len(_ALL_LAYERS)
+                bm25_hits = self.relational.bm25_search(query, layer_filter=None, k=global_k)
+                _record_sparse_fetch("head", global_k, bm25_hits)
+                raw_n_sparse_signal = len(bm25_hits)
+                cap_signal = global_k
+                sparse_fetch_shape = "global+backstop"
+                head_censored = raw_n_sparse_signal >= global_k
+
+                sparse_head = [hit for hit in bm25_hits if hit.get("layer") in _target_layer_set]
+                _ingest_sparse_hits(sparse_head)
+
+                needed = candidate_k * len(target_layers)
+                if len(sparse_head) < needed and head_censored:
+                    for layer in target_layers:
+                        layer_hits = self.relational.bm25_search(
+                            query, layer_filter=layer, k=candidate_k
+                        )
+                        _record_sparse_fetch(f"backstop:{layer}", candidate_k, layer_hits)
+                        # Layer-major, appended AFTER the globally-ordered
+                        # head; dedup against rows already present handled by
+                        # _ingest_sparse_hits' own "if cid not in" guard.
+                        _ingest_sparse_hits(layer_hits)
+
+                if query_vec:
+                    dense_hits_global = self.vector_store.dense_search(
+                        query_vec=query_vec, layer_filter=None, k=global_k
+                    )
+                    dense_head = [
+                        hit for hit in dense_hits_global if hit.get("layer") in _target_layer_set
+                    ]
+                    _ingest_dense_hits(dense_head)
+
+                    dense_needed = candidate_k * len(target_layers)
+                    dense_head_censored = len(dense_hits_global) >= global_k
+                    if len(dense_head) < dense_needed and dense_head_censored:
+                        for layer in target_layers:
+                            layer_dense_hits = self.vector_store.dense_search(
+                                query_vec=query_vec, layer_filter=layer, k=candidate_k
+                            )
+                            _ingest_dense_hits(layer_dense_hits)
 
             # crystalium#36 seam 3b (gated; DP-R1/C-12): once k means "response
             # cap" (seam 3), the RANKING UNIVERSE must not shrink with it, or a
@@ -594,8 +710,17 @@ class Aetheryte:
             w_dense = self.fusion_weight_dense
             w_derived = self.fusion_weight_derived
             selectivity = 0.0
-            cap = candidate_k * len(target_layers)
-            raw_n_sparse = len(sparse_ranking)
+            # crystalium#45 / K-C-N13 (spec.amend-03.md §10): `cap`/`raw_n_sparse`
+            # are the requested-k/raw-row-count of the FETCH THAT PRODUCED THE
+            # HEAD (cap_signal/raw_n_sparse_signal, captured at the call site
+            # above) — never `len(sparse_ranking)` directly, which on the
+            # strict-subset path also holds starvation-backstop rows from
+            # OTHER fetches and would conflate the censoring signal with
+            # coverage. Single-layer path: unchanged, byte-preserving
+            # (cap_signal == candidate_k, raw_n_sparse_signal == that call's
+            # row count).
+            cap = cap_signal
+            raw_n_sparse = raw_n_sparse_signal
             n_sparse_resolved = raw_n_sparse
             n_scoped = 0
             n_scoped_status = "n/a"
@@ -1090,6 +1215,20 @@ class Aetheryte:
                         "selectivity": selectivity,
                         "n_sparse": n_sparse_resolved,
                         "n_sparse_cap": cap,
+                        # crystalium#45 / K-C-N13 (spec.amend-03.md §10, §15.4):
+                        # additive fields making the censoring signal and the
+                        # fetch shape observable from outside (previously
+                        # unobservable — `n_sparse` above is population-
+                        # resolved, never the raw pre-population-filter count).
+                        # `raw_n_sparse` is the SAME value passed to
+                        # `resolve_sparse_weight` as `raw_n_sparse` (== `cap`'s
+                        # own fetch); `fetches` is the per-fetch capture (one
+                        # entry per `bm25_search` call the recall path issued)
+                        # W-44's top-up reads at the call site rather than
+                        # re-deriving from `sparse_ranking` (K-C-N10 risk).
+                        "raw_n_sparse": raw_n_sparse,
+                        "sparse_fetch_shape": sparse_fetch_shape,
+                        "fetches": list(sparse_fetches),
                         "n_scoped": n_scoped,
                         "n_scoped_layers": list(target_layers),
                         "n_scoped_status": n_scoped_status,
