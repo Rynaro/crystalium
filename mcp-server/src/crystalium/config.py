@@ -344,9 +344,20 @@ class Config:
     # == 1.0` (`p1_recreated: false`), with the `w_derived=100.0` positive
     # control confirming the instrument can detect it when it IS present —
     # see evals/results/wd-dp1-recheck.json + wd-dp1-control.json (AC-352).
-    # False -> byte-identical to `b7f1a47` (Dream and every other
-    # GraphStore consumer untouched by construction).
-    recall_seed_derived_credit: bool = True
+    # DEFAULT IS False, per FORGE's post-measurement ruling (issue-42-default-ruling.md).
+    # S-1 has TWO triggers. (a) P1 re-creation: CLEARED. (b) "relaxation regresses
+    # multi-hop F1": NEVER MEASURED. The substitute run (retrieval_gate hub/spoke,
+    # flag on vs off) returned byte-identical output ONLY because that topology has
+    # no seed-to-seed edge and so never exercises this code path either way — a
+    # negative from an instrument that cannot produce a positive, which global rule
+    # (f)/S-14 forbids admitting as evidence. Do NOT cite that run as no-regression.
+    # False -> byte-identical to `b7f1a47` (Dream and every other GraphStore
+    # consumer untouched by construction), so the safe default costs nothing.
+    # REOPEN / forward obligation: any PR flipping this default MUST attach a
+    # flag-on/off multi-hop measurement from production traces or a real corpus —
+    # a synthetic fixture cannot discharge (b), because "regresses quality" is a
+    # direction-of-quality claim whose ground truth would be author-stipulated.
+    recall_seed_derived_credit: bool = False
 
     # Security & integrity hardening (W6) — each defense behind its own flag,
     # default OFF (ablation-or-revert; the poisoning ASR gate is the arbiter).
@@ -462,7 +473,7 @@ class Config:
             conflict_tau_lo=_env_float("CRYSTALIUM_CONFLICT_TAU_LO", 0.80),
             recall_active_only=_env_bool("CRYSTALIUM_RECALL_ACTIVE_ONLY", True),
             recall_seed_derived_credit=_env_bool(
-                "CRYSTALIUM_RECALL_SEED_DERIVED_CREDIT", True
+                "CRYSTALIUM_RECALL_SEED_DERIVED_CREDIT", False
             ),
         )
 
