@@ -198,15 +198,22 @@ class GraphStore:
         )
 
     def _neighbor_expand_one_hop(
-        self, seed_ids: list[str], rel_filter: str | None
+        self, seed_ids: list[str], rel_filter: str | None, exclude_input: bool = True
     ) -> set[str]:
-        """Single depth-1 expansion over *seed_ids*, excluding *seed_ids* itself.
+        """Single depth-1 expansion over *seed_ids*.
 
         Uses the repo's own has_next()-guarded idiom (graph.py:185-186, the
         add_edge path at :187-192) instead of the dead `is None` check: the
         kuzu driver RAISES RuntimeError at cursor exhaustion, it never
         returns None from get_next(). The try/except is per-seed so one
         failing seed cannot abort the remaining seeds in the caller's loop.
+
+        exclude_input (crystalium#42, FORGE D2): when True (default), a
+        neighbor that is itself a member of *seed_ids* (the current hop's
+        frontier) is dropped — this is the frontier-mate filter. When False,
+        a frontier-mate neighbor is admitted like any other; the caller
+        (`neighbor_expand`) threads its own `exclude_seeds` flag through this
+        parameter.
         """
         conn = self._get_conn()
         result_ids: set[str] = set()
@@ -222,7 +229,7 @@ class GraphStore:
                 while result.has_next():
                     row = result.get_next()
                     neighbor_id = row[0]
-                    if neighbor_id not in seed_ids:
+                    if not exclude_input or neighbor_id not in seed_ids:
                         result_ids.add(neighbor_id)
             except Exception as exc:
                 log.warning("neighbor_expand_error", error=str(exc), seed_id=seed_id)
@@ -234,17 +241,26 @@ class GraphStore:
         seed_ids: list[str],
         depth: int = 1,
         rel_filter: str | None = None,
+        exclude_seeds: bool = True,
     ) -> set[str]:
         """Expand from *seed_ids* up to *depth* hops along *rel_filter* edges.
 
         Args:
-            seed_ids:   Starting crystal IDs.
-            depth:      Number of hops to traverse (default 1).
-            rel_filter: Optional relationship type to traverse.
-                        None = all three (LINKS_TO, SUPERSEDES, CITES).
+            seed_ids:      Starting crystal IDs.
+            depth:         Number of hops to traverse (default 1).
+            rel_filter:    Optional relationship type to traverse.
+                           None = all three (LINKS_TO, SUPERSEDES, CITES).
+            exclude_seeds: Default True — excludes the seeds themselves from
+                           the returned set, today's behaviour byte-identically
+                           (crystalium#42, FORGE D2). When False, a seed
+                           reachable from another seed earns derived credit at
+                           its true hop distance instead of being subtracted
+                           out at every hop.
 
         Returns:
-            Set of crystal IDs reachable from seeds (excludes the seeds themselves).
+            Set of crystal IDs reachable from seeds. Excludes the seeds
+            themselves when `exclude_seeds` is True (the default); otherwise
+            a seed reachable from another seed is included.
         """
         if not seed_ids:
             return set()
@@ -260,7 +276,16 @@ class GraphStore:
         # '()'), matching only self-loops. Walking the frontier one hop at a
         # time reuses the same has_next()-guarded query at every hop and
         # keeps the original seeds excluded at every hop, not just the first
-        # (graph.py's public contract: "excludes the seeds themselves").
+        # (graph.py's public contract: "excludes the seeds themselves" —
+        # unless `exclude_seeds=False`, crystalium#42).
+        #
+        # `visited` (below) tracks the RE-EXPANSION frontier, not RESULT
+        # membership, and is deliberately left unconditional on
+        # `exclude_seeds` (FORGE D2): every seed is already expanded at hop 0
+        # (the seeds ARE the initial frontier), so conditioning it on the
+        # flag would change nothing except redundant re-expansion work. T2 in
+        # test_storage_graph.py discharges this as a proof obligation rather
+        # than asserting it in prose.
         result_ids: set[str] = set()
         frontier = list(dict.fromkeys(seed_ids))
         visited = set(frontier)
@@ -268,8 +293,11 @@ class GraphStore:
         for _hop in range(depth):
             if not frontier:
                 break
-            hop_ids = self._neighbor_expand_one_hop(frontier, rel_filter)
-            hop_ids -= original_seeds
+            hop_ids = self._neighbor_expand_one_hop(
+                frontier, rel_filter, exclude_input=exclude_seeds
+            )
+            if exclude_seeds:
+                hop_ids -= original_seeds
             result_ids |= hop_ids
             new_frontier = hop_ids - visited
             if not new_frontier:
@@ -284,12 +312,17 @@ class GraphStore:
         seed_ids: list[str],
         max_hops: int = 2,
         decay: float = 0.5,
+        exclude_seeds: bool = True,
     ) -> dict[str, float]:
         """Bounded, decaying multi-hop walk (W5 pattern completion / CA3 analogue).
 
-        Returns {crystal_id: decay**hop} for nodes reachable within *max_hops*,
-        excluding the seeds; each node's score reflects its SHORTEST hop distance
-        (first time seen in a BFS frontier). Empty dict if the graph is edgeless.
+        Returns {crystal_id: decay**hop} for nodes reachable within *max_hops*.
+        With `exclude_seeds=True` (default, today's behaviour byte-identically —
+        crystalium#42, FORGE D2), the seeds are excluded; each node's score
+        reflects its SHORTEST hop distance (first time seen in a BFS frontier).
+        With `exclude_seeds=False`, a seed reachable from another seed is
+        included, credited at its true shortest-hop distance like any other
+        node. Empty dict if the graph is edgeless.
         Reuses the reliable depth-1 neighbor_expand per frontier so hop count is
         tracked honestly (unlike the fixed-depth pattern which collapses distance).
         The frontier (a set) is walked in sorted() order so the query sequence —
@@ -299,10 +332,10 @@ class GraphStore:
         if not seed_ids or max_hops < 1:
             return {}
         scores: dict[str, float] = {}
-        visited: set[str] = set(seed_ids)
+        visited: set[str] = set(seed_ids) if exclude_seeds else set()
         frontier: set[str] = set(seed_ids)
         for hop in range(1, max_hops + 1):
-            nxt = self.neighbor_expand(sorted(frontier), depth=1)
+            nxt = self.neighbor_expand(sorted(frontier), depth=1, exclude_seeds=exclude_seeds)
             new = {n for n in nxt if n not in visited}
             if not new:
                 break

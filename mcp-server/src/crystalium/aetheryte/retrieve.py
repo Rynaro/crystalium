@@ -329,6 +329,7 @@ class Aetheryte:
         fusion_weight_dense: float = 1.0,
         fusion_weight_derived: float = 1.0,
         fusion_sparse_boost_alpha: float = 1.0,
+        recall_seed_derived_credit: bool = False,
     ) -> None:
         self.relational = relational
         self.vector_store = vector_store
@@ -387,6 +388,16 @@ class Aetheryte:
         self.fusion_weight_dense = fusion_weight_dense
         self.fusion_weight_derived = fusion_weight_derived
         self.fusion_sparse_boost_alpha = fusion_sparse_boost_alpha
+        # crystalium#42 (FORGE D2) — opt-in relaxation of GraphStore's seed
+        # exclusion. Threaded into the graph-expand arm and the completion
+        # walk below as `exclude_seeds=not self.recall_seed_derived_credit`.
+        # Default False here (mirroring `recall_active_only`'s own
+        # constructor default above): production passes
+        # `config.recall_seed_derived_credit` explicitly (server.py,
+        # __main__.py); a bare `Aetheryte(...)` at a hypothetical future
+        # third site gets `exclude_seeds=True` — today's behaviour
+        # byte-identically — never a silent foot-gun default.
+        self.recall_seed_derived_credit = recall_seed_derived_credit
         # D7 — subsumption: the weighted path activates ONLY when both flags
         # are True. `recall_relevance_primary=False` is contractually
         # byte-identical to pre-1.9.0 (#36 AC-008/AC-009, frozen); an
@@ -920,7 +931,9 @@ class Aetheryte:
             if seed_ids:
                 try:
                     neighbour_ids = self.graph_store.neighbor_expand(
-                        seed_ids=seed_ids, depth=1
+                        seed_ids=seed_ids,
+                        depth=1,
+                        exclude_seeds=not self.recall_seed_derived_credit,
                     )
                     # D5 (P3 determinism fix; deliberately OUTSIDE the
                     # recall_weighted_fusion flag — see class docstring /
@@ -957,6 +970,7 @@ class Aetheryte:
                             seed_ids=completion_seeds,
                             max_hops=self.completion_max_hops,
                             decay=self.completion_decay,
+                            exclude_seeds=not self.recall_seed_derived_credit,
                         )
                         # D5: id tiebreak added (score-primary, id-ascending
                         # within a hop) — keeps the within-hop order stable

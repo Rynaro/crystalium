@@ -28,6 +28,7 @@ from evals.weight_discrimination import (
     build_aetheryte,
     emit,
     run,
+    run_dp1_recheck,
 )
 
 # ---------------------------------------------------------------------------
@@ -211,3 +212,34 @@ class TestRConfConfound:
         # AC-317's own type-guard (`.outcome | type == "string"`) would now
         # fail on every cell -- this IS the red-check's mechanism, not a
         # separate one.
+
+
+# ---------------------------------------------------------------------------
+# crystalium#42 (W-42) -- AC-352 DP-1(b) re-check regression coverage. Pins
+# `run_dp1_recheck`'s behaviour as a pytest node so `make test` / CI catches
+# a regression the same way the rest of this file does for AC-317/AC-375 --
+# the container-side commands in spec.criteria.amend-03.md remain the
+# criterion's own VERIFY, this is the permanent-suite twin.
+# ---------------------------------------------------------------------------
+
+
+class TestDp1Recheck:
+    def test_no_p1_recreation_at_supported_weight(self, tmp_path: Path) -> None:
+        """AC-352 part (i): at `w_derived=1.0` (the only supported value,
+        C-9), a derived-only record must NOT outrank a record backed by two
+        base arms, WITH seed exclusion relaxed on the retrieval path."""
+        result = run_dp1_recheck(w_derived=1.0, data_root=str(tmp_path / "dp1-recheck"))
+        assert result["p1_recreated"] is False
+        assert result["w_derived"] == 1.0
+        assert result["derived_only_rank"] > result["two_base_arm_rank"]
+        assert result["recall_seed_derived_credit"] is True
+
+    def test_positive_control_can_recreate_p1(self, tmp_path: Path) -> None:
+        """AC-352 part (ii), the MANDATORY positive control: the same
+        fixture must be able to say `true` at `w_derived=100.0`
+        (`config.py:296-298`'s stated ceiling) -- otherwise part (i)'s
+        `false` is not evidence (global rule (f) / S-14)."""
+        result = run_dp1_recheck(w_derived=100.0, data_root=str(tmp_path / "dp1-control"))
+        assert result["p1_recreated"] is True
+        assert result["w_derived"] == 100.0
+        assert result["derived_only_rank"] < result["two_base_arm_rank"]
