@@ -531,6 +531,7 @@ class TestDefaultParity:
         "write_dedup_merge", "recall_prefetch", "drift_detect",
         "write_conflict_detect", "recall_active_only",
         "recall_weighted_fusion",  # crystalium#38
+        "recall_seed_derived_credit",  # crystalium#42
     )
 
     def test_dataclass_default_equals_from_env_default(

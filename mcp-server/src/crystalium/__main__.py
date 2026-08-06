@@ -354,6 +354,7 @@ def recall(
         fusion_weight_dense=config.fusion_weight_dense,
         fusion_weight_derived=config.fusion_weight_derived,
         fusion_sparse_boost_alpha=config.fusion_sparse_boost_alpha,
+        recall_seed_derived_credit=config.recall_seed_derived_credit,
     )
 
     # Parse and validate --layers CSV.

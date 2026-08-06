@@ -15,10 +15,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from evals._corpus_rig import build_aetheryte, new_stores, stub_vector_store
-from evals.cross_layer_gate import _XL_QUERY, build_fixture, run
+from evals._corpus_rig import (
+    build_aetheryte,
+    crystal,
+    new_stores,
+    seed_graph,
+    seed_relational,
+    stamp_sequence,
+    stub_vector_store,
+)
+from evals.cross_layer_gate import (
+    _EPISODIC_IDS,
+    _FILLER_LENGTHS,
+    _TARGET_ID,
+    _XL_QUERY,
+    _filler_summary,
+    _sem_target_summary,
+    build_fixture,
+    run,
+)
 
 _PROJECT = "cross-layer-gate"
 _AGENT_CLASS = "backend"
@@ -43,28 +58,41 @@ def _build_aetheryte_for(stores, *, dense_hits: list[str] | None = None):
 
 
 class TestCrossLayerGateRedness:
-    """AC-310: the fused rank is NOT 0 on `b7f1a47` -- it is blocked at the
-    per-layer append position, not evicted (-1) and not silently null."""
+    """crystalium#45 FIXED (W-45, Option A). Pre-fix, `b7f1a47`, this class
+    asserted the fused rank was NOT 0 -- blocked at the per-layer append
+    position (`AC-310`). That pre-fix characterisation is preserved
+    PERMANENTLY in git history (`release/v2.0.2` commit `a16c072`, W-G-XL)
+    and in `CHANGE/vp-m2-gxl-red.json`; it is not re-asserted here on every
+    future tree, exactly as AC-345's D7 two-commit shape preserves a
+    pre-fix characterisation via a pinned SHA rather than a permanently-red
+    node on HEAD. Post-fix, the SAME fixture's `Aetheryte.recall` call now
+    goes through the Option A global fetch shape (`retrieve.py`'s
+    `_is_no_exclusion` case): `sem-target` is the strict global BM25 best
+    (C-XL-3 / `TestGlobalPremiseProbe`, unaffected by this change), so the
+    fused rank is now 0 -- AC-340's oracle."""
 
-    def test_target_blocked_at_layer_append_rank(self, tmp_path: Path) -> None:
+    def test_target_not_blocked_at_layer_append_rank(self, tmp_path: Path) -> None:
         result = run(data_root=str(tmp_path / "xl-gate"))
         assert result["verdict"] == "measured", result
         assert isinstance(result["target_rank"], int), result
         assert isinstance(result["expected_blocked_rank"], int), result
         assert result["expected_blocked_rank"] == result["liveness"]["corpus_per_layer"], result
         assert result["expected_blocked_rank"] == 3, result
-        assert result["target_rank"] == result["expected_blocked_rank"], result
-        assert result["target_rank"] != 0, result
+        # AC-340's oracle: the target is no longer blocked at the per-layer
+        # append position -- it is the global BM25 best, fused rank 0.
+        assert result["target_rank"] != result["expected_blocked_rank"], result
+        assert result["target_rank"] == 0, result
 
-    def test_sparse_ranking_is_layer_append_order(self, tmp_path: Path) -> None:
-        """The mechanism, not just the number: `sparse_ranking` is the
-        per-layer-appended, dedup'd union in first-seen order -- episodic's
-        three fillers, THEN semantic's `sem-target` (`retrieve.py:521-530`,
-        `_ALL_LAYERS` order `retrieve.py:44`)."""
+    def test_sparse_ranking_is_global_bm25_order(self, tmp_path: Path) -> None:
+        """The mechanism, not just the number: post-#45, `sparse_ranking` is
+        the ONE global call's score-space order (`relational.py:531-541`
+        orders by `bm25(crystals_fts)` with no layer filter) -- `sem-target`
+        first (the strict global BM25 best, C-XL-3), the three episodic
+        fillers after it in their own strict BM25 order."""
         result = run(data_root=str(tmp_path / "xl-gate-order"))
-        assert result["sparse_ranking"][-1] == "sem-target", result
-        assert result["sparse_ranking"].index("sem-target") == 3, result
-        assert set(result["sparse_ranking"][:3]) == {"ep1", "ep2", "ep3"}, result
+        assert result["sparse_ranking"][0] == "sem-target", result
+        assert result["sparse_ranking"].index("sem-target") == 0, result
+        assert set(result["sparse_ranking"][1:]) == {"ep1", "ep2", "ep3"}, result
 
     def test_sparse_ranking_provenance_is_spy(self, tmp_path: Path) -> None:
         """K-C-N10: `sparse_ranking` is bound to a recording spy on
@@ -135,28 +163,63 @@ class TestGlobalPremiseProbe:
 
 
 class TestFutureLayerMerge:
-    """crystalium#45 -- cross-layer rank blocking. Ship the gate RED as
-    `strict=True` xfail (the repo's own precedent, `test_fusion_gate.py:85-
-    103`): strict xfail is self-enforcing -- landing #45 turns this XPASS,
-    which fails the suite until W-45 also removes the marker, coupling the
-    fix to the gate's own retirement (spec.amend-01.md Sec B.2.6)."""
+    """crystalium#45 -- cross-layer rank blocking. FIXED (W-45, Option A).
 
-    @pytest.mark.xfail(
-        reason=(
-            "crystalium#45 (cross-layer rank blocking) is not fixed yet: the "
-            "per-layer append order in retrieve.py:521-530 fuses sem-target "
-            "at rank corpus_per_layer (3) instead of its true global BM25 "
-            "rank 0 (measured directly by C-XL-3, "
-            "test_global_premise_probe_ranks_target_first). Landing #45 "
-            "(the single-fetch score merge over layers=None) should flip "
-            "this XPASS -- which is deliberate: strict=True fails the suite "
-            "on XPASS until W-45 also removes this marker. See "
-            "CHANGE/vp-m2-gxl-red.json for the measured artifact."
-        ),
-        strict=True,
-    )
+    Shipped as a `strict=True` xfail (the repo's own precedent,
+    `test_fusion_gate.py:85-103`): strict xfail is self-enforcing -- landing
+    #45 turns this XPASS, which fails the suite until W-45 also removes the
+    marker (AC-341), coupling the fix to the gate's own retirement
+    (spec.amend-01.md Sec B.2.6). This commit is that removal, landed in the
+    SAME commit as the `retrieve.py` fetch-shape change (AC-341's
+    `git show --name-only` predicate)."""
+
     def test_fused_rank_matches_global_bm25_once_layers_merge(self, tmp_path: Path) -> None:
-        """The literal post-#45 assertion, left in its RED (xfail) state
-        rather than silently omitted."""
+        """The literal post-#45 assertion (AC-340's oracle)."""
         result = run(data_root=str(tmp_path / "xl-gate-xfail"))
         assert result["target_rank"] == 0, result
+
+
+def test_relocated_target_control(tmp_path: Path) -> None:
+    """AC-343: relocate the semantic target INTO the `episodic` layer (the
+    same layer as the fillers it used to be blocked behind) on the FIXED
+    build, and confirm the gate still measures fused rank through
+    `Aetheryte.recall` -- never record IDENTITY. If the gate secretly keyed
+    off `sem-target`'s id/layer rather than its measured BM25 score, this
+    would go undetected by every other node in this module (all of which use
+    the unmodified fixture). Moving the target's LAYER while keeping its
+    TF/length recipe (still the strict corpus-wide BM25 best) must still put
+    it at fused rank 0 -- the same global merge, on a target now indistinguishable
+    from the OTHER episodic layer members except by its BM25 score."""
+    from crystalium.schemas import Scope
+    from crystalium.trust import Tier
+
+    stores = new_stores(str(tmp_path / "xl-gate-relocated"), "relocated-target")
+
+    stamps = stamp_sequence()
+    fillers = [
+        crystal(
+            eid, "episodic", _filler_summary(eid, _FILLER_LENGTHS[eid]),
+            project=_PROJECT, agent_class=_AGENT_CLASS, created_at=next(stamps),
+        )
+        for eid in _EPISODIC_IDS
+    ]
+    # The target's recipe is UNCHANGED (still the strict global BM25 best,
+    # spec.amend-01.md Sec B.2.1's measured TF=3/12-token construction) --
+    # only its LAYER moves, from `semantic` to `episodic`.
+    relocated_target = crystal(
+        _TARGET_ID, "episodic", _sem_target_summary(),
+        project=_PROJECT, agent_class=_AGENT_CLASS, created_at=next(stamps),
+    )
+    seed_relational(stores.relational, [*fillers, relocated_target])
+    seed_graph(
+        stores.graph,
+        nodes=[(eid, "episodic") for eid in _EPISODIC_IDS] + [(_TARGET_ID, "episodic")],
+    )
+
+    aetheryte = _build_aetheryte_for(stores)
+    result = aetheryte.recall(
+        Scope(project=_PROJECT, agent_class_visibility=_AGENT_CLASS),
+        _XL_QUERY, 5, None, Tier.T1,
+    )
+    retrieved = [r.id for r in result.records]
+    assert retrieved.index(_TARGET_ID) == 0, retrieved

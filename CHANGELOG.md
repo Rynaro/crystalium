@@ -6,6 +6,53 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-08-06
+
+Recall **result order and membership change by design.** Minor, not patch: no tool rename, no
+schema change, no `isError` semantics change, no removed field — but a client issuing the same
+query gets a differently-ordered (and, on the deprecated-heavy path, differently-populated)
+result set.
+
+### Fixed
+- **Cross-layer rank blocking (#45).** The sparse and dense arms fetched per layer and appended
+  layer-major, so a record that was the best BM25 match *globally* could only reach rank
+  `n_layers`. Replaced with a score-space merge: one global `bm25_search(layer_filter=None)` for
+  the all-layers case, the existing filtered call for a single layer, and global+post-filter with
+  a per-layer starvation backstop for a strict subset. Measured on the #52 gate: the semantic
+  target moves from fused rank 3 to rank 0 while remaining global BM25 rank 0 throughout.
+  `bm25_search`'s signature and SQL are untouched (AC-349 verified empty diff).
+- **Status-blind sparse candidate set (#44).** Deprecated rows consumed fetch slots and starved
+  active hits — silently, with no error, log line or explain anomaly. This is live at default
+  deployment: `config.py` defaults `recall_active_only=True` and both entrypoints pass it
+  through. Each *individually* censored-and-dirty fetch now widens at most once, caller-side,
+  with the censoring signal recomputed against the fetch actually performed. Widening only the
+  global head was rejected — measured RED on the strict-subset path, where it would have
+  reported `fired: true` with recovery structurally absent.
+- **Seed exclusion is now a policy, not an accident (#42).** `neighbor_expand` and
+  `decaying_walk` take `exclude_seeds: bool = True`, threaded through all five sites that
+  enforce it (including `hop_ids -= original_seeds`, added by #41 to exclude seeds at *every*
+  hop, which made a two-site fix a no-op at depth 1). Default `True` is byte-identical to
+  v2.0.2 on all three oracle topologies.
+
+### Added
+- `explain.fusion.sparse_topup {fired, k_initial, k_final, n_inactive_observed}`, plus per-fetch
+  raw counts and `sparse_fetch_shape` — derived from the fetch actually performed, so the
+  counter cannot stay truthful after the code it describes is removed.
+- `Config.recall_seed_derived_credit` (**default `False`**) and
+  `CRYSTALIUM_RECALL_SEED_DERIVED_CREDIT`.
+
+### Not claimed
+- **The seed-exclusion relaxation ships OFF by default.** STOP S-1 has two triggers: DP-1(b) P1
+  re-creation (cleared — `p1_recreated: false` at `w=1.0`, with a `w=100.0` positive control
+  returning `true`, so the instrument works), and "relaxation regresses multi-hop F1" — which
+  was **never measured**. The available fixture returned identical output with the flag on and
+  off only because its topology has no seed-to-seed edge, so it could not have detected a
+  regression either way. That run is not evidence and must not be cited as such. Any PR flipping
+  this default must attach a flag-on/off multi-hop measurement from production traces or a real
+  corpus.
+- No claim of improved retrieval **quality**. #45 changes ordering to match BM25 score; whether
+  that is better on real corpora is not measured here.
+
 ## [2.0.2] — 2026-08-06
 
 Falsifiability batch. **Zero production-behaviour change** — tests, evals and comments only;

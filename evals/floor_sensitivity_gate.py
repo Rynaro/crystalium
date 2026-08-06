@@ -121,16 +121,28 @@ class _GraphStoreSpy:
         self.decaying_walk_results: list[dict[str, float]] = []
 
     def neighbor_expand(
-        self, seed_ids: list[str], depth: int = 1, rel_filter: str | None = None
+        self,
+        seed_ids: list[str],
+        depth: int = 1,
+        rel_filter: str | None = None,
+        exclude_seeds: bool = True,
     ) -> set[str]:
-        result = self._graph.neighbor_expand(seed_ids, depth=depth, rel_filter=rel_filter)
+        result = self._graph.neighbor_expand(
+            seed_ids, depth=depth, rel_filter=rel_filter, exclude_seeds=exclude_seeds
+        )
         self.neighbor_expand_results.append(set(result))
         return result
 
     def decaying_walk(
-        self, seed_ids: list[str], max_hops: int = 2, decay: float = 0.5
+        self,
+        seed_ids: list[str],
+        max_hops: int = 2,
+        decay: float = 0.5,
+        exclude_seeds: bool = True,
     ) -> dict[str, float]:
-        result = self._graph.decaying_walk(seed_ids, max_hops=max_hops, decay=decay)
+        result = self._graph.decaying_walk(
+            seed_ids, max_hops=max_hops, decay=decay, exclude_seeds=exclude_seeds
+        )
         self.decaying_walk_results.append(dict(result))
         return result
 

@@ -603,6 +603,7 @@ def _build_components(
         fusion_weight_dense=config.fusion_weight_dense,
         fusion_weight_derived=config.fusion_weight_derived,
         fusion_sparse_boost_alpha=config.fusion_sparse_boost_alpha,
+        recall_seed_derived_credit=config.recall_seed_derived_credit,
     )
     # Execution layer depends on aetheryte/recall_cache for W5 prefetch warming.
     execution = ExecutionLayer(
@@ -677,10 +678,22 @@ class _NullGraphStore:
     # v1.6 `recall --explain` / `doctor` (item 3/4): see _NullVectorStore._is_null.
     _is_null = True
 
-    def neighbor_expand(self, seed_ids: list[str], depth: int = 1) -> list[str]:
+    def neighbor_expand(
+        self,
+        seed_ids: list[str],
+        depth: int = 1,
+        rel_filter: str | None = None,
+        exclude_seeds: bool = True,
+    ) -> list[str]:
         return []
 
-    def decaying_walk(self, seed_ids: list[str], max_hops: int = 2, decay: float = 0.5) -> dict:
+    def decaying_walk(
+        self,
+        seed_ids: list[str],
+        max_hops: int = 2,
+        decay: float = 0.5,
+        exclude_seeds: bool = True,
+    ) -> dict:
         return {}
 
     def add_node(self, *args, **kwargs) -> None:  # noqa: ARG002 — W5 edge writes no-op

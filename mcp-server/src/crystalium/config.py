@@ -335,6 +335,29 @@ class Config:
     # queries. Do not raise it chasing headroom the measured fixture does
     # not need — every increment moves surfaced `score` magnitudes (DP-7).
     fusion_sparse_boost_alpha: float = 1.0
+    # recall_seed_derived_credit (crystalium#42, FORGE D2) — opt-in relaxation
+    # of GraphStore's seed exclusion. Threads `exclude_seeds=not
+    # recall_seed_derived_credit` into `retrieve.py`'s two call sites
+    # (neighbor_expand / decaying_walk). DEFAULT decided by the DP-1(b)
+    # re-check (spec.md Sec 3.4 / Sec 6 S-1): `evals/weight_discrimination.py
+    # ::run_dp1_recheck` showed no P1 re-creation at `fusion_weight_derived
+    # == 1.0` (`p1_recreated: false`), with the `w_derived=100.0` positive
+    # control confirming the instrument can detect it when it IS present —
+    # see evals/results/wd-dp1-recheck.json + wd-dp1-control.json (AC-352).
+    # DEFAULT IS False, per FORGE's post-measurement ruling (issue-42-default-ruling.md).
+    # S-1 has TWO triggers. (a) P1 re-creation: CLEARED. (b) "relaxation regresses
+    # multi-hop F1": NEVER MEASURED. The substitute run (retrieval_gate hub/spoke,
+    # flag on vs off) returned byte-identical output ONLY because that topology has
+    # no seed-to-seed edge and so never exercises this code path either way — a
+    # negative from an instrument that cannot produce a positive, which global rule
+    # (f)/S-14 forbids admitting as evidence. Do NOT cite that run as no-regression.
+    # False -> byte-identical to `b7f1a47` (Dream and every other GraphStore
+    # consumer untouched by construction), so the safe default costs nothing.
+    # REOPEN / forward obligation: any PR flipping this default MUST attach a
+    # flag-on/off multi-hop measurement from production traces or a real corpus —
+    # a synthetic fixture cannot discharge (b), because "regresses quality" is a
+    # direction-of-quality claim whose ground truth would be author-stipulated.
+    recall_seed_derived_credit: bool = False
 
     # Security & integrity hardening (W6) — each defense behind its own flag,
     # default OFF (ablation-or-revert; the poisoning ASR gate is the arbiter).
@@ -449,6 +472,9 @@ class Config:
             write_conflict_detect=_env_bool("CRYSTALIUM_WRITE_CONFLICT_DETECT", False),
             conflict_tau_lo=_env_float("CRYSTALIUM_CONFLICT_TAU_LO", 0.80),
             recall_active_only=_env_bool("CRYSTALIUM_RECALL_ACTIVE_ONLY", True),
+            recall_seed_derived_credit=_env_bool(
+                "CRYSTALIUM_RECALL_SEED_DERIVED_CREDIT", False
+            ),
         )
 
     @classmethod
@@ -473,6 +499,7 @@ class Config:
             "recall_completion", "recall_context_match", "write_dedup_merge", "recall_prefetch",
             "drift_detect", "write_conflict_detect", "recall_active_only",
             "recall_relevance_primary", "recall_weighted_fusion",
+            "recall_seed_derived_credit",
         ):
             if bool_field in data:
                 kwargs[bool_field] = bool(data[bool_field])

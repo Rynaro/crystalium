@@ -389,3 +389,130 @@ class TestAllEdgesCursor:
         assert len(edges) == 2
         rel_error_events = [e for e in logs if e.get("event") == "all_edges_rel_error"]
         assert rel_error_events == []
+
+
+# ---------------------------------------------------------------------------
+# crystalium#42 (W-42, FORGE D2) -- exclude_seeds oracle.
+#
+# Three topologies, all mandatory (spec.amend-01.md Sec B.5.2): a single
+# fixture cannot attribute across the three sites (graph.py:225/:271/:272,
+# :302, :305) that each bind on a different shape.
+#
+#   T1 -- depth 1, frontier-mates. Seeds {S1,S2}; S1->S2, S1->N1. This is the
+#         topology on which the ORIGINAL (2-site) spec's exclude_seeds=False
+#         was a no-op -- with the full 5-site threading it now differs, so
+#         AC-351's default-flip red-check genuinely goes red HERE.
+#   T2 -- depth 2. Seeds {S1,S2}; S1->M, M->S2, M->N2. Exercises :272 at hop
+#         2 and DISCHARGES the graph.py:266 (`visited = set(frontier)`)
+#         proof obligation: S2 is a hop-2-discovered seed that must appear
+#         in result_ids with :266 left unconditional.
+#   T3 -- walk. Same graph as T2, via decaying_walk. Exercises :302/:305.
+#   T3-variant -- seeds {S1,S2}, single edge S1->S2. decaying_walk's
+#         True-branch value is EMPTY ({}), which is exactly what a dead
+#         store would also return -- so its node carries a mandatory
+#         liveness guard (node_count()==2, len(all_edges())==1) rather than
+#         trusting an empty expectation on its own (K-B16 form).
+#
+# These builders are named `_build_t*` and are module-private to this
+# oracle -- normative node names below (AC-350, AC-354) are module-level
+# functions, NOT class-nested, per spec.criteria.amend-01/03.md.
+# ---------------------------------------------------------------------------
+
+
+def _build_t1(graph: GraphStore) -> list[str]:
+    graph.add_node("t1-s1", "semantic")
+    graph.add_node("t1-s2", "semantic")
+    graph.add_node("t1-n1", "semantic")
+    graph.add_edge("t1-s1", "t1-s2", "LINKS_TO")
+    graph.add_edge("t1-s1", "t1-n1", "LINKS_TO")
+    return ["t1-s1", "t1-s2"]
+
+
+def _build_t2(graph: GraphStore) -> list[str]:
+    graph.add_node("t2-s1", "semantic")
+    graph.add_node("t2-s2", "semantic")
+    graph.add_node("t2-m", "semantic")
+    graph.add_node("t2-n2", "semantic")
+    graph.add_edge("t2-s1", "t2-m", "LINKS_TO")
+    graph.add_edge("t2-m", "t2-s2", "LINKS_TO")
+    graph.add_edge("t2-m", "t2-n2", "LINKS_TO")
+    return ["t2-s1", "t2-s2"]
+
+
+def _build_t3_variant(graph: GraphStore) -> list[str]:
+    graph.add_node("t3v-s1", "semantic")
+    graph.add_node("t3v-s2", "semantic")
+    graph.add_edge("t3v-s1", "t3v-s2", "LINKS_TO")
+    return ["t3v-s1", "t3v-s2"]
+
+
+@pytest.mark.parametrize(
+    "topology",
+    ["T1", "T2", "T3", "T3-variant"],
+)
+def test_exclude_seeds_default_is_byte_identical(
+    topology: str, tmp_graph_store: GraphStore
+) -> None:
+    """AC-350: exclude_seeds=True (the default) is byte-identical to `b7f1a47`
+    on all four topologies (FORGE D2)."""
+    if topology == "T1":
+        seeds = _build_t1(tmp_graph_store)
+        result = tmp_graph_store.neighbor_expand(seeds, depth=1)
+        assert result == {"t1-n1"}
+    elif topology == "T2":
+        seeds = _build_t2(tmp_graph_store)
+        result = tmp_graph_store.neighbor_expand(seeds, depth=2)
+        assert result == {"t2-m", "t2-n2"}
+    elif topology == "T3":
+        seeds = _build_t2(tmp_graph_store)
+        scores = tmp_graph_store.decaying_walk(seeds, max_hops=2, decay=0.5)
+        assert scores == {"t2-m": 0.5, "t2-n2": 0.25}
+    else:  # T3-variant
+        seeds = _build_t3_variant(tmp_graph_store)
+        scores = tmp_graph_store.decaying_walk(seeds, max_hops=2, decay=0.5)
+        # Mandatory liveness guard (K-B16 form): the expected value here is
+        # EMPTY, exactly what a dead/never-came-up store would also return.
+        # Without this the case would pass on a kuzu error.
+        assert tmp_graph_store.node_count() == 2
+        assert len(tmp_graph_store.all_edges()) == 1
+        assert scores == {}
+
+
+@pytest.mark.parametrize(
+    "topology",
+    ["T1", "T2", "T3", "T3-variant"],
+)
+def test_exclude_seeds_false_expected_sets(
+    topology: str, tmp_graph_store: GraphStore
+) -> None:
+    """AC-354: exclude_seeds=False (the opt-in relaxation) produces exactly
+    the enumerated False-branch sets/weights, including a seed credited at
+    its true shortest-hop distance (FORGE D2).
+
+    T2 additionally DISCHARGES the graph.py:266 (`visited = set(frontier)`)
+    proof obligation: S2 is a hop-2-discovered seed and appears in
+    result_ids here with :266 deliberately left unconditional -- if it were
+    absent, :266 (or the frontier arithmetic) would be load-bearing for
+    membership after all and the D2 ruling's :266-unchanged clause would be
+    overturned.
+    """
+    if topology == "T1":
+        seeds = _build_t1(tmp_graph_store)
+        result = tmp_graph_store.neighbor_expand(seeds, depth=1, exclude_seeds=False)
+        assert result == {"t1-n1", "t1-s2"}
+    elif topology == "T2":
+        seeds = _build_t2(tmp_graph_store)
+        result = tmp_graph_store.neighbor_expand(seeds, depth=2, exclude_seeds=False)
+        assert result == {"t2-m", "t2-n2", "t2-s2"}
+    elif topology == "T3":
+        seeds = _build_t2(tmp_graph_store)
+        scores = tmp_graph_store.decaying_walk(
+            seeds, max_hops=2, decay=0.5, exclude_seeds=False
+        )
+        assert scores == {"t2-m": 0.5, "t2-n2": 0.25, "t2-s2": 0.25}
+    else:  # T3-variant -- hop-1 seed credit
+        seeds = _build_t3_variant(tmp_graph_store)
+        scores = tmp_graph_store.decaying_walk(
+            seeds, max_hops=2, decay=0.5, exclude_seeds=False
+        )
+        assert scores == {"t3v-s2": 0.5}
