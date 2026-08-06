@@ -91,6 +91,17 @@ from the (now reverted) renamed fixture.
   overlapping distribution makes AC-139 INDETERMINATE regardless of
   whether individual seeds diverge.
 
+  HISTORICAL (pre-#41 tree, 56c8510) -- dated by crystalium#52/AC-359, not
+  deleted (this docstring's own policy, above: "the failures are kept in
+  this docstring on purpose"). The "LIVE and MEASURED" claim and the
+  14-seed measurement above were taken BEFORE #41 (cab9b73) removed
+  anomaly A's single-seed cap: `_neighbor_expand_one_hop` now loops EVERY
+  seed (graph.py:215-230) and `decaying_walk` sorts the frontier
+  (graph.py:305), so the hash-order lottery this measurement rode on no
+  longer exists on the post-#41 tree, and this claim is untested there --
+  see `evals/floor_sensitivity_gate.py`'s VP-M1 for the measurement that
+  does.
+
   On the FIXED (weighted) path, `target` (boosted, its only arm) leads the
   base-arm `prelim`, so `target` -- not N1 -- is `seed_ids[0]`; target has no
   out-edges, so the ORDERED graph arm dies immediately there regardless of
@@ -102,8 +113,15 @@ from the (now reverted) renamed fixture.
   sampled seed and both floors (C-2, unanimous).
 
 Multi-layer fixture (AC-126): the query also matches a `target-sem` crystal
-committed to `semantic`, so the cross-layer sparse-arm rank is reported per
-layer even though DP-5 defers the cross-layer fusion fix itself.
+committed to `semantic`, so `sparse_arm_per_layer_probe` (renamed from
+`cross_layer` by crystalium#52 item 2 -- the old name over-claimed) reports
+the target's PER-LAYER `bm25_search` rank for `episodic` and `semantic`
+separately. This is a sanity probe on the shared sparse arm's per-layer
+scoping, NOT a measurement of `Aetheryte.recall`'s cross-layer fusion --
+it never calls `recall`, so it cannot detect crystalium#45 (cross-layer
+rank blocking) by construction. `evals/cross_layer_gate.py` (W-G-XL) is the
+gate that measures the fused rank THROUGH `recall`; see its module
+docstring for #52's full finding and #45's fix.
 """
 
 from __future__ import annotations
@@ -254,16 +272,16 @@ def run_arm(
         retrieved = [r.id for r in result.records]
         target_rank = retrieved.index(target_id) if target_id in retrieved else -1
 
-        cross_layer: dict[str, int | None] = {}
+        sparse_arm_per_layer_probe: dict[str, int | None] = {}
         for layer in ("episodic", "semantic"):
             hits = relational.bm25_search(_QUERY, layer_filter=layer, k=30)
             ids = [h["id"] for h in hits]
             layer_target = "target" if layer == "episodic" else "target-sem"
-            cross_layer[layer] = ids.index(layer_target) if layer_target in ids else None
+            sparse_arm_per_layer_probe[layer] = ids.index(layer_target) if layer_target in ids else None
     finally:
         retrieve_mod.FETCH_WIDTH_FLOOR = original_floor
 
-    return {"target_rank": target_rank, "retrieved": retrieved, "cross_layer": cross_layer}
+    return {"target_rank": target_rank, "retrieved": retrieved, "sparse_arm_per_layer_probe": sparse_arm_per_layer_probe}
 
 
 def run(*, data_root: str = "/tmp/crystalium-fusion-gate") -> dict[str, Any]:
@@ -278,7 +296,7 @@ def run(*, data_root: str = "/tmp/crystalium-fusion-gate") -> dict[str, Any]:
         "weighted": weighted,
         "unweighted": unweighted,
         "gate_pass": gate_pass,
-        "cross_layer": weighted["cross_layer"],
+        "sparse_arm_per_layer_probe": weighted["sparse_arm_per_layer_probe"],
         "verdict": (
             "weighted fusion holds target at fused rank 0; unweighted does not"
             if gate_pass else
@@ -308,6 +326,15 @@ def run_floor_probe(
     id-renamed measurement variant), but the two floors' outcome SETS
     overlap across a 14-seed sample. A genuine rank change at any ONE seed
     is real and worth recording, not dismissed -- but AC-139 needs the
-    *distributions* to be disjoint (C-2), and they are not."""
+    *distributions* to be disjoint (C-2), and they are not.
+
+    HISTORICAL (pre-#41 tree, 56c8510) -- dated by crystalium#52/AC-359, not
+    deleted. The "live, measured channel" claim and the 14-seed measurement
+    above predate #41 (cab9b73), which removed anomaly A's single-successful-
+    seed cap: `_neighbor_expand_one_hop` now loops every seed
+    (graph.py:215-230) and `decaying_walk` sorts the frontier (graph.py:305).
+    This claim has not been re-tested on the post-#41 tree -- see
+    `evals/floor_sensitivity_gate.py`'s VP-M1 for the measurement that does.
+    """
     os.makedirs(data_root, exist_ok=True)
     return run_arm(weighted=weighted, data_root=data_root, fetch_width_floor=floor)
