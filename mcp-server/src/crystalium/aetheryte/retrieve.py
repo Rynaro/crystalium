@@ -51,6 +51,14 @@ _ALL_LAYERS: list[str] = ["episodic", "semantic", "procedural", "execution"]
 # off keeps every arm-seeding slice as bare `[:k]`, byte-identical to 323229f.
 FETCH_WIDTH_FLOOR: int = 10
 
+# crystalium#44 (fence-amend ALLOW; spec.amend-01.md Sec B.4.2,
+# spec.amend-03.md Sec 15, fence-amend.json authorised_changes #4): the
+# ceiling on a single status-blind top-up widen of an individually
+# censored-and-dirty `bm25_search` fetch — `k_wide = min(k_requested +
+# n_inactive_observed, HARD_TOPUP_CEILING)`. retrieve.py-local; NEVER
+# threaded into `bm25_search`'s own signature (AC-349 freezes it).
+HARD_TOPUP_CEILING: int = 1000
+
 
 # ---------------------------------------------------------------------------
 # Pure RRF fusion function (tested independently in test_rrf.py)
@@ -577,6 +585,85 @@ class Aetheryte:
                     if cid not in dense_ranking:
                         dense_ranking.append(cid)
 
+            # W6 defense (recall_active_only): drop deprecated/superseded/expired
+            # crystals so a rejected (deprecated) or superseded fact cannot resurface.
+            # Active := status == "active" AND temporal.t_valid_to is unset. Off ->
+            # always True (byte-identical to W5). Defined here — moved up again by
+            # crystalium#44 (fence-amend ALLOW) from its v1.10.0 position just
+            # after the fetch-shape branches below — so BOTH the #44 top-up's
+            # per-fetch dirtiness check (below) and crystalium#38's DP-9(b)
+            # sparse-weight numerator (further down) reuse the SAME predicate the
+            # response applies — population parity by construction, never a
+            # second divergent definition (fence-amend breach condition 4).
+            def _is_active(crystal: dict[str, Any]) -> bool:
+                if not self.recall_active_only:
+                    return True
+                if crystal.get("status", "active") != "active":
+                    return False
+                temporal = crystal.get("temporal") or {}
+                if isinstance(temporal, str):
+                    import json
+                    try:
+                        temporal = json.loads(temporal)
+                    except Exception:
+                        temporal = {}
+                return temporal.get("t_valid_to") is None
+
+            # crystalium#44 (fence-amend ALLOW, forge-rulings.md D6/D7;
+            # spec.amend-01.md Sec B.4, spec.amend-03.md Sec 15 / fence-amend.md
+            # Ruling 2 "composition_ruling"): status-blind top-up for a fetch
+            # that is INDIVIDUALLY censored (its own raw row count >= its own
+            # requested k) AND dirty (>= 1 row of its CONTRIBUTION to the
+            # candidate set fails `_is_active`), at most once per fetch — never
+            # a widen decided by another fetch's signal (K-B13(c) applied per
+            # fetch; fence breach condition 7). `widened_fetches` is read by
+            # `explain.fusion.sparse_topup` below, F-V3-derived: every field
+            # comes from the fetch actually performed, never from intent.
+            widened_fetches: list[dict[str, Any]] = []
+
+            def _merge_bm25_order(
+                base: list[dict[str, Any]], wider: list[dict[str, Any]]
+            ) -> list[dict[str, Any]]:
+                """BM25-order-preserving merge + dedupe of a fetch's pre-/
+                post-topup result sets (fence-amend authorised_changes #5).
+                `wider` is authoritative for order — same (query, layer_filter),
+                a strictly larger `k`, over the SAME store state — so it already
+                contains `base`'s rows as an ordered prefix under SQLite's
+                deterministic per-connection execution; any `base` row absent
+                from `wider` (not expected in practice, kept as a defensive
+                fallback rather than an assumption) is appended after, in its
+                own relative order."""
+                seen = {hit["id"] for hit in wider}
+                merged = list(wider)
+                for hit in base:
+                    if hit["id"] not in seen:
+                        merged.append(hit)
+                        seen.add(hit["id"])
+                return merged
+
+            def _topup_widen(
+                label: str,
+                layer_filter: str | None,
+                k_requested: int,
+                k_wide: int,
+                n_inactive_observed: int,
+            ) -> list[dict[str, Any]]:
+                """Fires the single authorised extra `bm25_search` call for a
+                censored-and-dirty fetch (fence-amend authorised_changes #4):
+                existing signature only (`query, layer_filter, k`), no new
+                storage surface. Records it into the SAME per-fetch capture
+                W-45 built (`sparse_fetches` / `explain.fusion.fetches[]`) and
+                appends the F-V3-derived entry to `widened_fetches`."""
+                wide_hits = self.relational.bm25_search(query, layer_filter=layer_filter, k=k_wide)
+                _record_sparse_fetch(f"{label}:topup", k_wide, wide_hits)
+                widened_fetches.append({
+                    "fetch": label,
+                    "k_initial": k_requested,
+                    "k_final": k_wide,
+                    "n_inactive_observed": n_inactive_observed,
+                })
+                return wide_hits
+
             if _is_no_exclusion:
                 # Default path (layers=None, or an explicit all-four subset):
                 # ONE global call per arm. Score-space by construction --
@@ -586,10 +673,25 @@ class Aetheryte:
                 global_k = candidate_k * len(_ALL_LAYERS)
                 bm25_hits = self.relational.bm25_search(query, layer_filter=None, k=global_k)
                 _record_sparse_fetch("head", global_k, bm25_hits)
-                _ingest_sparse_hits(bm25_hits)
                 raw_n_sparse_signal = len(bm25_hits)
                 cap_signal = global_k
                 sparse_fetch_shape = "global"
+
+                # crystalium#44: default path — one fetch, contribution ==
+                # raw hits, so head-only and the per-fetch locus rule coincide
+                # (fence-amend composition_ruling: "there is one fetch;
+                # head-only and H-C coincide").
+                if raw_n_sparse_signal >= global_k:
+                    n_inactive = sum(1 for hit in bm25_hits if not _is_active(hit))
+                    if n_inactive:
+                        k_wide = min(global_k + n_inactive, HARD_TOPUP_CEILING)
+                        if k_wide > global_k:
+                            wide_hits = _topup_widen("head", None, global_k, k_wide, n_inactive)
+                            bm25_hits = _merge_bm25_order(bm25_hits, wide_hits)
+                            raw_n_sparse_signal = len(wide_hits)
+                            cap_signal = k_wide
+
+                _ingest_sparse_hits(bm25_hits)
 
                 if query_vec:
                     dense_hits = self.vector_store.dense_search(
@@ -603,10 +705,23 @@ class Aetheryte:
                 layer = target_layers[0]
                 bm25_hits = self.relational.bm25_search(query, layer_filter=layer, k=candidate_k)
                 _record_sparse_fetch("head", candidate_k, bm25_hits)
-                _ingest_sparse_hits(bm25_hits)
                 raw_n_sparse_signal = len(bm25_hits)
                 cap_signal = candidate_k
                 sparse_fetch_shape = "single-layer"
+
+                # crystalium#44: single-layer path — one fetch, contribution ==
+                # raw hits; head-only and the per-fetch locus rule coincide.
+                if raw_n_sparse_signal >= candidate_k:
+                    n_inactive = sum(1 for hit in bm25_hits if not _is_active(hit))
+                    if n_inactive:
+                        k_wide = min(candidate_k + n_inactive, HARD_TOPUP_CEILING)
+                        if k_wide > candidate_k:
+                            wide_hits = _topup_widen("head", layer, candidate_k, k_wide, n_inactive)
+                            bm25_hits = _merge_bm25_order(bm25_hits, wide_hits)
+                            raw_n_sparse_signal = len(wide_hits)
+                            cap_signal = k_wide
+
+                _ingest_sparse_hits(bm25_hits)
 
                 if query_vec:
                     dense_hits = self.vector_store.dense_search(
@@ -631,6 +746,27 @@ class Aetheryte:
                 head_censored = raw_n_sparse_signal >= global_k
 
                 sparse_head = [hit for hit in bm25_hits if hit.get("layer") in _target_layer_set]
+
+                # crystalium#44 (fence-amend Ruling 2 "H-C"): the HEAD widens
+                # only when its OWN POST-FILTERED contribution is dirty —
+                # inactive EXCLUDED-layer rows are discarded by the post-
+                # filter regardless of status and must never gate this widen
+                # (K-N12's own premise: they can dominate the raw fetch while
+                # contributing nothing to `sparse_head`).
+                if head_censored:
+                    n_inactive_head = sum(1 for hit in sparse_head if not _is_active(hit))
+                    if n_inactive_head:
+                        k_wide = min(global_k + n_inactive_head, HARD_TOPUP_CEILING)
+                        if k_wide > global_k:
+                            wide_raw = _topup_widen("head", None, global_k, k_wide, n_inactive_head)
+                            bm25_hits = _merge_bm25_order(bm25_hits, wide_raw)
+                            sparse_head = [
+                                hit for hit in bm25_hits if hit.get("layer") in _target_layer_set
+                            ]
+                            raw_n_sparse_signal = len(wide_raw)
+                            cap_signal = k_wide
+                            head_censored = raw_n_sparse_signal >= cap_signal
+
                 _ingest_sparse_hits(sparse_head)
 
                 needed = candidate_k * len(target_layers)
@@ -640,6 +776,25 @@ class Aetheryte:
                             query, layer_filter=layer, k=candidate_k
                         )
                         _record_sparse_fetch(f"backstop:{layer}", candidate_k, layer_hits)
+
+                        # crystalium#44: EACH backstop call widens on its OWN
+                        # censoring-and-dirtiness signal only — never the
+                        # head's, and never another backstop's (K-B13(c)
+                        # applied per fetch; fence breach condition 7).
+                        # Backstop widens are coverage appendages and never
+                        # touch raw_n_sparse_signal/cap_signal (composition_
+                        # ruling item 6 — the censoring signal stays the
+                        # head's alone).
+                        if len(layer_hits) >= candidate_k:
+                            n_inactive_layer = sum(1 for hit in layer_hits if not _is_active(hit))
+                            if n_inactive_layer:
+                                k_wide = min(candidate_k + n_inactive_layer, HARD_TOPUP_CEILING)
+                                if k_wide > candidate_k:
+                                    wide_layer_hits = _topup_widen(
+                                        f"backstop:{layer}", layer, candidate_k, k_wide, n_inactive_layer
+                                    )
+                                    layer_hits = _merge_bm25_order(layer_hits, wide_layer_hits)
+
                         # Layer-major, appended AFTER the globally-ordered
                         # head; dedup against rows already present handled by
                         # _ingest_sparse_hits' own "if cid not in" guard.
@@ -676,28 +831,6 @@ class Aetheryte:
             # Flag off: fetch_width == k exactly, so this is a no-op — every
             # arm-seeding slice stays bare `[:k]`, byte-identical to 323229f.
             fetch_width = max(k, FETCH_WIDTH_FLOOR) if self.recall_relevance_primary else k
-
-            # W6 defense (recall_active_only): drop deprecated/superseded/expired
-            # crystals so a rejected (deprecated) or superseded fact cannot resurface.
-            # Active := status == "active" AND temporal.t_valid_to is unset. Off ->
-            # always True (byte-identical to W5). Defined here (moved up from its
-            # v1.9.0 position at the scope/status filter, below) so crystalium#38's
-            # DP-9(b) sparse-weight numerator can reuse the SAME predicate the
-            # response applies — population parity by construction, never a second
-            # divergent definition.
-            def _is_active(crystal: dict[str, Any]) -> bool:
-                if not self.recall_active_only:
-                    return True
-                if crystal.get("status", "active") != "active":
-                    return False
-                temporal = crystal.get("temporal") or {}
-                if isinstance(temporal, str):
-                    import json
-                    try:
-                        temporal = json.loads(temporal)
-                    except Exception:
-                        temporal = {}
-                return temporal.get("t_valid_to") is None
 
             # crystalium#38 (FORGE DP-1..DP-9, D0 pipeline order — load-bearing,
             # no feedback loop): weights are resolved ONCE per recall, from the
@@ -1229,6 +1362,16 @@ class Aetheryte:
                         "raw_n_sparse": raw_n_sparse,
                         "sparse_fetch_shape": sparse_fetch_shape,
                         "fetches": list(sparse_fetches),
+                        # crystalium#44 (fence-amend ALLOW; composition_ruling
+                        # / spec.amend-03.md Sec 15.3, AC-379 part 2): every
+                        # field is derived from the fetch(es) ACTUALLY
+                        # PERFORMED (`widened_fetches`, appended only inside
+                        # `_topup_widen`, at the call site) — never from
+                        # intent (the #36 F-V3 counter-honesty discipline).
+                        "sparse_topup": {
+                            "fired": bool(widened_fetches),
+                            "widened_fetches": list(widened_fetches),
+                        },
                         "n_scoped": n_scoped,
                         "n_scoped_layers": list(target_layers),
                         "n_scoped_status": n_scoped_status,
