@@ -574,3 +574,13 @@ Availability meets the target. recall p95 (~205 ms) is **embedder-bound** — th
 p95 is essentially one bge-m3 query-embedding forward pass on CPU; it marginally
 exceeds the 200 ms target. Recorded honestly (the target is not moved to pass).
 **[PROXY]** both values are from a synthetic harness, not production traffic.
+
+## crystalium#55 item 3 — weight-sensitivity sweeps: which gate is informative
+
+**Pointer, not a restatement.** For any future `fusion_weight_derived` sweep: the
+**retrieval gate** is the informative axis; the **FUSION gate cannot express weight
+sensitivity** (it collapses to a target/Z comparison at k=2, degenerate across the
+whole sub-1.0 band). The canonical statement — plus the C-9 fence and the sub-1.0
+band's reopen condition — lives in `mcp-server/src/crystalium/config.py`, in the
+`fusion_weight_derived` field's comment block. Read it there; this line exists only
+so a sweep author who starts in `evals/` finds it.
