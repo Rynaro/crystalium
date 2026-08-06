@@ -13,9 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from evals.fusion_gate import run, run_floor_probe
+from evals.fusion_gate import run
 
 
 class TestFusionGate:
@@ -45,76 +43,10 @@ class TestFusionGate:
         assert sparse_arm_per_layer_probe["episodic"] == 0  # sole sparse hit in that layer
         assert sparse_arm_per_layer_probe["semantic"] == 0  # sole sparse hit in that layer
 
-
-class TestFetchWidthFloorInflation:
-    """AC-138/AC-139 -- BLOCKED/INDETERMINATE on this eval, not weakened.
-
-    CORRECTED root cause (vigil F-V4 remediation, 2026-08-03; the original
-    "the floor changes nothing, anomaly A caps seeds[0] which is invariant
-    to it" attribution was WRONG and has been retracted from this file, from
-    `evals/fusion_gate.py`'s docstring, and from `red-evidence.txt`).
-
-    The floor DOES have a live, measured channel on the SHIPPED fixture: it
-    now carries 12 filler competitors specifically so `dense_ranking` holds
-    15 ids (> FETCH_WIDTH_FLOOR=10), and `[:10]` vs `[:1000]` are confirmed
-    (by intercepting the real `neighbor_expand`/`decaying_walk` calls) to
-    receive genuinely different seed lists/sets. On a fixture variant built
-    specifically to expose that channel (ids renamed so ties resolve to
-    `target` instead of to a competitor by accident of alphabetical order --
-    see `evals/fusion_gate.py`'s module docstring, item 3), individual seeds
-    DO diverge between floor=10 and floor=1000 (seed 8, in a 14-seed sweep) --
-    proof the channel is real, not vestigial.
-
-    That variant is NOT what ships, because it regressed AC-125's own
-    reliability (7/7 -> ~2/7 unanimous), and AC-125 IS in AC-136's
-    contingency six while AC-138/AC-139 are NOT -- so reliability was kept
-    on the criterion the shipped default actually depends on. On the
-    SHIPPED fixture (this file, `evals/fusion_gate.py::_build_fixture`),
-    `N1` alone (tied with `target` at `1/61`, id-ascending tiebreak) already
-    keeps `target` off rank 0 on the reverted build with NO vote needed --
-    which is exactly what makes AC-125 reliable, and exactly what masks the
-    floor's now-confirmed-live effect on vote count behind a tie the floor
-    cannot move. Measured via the C-2 multi-run protocol (7 runs,
-    PYTHONHASHSEED 0-5 and unset, `red-evidence.txt`): on THIS shipped
-    fixture floor=10 and floor=1000 give IDENTICAL, 7/7-unanimous target-rank
-    distributions on both builds.
-
-    Per AC-139's own escape-hatch text ("If AC-139 cannot go green, the
-    fixture is seed-insensitive and AC-138 must be moved, not weakened")
-    this test class records the finding rather than asserting a fabricated
-    pass. C-14: this is a deviation report for the checker/FORGE, not an
-    implementer's judgement call. Landing F-A = crystalium#41 (anomaly A's store-side fix)
-    alone will NOT flip this xfail -- the blocker on the shipped fixture is
-    the tie-break-by-design that keeps AC-125 reliable, a DELIBERATE
-    trade-off recorded here, not a bug awaiting a store-side fix.
-    """
-
-    @pytest.mark.xfail(
-        reason=(
-            "AC-139 INDETERMINATE on the SHIPPED fixture: floor=10 and "
-            "floor=1000 give identical, 7/7-unanimous target-rank "
-            "distributions (PYTHONHASHSEED 0-5, unset). The floor DOES have "
-            "a live, measured channel here (confirmed by intercepting "
-            "neighbor_expand/decaying_walk -- see the class docstring and "
-            "evals/fusion_gate.py's module docstring) -- it is masked on "
-            "THIS fixture by N1's id-ascending tie-break win over target, "
-            "which is what keeps AC-125 (contingency-six) reliably green. "
-            "A fixture variant that removes that tie-break DOES show "
-            "individual-seed divergence (proving the channel is live) but "
-            "regresses AC-125's own reliability, so it does not ship. "
-            "Landing crystalium#41 (F-A) will NOT by itself flip this xfail -- the blocker "
-            "here is a deliberate reliability trade-off, not anomaly A "
-            "alone. See red-evidence.txt for the full measurement."
-        ),
-        strict=True,
-    )
-    def test_reverted_build_rank_changes_with_floor(self, tmp_path: Path) -> None:
-        """The literal AC-139 assertion, left in its RED (xfail) state
-        rather than silently dropped."""
-        floor10 = run_floor_probe(
-            floor=10, weighted=False, data_root=str(tmp_path / "fp10")
-        )
-        floor1000 = run_floor_probe(
-            floor=1000, weighted=False, data_root=str(tmp_path / "fp1000")
-        )
-        assert floor10["target_rank"] != floor1000["target_rank"]
+    # AC-138/AC-139 moved to `evals/floor_sensitivity_gate.py` /
+    # `mcp-server/tests/test_floor_sensitivity_gate.py` (crystalium#48,
+    # W-G-FLOOR; AC-139's own "moved, not weakened" escape hatch). The
+    # class that used to carry a strict-marked expected-red node here is
+    # retired with a mechanism note, not kept as a permanently-red-pinned
+    # test -- see `CHANGE/issue-48-mechanism-note.md` and AC-321/AC-374 in
+    # `evals/floor_sensitivity_gate.py`.
