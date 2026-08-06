@@ -79,13 +79,17 @@ Container-first, like every other Wave-1 gate in this campaign:
       "import evals.weight_discrimination as m; \
        m.emit(m.run(seed_label='0'), '/app/evals/results/wd-seed-0.json')"
 
-Out of scope for this unit (forge-rulings.md D4; W-G-WD's scope is the
-fixture + AC-317/AC-318/AC-375/AC-376 only): the #42 `run_dp1_recheck`
-oracle (AC-352) is a FORWARD OBLIGATION on #42's own unit (W-42), which
-needs `recall_active_only`/seed-exclusion relaxed on the retrieval path
-before that check is meaningful -- nothing here builds it, and nothing
-here builds the struck Sec-D2 bitwise identity harness (AC-319/AC-320,
-dropped by FORGE D4: no runnable harness ever existed to "re-run").
+Out of scope for the W-G-WD unit that built everything ABOVE this line
+(forge-rulings.md D4; W-G-WD's scope was the fixture + AC-317/AC-318/
+AC-375/AC-376 only): this module's own docstring used to record the #42
+`run_dp1_recheck` oracle (AC-352) as a FORWARD OBLIGATION on #42's own
+unit (W-42), needing seed exclusion relaxed on the retrieval path before
+the check is meaningful. **W-42 has now discharged that obligation** --
+`run_dp1_recheck` / `_run_dp1_cell` / `_build_dp1_fixture` below are W-42's
+own grant into this file, on a fixture disjoint from the A/B/leader corpus
+above (own project scope, own ids -- spec.md Sec 0.2). Nothing here builds
+the struck Sec-D2 bitwise identity harness (AC-319/AC-320, dropped by
+FORGE D4: no runnable harness ever existed to "re-run").
 """
 
 from __future__ import annotations
@@ -388,3 +392,185 @@ def run(
         "cells": cells,
         "distinct_outcome_count": len(distinct),
     }
+
+
+# ---------------------------------------------------------------------------
+# crystalium#42 (W-42) -- DP-1(b) re-check oracle (AC-352). This is the
+# FORWARD OBLIGATION this module's own docstring names as out of scope for
+# W-G-WD: "the #42 run_dp1_recheck oracle (AC-352) is a FORWARD OBLIGATION
+# on #42's own unit (W-42), which needs recall_active_only/seed-exclusion
+# relaxed on the retrieval path before that check is meaningful". Landing
+# #42 is itself the evidence deliberation.md Sec 8's DP-1(b) reversal
+# fires on (spec.md Sec 3.4: "#42 IS F-B") -- this is that re-check.
+#
+# A SEPARATE, disjoint fixture from the AC-317/AC-375 A/B/leader corpus
+# above (own project scope, own ids -- spec.md Sec 0.2 discipline applied
+# to this module's own two fixtures, never sharing a data root):
+#   - `_ID_DP1_SUP` -- a support record with exactly ONE base-arm (sparse)
+#     vote, and the sole edge to the phantom below. Reachable ONLY through
+#     it does `_ID_DP1_D` earn derived-arm rank 0.
+#   - `_ID_DP1_D`   -- graph-only phantom: no lexical or dense presence
+#     whatsoever (AC-352's "derived-only record").
+#   - `_ID_DP1_TB`  -- "two base arms" (AC-352's own term): ONE sparse vote
+#     (weaker TF than SUP, so sparse order is [SUP, TB] deterministically)
+#     AND the sole dense hit -- a record backed by two base arms, no graph
+#     edge, so its score is base-arm-only by construction.
+# ---------------------------------------------------------------------------
+
+_DP1_PROJECT = "dp1-recheck-gate"
+_DP1_QUERY = "florzenweit brackamyr"
+
+_ID_DP1_SUP = "dp1-record-sup"  # one sparse vote, KNOWN rank 0; sole edge to D
+_ID_DP1_D = "dp1-record-d"      # graph-only phantom -- derived-arm rank 0, ONLY support
+_ID_DP1_TB = "dp1-record-tb"    # two base arms: sparse rank 1 AND the sole dense hit
+
+
+def _build_dp1_fixture(relational: Any, graph: Any) -> list[dict[str, Any]]:
+    """Seed the SUP / D / TB corpus (module docstring, AC-352 section) into
+    a fresh pair of stores."""
+    stamps = stamp_sequence()
+    sup = crystal(
+        _ID_DP1_SUP,
+        _LAYER,
+        f"{_DP1_QUERY} {_DP1_QUERY} support record entry",
+        project=_DP1_PROJECT,
+        agent_class=_AGENT_CLASS,
+        created_at=next(stamps),
+    )
+    tb = crystal(
+        _ID_DP1_TB,
+        _LAYER,
+        f"{_DP1_QUERY} single mention two-base-arm record",
+        project=_DP1_PROJECT,
+        agent_class=_AGENT_CLASS,
+        created_at=next(stamps),
+    )
+    phantom = crystal(
+        _ID_DP1_D,
+        _LAYER,
+        "graph-only phantom node, no lexical or dense presence whatsoever",
+        project=_DP1_PROJECT,
+        agent_class=_AGENT_CLASS,
+        created_at=next(stamps),
+    )
+    corpus = [sup, tb, phantom]
+    seed_relational(relational, corpus)
+    # ONE edge, SUP -> D: D is then the sole neighbour of ANY seed (SUP is
+    # always within fetch_width on this tiny corpus), so D lands at
+    # derived-arm rank 0 regardless of seed order or PYTHONHASHSEED. TB
+    # carries NO edge -- its score is base-arm-only, by construction.
+    seed_graph(
+        graph,
+        nodes=[(_ID_DP1_SUP, _LAYER), (_ID_DP1_D, _LAYER), (_ID_DP1_TB, _LAYER)],
+        edges=[(_ID_DP1_SUP, _ID_DP1_D, "LINKS_TO")],
+    )
+    return corpus
+
+
+def _run_dp1_cell(*, w_derived: float, data_root: str, k: int = 3) -> dict[str, Any]:
+    """One `w_derived` sample of the DP-1(b) re-check (AC-352): build a
+    fresh corpus, an `Aetheryte` with `recall_seed_derived_credit=True`
+    (seed exclusion RELAXED -- the configuration this check exists to
+    re-verify), recall, and read the derived-only phantom's and the
+    two-base-arm record's ranks off the ACTUAL fused `result.records`
+    (never off hand-computed arithmetic alone), so a combiner regression
+    the stated RRF formula does not predict would still be caught.
+
+    `recall_seed_derived_credit` predates `evals/_corpus_rig.py::build_aetheryte`
+    (crystalium#42 postdates W-RIG) and is not one of that factory's stated
+    required flags, so it is set on the returned INSTANCE post-construction
+    -- `retrieve.py`'s two call sites read `self.recall_seed_derived_credit`
+    at call time, so this is behaviourally identical to constructor
+    injection and leaves `_corpus_rig.py` -- shared by three OTHER,
+    already-shipped Wave-1 gates -- byte-untouched.
+    """
+    from crystalium.aetheryte.retrieve import FETCH_WIDTH_FLOOR
+    from crystalium.schemas import Scope
+    from crystalium.trust import Tier
+
+    tag = f"dp1-{w_derived}-{uuid.uuid4().hex[:8]}"
+    stores = new_stores(data_root, tag)
+    relational, graph, cfg = stores.relational, stores.graph, stores.cfg
+
+    corpus = _build_dp1_fixture(relational, graph)
+    vector_store = stub_vector_store([_ID_DP1_TB])  # TB is the sole dense hit
+
+    aetheryte = _rig_build_aetheryte(
+        cfg=cfg,
+        relational=relational,
+        vector_store=vector_store,
+        graph_store=graph,
+        completion=False,
+        completion_max_hops=2,
+        completion_decay=0.5,
+        recall_active_only=True,
+        recall_relevance_primary=True,
+        recall_weighted_fusion=True,
+        fusion_weight_dense=1.0,
+        fusion_weight_derived=w_derived,
+        fusion_sparse_boost_alpha=0.0,
+    )
+    # crystalium#42 -- the flag this re-check exists to exercise. Set on the
+    # instance (see docstring above); `_rig_build_aetheryte` predates it.
+    aetheryte.recall_seed_derived_credit = True
+
+    candidate_k = max(k * 3, FETCH_WIDTH_FLOOR)
+    corpus_size = len(corpus)
+    assert corpus_size < candidate_k, (corpus_size, candidate_k)  # pinned non-binding axis
+
+    scope = Scope(
+        project=_DP1_PROJECT, agent_class_visibility=_AGENT_CLASS, sensitivity_tag="none"
+    )
+    result = aetheryte.recall(scope, _DP1_QUERY, k, _LAYERS, Tier.T1, explain=True)
+
+    g_live = graph_liveness(graph, expected_node_count=3, expected_edge_count=1)
+    sparse_hits = relational.bm25_search(_DP1_QUERY, layer_filter=_LAYER, k=candidate_k)
+    sparse_ids = [h["id"] for h in sparse_hits]
+    dense_ids = [h["id"] for h in vector_store.dense_search.return_value]
+    a_live = arm_liveness(
+        dense_ranking=dense_ids, expected_dense=1, sparse_ranking=sparse_ids, expected_sparse=2,
+    )
+    # R-CONF: never report a numeric outcome unless every pinned/liveness
+    # axis is confirmed non-binding -- loud AssertionError, not a silent
+    # "confounded" this narrow, single-purpose oracle has no verdict field
+    # for.
+    assert g_live["verdict"] == "measured", g_live
+    assert a_live["verdict"] == "measured", a_live
+    assert _ID_DP1_D not in sparse_ids and _ID_DP1_D not in dense_ids, "D must be derived-only"
+    assert sparse_ids[:2] == [_ID_DP1_SUP, _ID_DP1_TB], sparse_ids  # KNOWN sparse ranks
+    assert dense_ids == [_ID_DP1_TB], dense_ids  # KNOWN dense rank
+
+    ids = [r.id for r in result.records]
+    assert _ID_DP1_D in ids, ("D fell out of the response entirely", ids)
+    assert _ID_DP1_TB in ids, ("TB fell out of the response entirely", ids)
+    derived_only_rank = ids.index(_ID_DP1_D)
+    two_base_arm_rank = ids.index(_ID_DP1_TB)
+
+    return {
+        "w_derived": aetheryte.fusion_weight_derived,  # off the INSTANCE (VP-M4)
+        "p1_recreated": derived_only_rank < two_base_arm_rank,
+        "derived_only_rank": derived_only_rank,
+        "two_base_arm_rank": two_base_arm_rank,
+        "recall_seed_derived_credit": aetheryte.recall_seed_derived_credit,
+        "liveness": {"graph": g_live["liveness"], "arms": a_live["liveness"]},
+    }
+
+
+def run_dp1_recheck(
+    *, w_derived: float = 1.0, data_root: str = "/tmp/crystalium-dp1-recheck"
+) -> dict[str, Any]:
+    """crystalium#42's DP-1(b) re-check (AC-352): does a derived-only
+    record outrank a record backed by two base arms, WITH seed exclusion
+    relaxed on the retrieval path (`recall_seed_derived_credit=True`)?
+    Returns `_run_dp1_cell`'s dict UNSTAMPED (no `run_nonce`/`tree_sha`) --
+    pass to `emit()` (re-exported from `evals._corpus_rig`, rule (g)) to
+    stamp and write it.
+
+    `w_derived=1.0` (the default, and the only value `config.py` documents
+    as supported) is the actual re-check; `w_derived=100.0` is AC-352's
+    MANDATORY positive control (`config.py:296-298`'s stated ceiling) --
+    the caller MUST run it too and confirm `p1_recreated: true` before
+    part (i)'s `false` can be read as evidence rather than as a fixture
+    that cannot say `true` under any input (global rule (f) / S-14).
+    """
+    return _run_dp1_cell(w_derived=w_derived, data_root=data_root)

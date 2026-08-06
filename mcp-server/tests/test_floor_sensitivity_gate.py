@@ -47,15 +47,15 @@ from evals.floor_sensitivity_gate import (
 
 class _FakeGraph:
     def __init__(self) -> None:
-        self.neighbor_expand_calls: list[tuple[list[str], int, str | None]] = []
-        self.decaying_walk_calls: list[tuple[list[str], int, float]] = []
+        self.neighbor_expand_calls: list[tuple[list[str], int, str | None, bool]] = []
+        self.decaying_walk_calls: list[tuple[list[str], int, float, bool]] = []
 
-    def neighbor_expand(self, seed_ids, depth=1, rel_filter=None):
-        self.neighbor_expand_calls.append((list(seed_ids), depth, rel_filter))
+    def neighbor_expand(self, seed_ids, depth=1, rel_filter=None, exclude_seeds=True):
+        self.neighbor_expand_calls.append((list(seed_ids), depth, rel_filter, exclude_seeds))
         return {"b", "a"}
 
-    def decaying_walk(self, seed_ids, max_hops=2, decay=0.5):
-        self.decaying_walk_calls.append((list(seed_ids), max_hops, decay))
+    def decaying_walk(self, seed_ids, max_hops=2, decay=0.5, exclude_seeds=True):
+        self.decaying_walk_calls.append((list(seed_ids), max_hops, decay, exclude_seeds))
         return {"c": 0.5, "a": 0.5}
 
     def all_edges(self):
@@ -77,7 +77,8 @@ class TestGraphStoreSpy:
         spy = _GraphStoreSpy(fake)
         result = spy.neighbor_expand(["seed1", "seed2"], depth=1, rel_filter=None)
         assert result == {"a", "b"}  # forwarded unchanged
-        assert fake.neighbor_expand_calls == [(["seed1", "seed2"], 1, None)]  # args forwarded unchanged
+        # args forwarded unchanged, exclude_seeds default True (crystalium#42)
+        assert fake.neighbor_expand_calls == [(["seed1", "seed2"], 1, None, True)]
         assert spy.neighbor_expand_results == [{"a", "b"}]  # recorded
 
     def test_records_and_forwards_decaying_walk(self) -> None:
@@ -85,7 +86,7 @@ class TestGraphStoreSpy:
         spy = _GraphStoreSpy(fake)
         result = spy.decaying_walk(["seed1"], max_hops=1, decay=0.5)
         assert result == {"c": 0.5, "a": 0.5}
-        assert fake.decaying_walk_calls == [(["seed1"], 1, 0.5)]
+        assert fake.decaying_walk_calls == [(["seed1"], 1, 0.5, True)]
         assert spy.decaying_walk_results == [{"c": 0.5, "a": 0.5}]
 
     def test_derived_union_combines_both_arms_and_dedupes(self) -> None:
