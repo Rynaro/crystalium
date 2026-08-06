@@ -6,6 +6,52 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-08-06
+
+Falsifiability batch. **Zero production-behaviour change** — tests, evals and comments only;
+the sole `mcp-server/src/` diff is comment-only text in `config.py`.
+
+### Added
+- `test_server_entrypoint.py` — drives `python -m crystalium serve` as a real subprocess over
+  stdio (`initialize` → `notifications/initialized` → `tools/list`) and asserts a clean exit.
+  Closes the gap where a server that crashed instantly on `serve` passed the whole suite
+  (972/976 green at v1.12.0). Not `slow`-marked, so it protects CI. (#57)
+- `evals/_corpus_rig.py` — shared deterministic corpus rig: crystal minting, store seeding,
+  stub dense arm, an all-flags-explicit `Aetheryte` harness, arm-liveness self-checks and a
+  pure verdict classifier that emits no numbers when an axis is confounded.
+- `evals/cross_layer_gate.py` — measures cross-layer rank blocking through `Aetheryte.recall`.
+  Ships RED as a strict xfail: a semantic record that is the best BM25 match GLOBALLY fuses at
+  rank 3 behind three episodic fillers. Self-enforcing — the #45 fix turns it XPASS. (#52)
+- `evals/corpus_scaling_gate.py` — shows `candidate_k` truncation dropping a planted record once
+  the corpus exceeds it, with `len(sparse_ranking) == candidate_k` asserted so the gate proves
+  the fetch was really censored. (#47)
+- `evals/weight_discrimination.py` — weight-discriminating fixture; the DP-1(b) re-check oracle
+  for #42, explicitly NOT a band characterisation. (#55)
+- `evals/floor_sensitivity_gate.py` — floor-sensitivity gate plus the VP-M1 probe. (#48)
+- CLI registration for the four new gates.
+
+### Changed
+- `evals/fusion_gate.py`: the `cross_layer` axis is renamed `sparse_arm_per_layer_probe`, because
+  it measured `bm25_search` directly and never reached `Aetheryte.recall` — both values were
+  pinned at 0 and it could not fail. The AC-125 fixture is byte-identical. (#52)
+- Two pre-#41 docstring claims that the `FETCH_WIDTH_FLOOR` channel is "LIVE and MEASURED" are
+  marked HISTORICAL rather than deleted. They were written 2026-08-03, one day before #41 landed,
+  and describe the single-seed abort lottery that #41 removed. (#48)
+
+### Fixed
+- `config.py` records that sub-1.0 `fusion_weight_derived` values are legal, **unsupported**, and
+  will remain uncharacterised until a fixture with non-stipulated ground truth exists; plus a
+  forward obligation to build a d2-identity harness before any future combiner-arithmetic
+  change. (#55)
+
+### Notes on what is NOT claimed
+- No retrieval **quality** improvement. Every gate here is a falsifiability instrument on a
+  stipulated fixture; none measures quality on a real corpus.
+- No `candidate_k` scaling law is validated (#47) and the sub-1.0 weight band is not
+  characterised (#55).
+- #48's floor gate is a **regression guard and existence proof**, not evidence that
+  `FETCH_WIDTH_FLOOR` matters in practice.
+
 ## [2.0.1] — 2026-08-05
 
 ### Fixed

@@ -7,11 +7,23 @@ Container-first:
   make bench
 
 Subcommands:
-  canary       — legacy memory-on/off A/B headline over the canary suite (run_all)
-  ab           — generalized ablation: ab(flag, missions) -> {axis:(on,off,delta)}
-  axes         — SWE-Bench-CL axes from an accuracy matrix (--demo or --matrix)
-  forget       — selective-forgetting probe summary (reuses selective_forgetting)
-  fusion-gate  — crystalium#38 weighted-vs-unweighted fusion A/B (--floor for AC-138/AC-139)
+  canary                — legacy memory-on/off A/B headline over the canary suite (run_all)
+  ab                     — generalized ablation: ab(flag, missions) -> {axis:(on,off,delta)}
+  axes                   — SWE-Bench-CL axes from an accuracy matrix (--demo or --matrix)
+  forget                 — selective-forgetting probe summary (reuses selective_forgetting)
+  fusion-gate            — crystalium#38 weighted-vs-unweighted fusion A/B (--floor for AC-138/AC-139)
+  cross-layer-gate       — crystalium#52 (W-G-XL) fused rank through Aetheryte.recall
+  corpus-scaling-gate    — crystalium#47 (W-G-CORPUS) candidate_k per-layer fetch-width truncation
+  weight-discrimination  — crystalium#55 (W-G-WD) fusion_weight_derived discriminability / #42 DP-1(b) oracle
+  floor-sensitivity-gate — crystalium#48 (W-G-FLOOR) FETCH_WIDTH_FLOOR seed-width channel
+
+The four gates above accept an optional `--out PATH` to also write the
+rule-(g) stamped artifact via the module's own `emit()` (requires
+`CRYSTALIUM_GATE_NONCE`/`CRYSTALIUM_TREE_SHA` in the environment, per
+`evals/_corpus_rig.py::emit`). Omitting `--out` only prints JSON to stdout
+(structlog writes to stdout ahead of it — this path is a convenience for
+eyeballing a result, never a `| jq` pipe contract; read the artifact file
+for anything that needs to trust the output, per rule (g)).
 """
 
 from __future__ import annotations
@@ -118,6 +130,42 @@ def _cmd_poisoning_gate(args: argparse.Namespace) -> dict[str, Any]:
     return run()
 
 
+def _cmd_cross_layer_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.cross_layer_gate import emit, run
+
+    result = run()
+    if args.out:
+        emit(result, args.out)
+    return result
+
+
+def _cmd_corpus_scaling_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.corpus_scaling_gate import emit, run
+
+    result = run()
+    if args.out:
+        emit(result, args.out)
+    return result
+
+
+def _cmd_weight_discrimination(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.weight_discrimination import emit, run
+
+    result = run()
+    if args.out:
+        emit(result, args.out)
+    return result
+
+
+def _cmd_floor_sensitivity_gate(args: argparse.Namespace) -> dict[str, Any]:
+    from evals.floor_sensitivity_gate import emit, run
+
+    result = run()
+    if args.out:
+        emit(result, args.out)
+    return result
+
+
 def _cmd_forget(args: argparse.Namespace) -> dict[str, Any]:
     from evals.ab_memory_onoff import _build_live_handlers
     from evals.selective_forgetting import run_test
@@ -205,6 +253,40 @@ def _build_parser() -> argparse.ArgumentParser:
 
     pog = sub.add_parser("poisoning-gate", help="poisoning-resistance ASR ablation gate (W6 DoD)")
     pog.set_defaults(func=_cmd_poisoning_gate)
+
+    _OUT_HELP = (
+        "also write the rule-(g) stamped artifact here via the module's emit() "
+        "(requires CRYSTALIUM_GATE_NONCE/CRYSTALIUM_TREE_SHA in the environment); "
+        "omitted -> stdout JSON only"
+    )
+
+    xlg = sub.add_parser(
+        "cross-layer-gate",
+        help="crystalium#52 (W-G-XL) fused rank through Aetheryte.recall",
+    )
+    xlg.add_argument("--out", default=None, help=_OUT_HELP)
+    xlg.set_defaults(func=_cmd_cross_layer_gate)
+
+    csg = sub.add_parser(
+        "corpus-scaling-gate",
+        help="crystalium#47 (W-G-CORPUS) candidate_k per-layer fetch-width truncation gate",
+    )
+    csg.add_argument("--out", default=None, help=_OUT_HELP)
+    csg.set_defaults(func=_cmd_corpus_scaling_gate)
+
+    wdg = sub.add_parser(
+        "weight-discrimination",
+        help="crystalium#55 (W-G-WD) fusion_weight_derived discriminability / #42 DP-1(b) re-check oracle",
+    )
+    wdg.add_argument("--out", default=None, help=_OUT_HELP)
+    wdg.set_defaults(func=_cmd_weight_discrimination)
+
+    fsg = sub.add_parser(
+        "floor-sensitivity-gate",
+        help="crystalium#48 (W-G-FLOOR) FETCH_WIDTH_FLOOR seed-width channel gate",
+    )
+    fsg.add_argument("--out", default=None, help=_OUT_HELP)
+    fsg.set_defaults(func=_cmd_floor_sensitivity_gate)
 
     return p
 

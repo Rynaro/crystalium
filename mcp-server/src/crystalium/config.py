@@ -310,6 +310,20 @@ class Config:
     #    sub-1.0 value as a supported "precision dial" — no shipped gate measures what
     #    such a dial does. NOTE for future sweeps: the FUSION gate cannot express
     #    weight sensitivity (target/Z at k=2); only the retrieval gate is informative.
+    #  - REOPEN CONDITION (crystalium#55 item 1, disposition unchanged by this
+    #    campaign): values below 1.0 are legal, unsupported, and will remain
+    #    uncharacterised until a fixture with non-stipulated ground truth exists —
+    #    i.e. one whose relevant/irrelevant judgments are not decided by the fixture's
+    #    own author, unlike the weight-discriminating fixture above. Until that fixture
+    #    exists, this line stands: no sub-1.0 value may be presented as a supported
+    #    precision dial (C-9).
+    #  - FORWARD OBLIGATION (FORGE D4, crystalium#55 item 2 — the "re-run the §D2
+    #    identity harness" premise was false: no such harness exists or is built by
+    #    this campaign, only the recorded result above). Any FUTURE change that
+    #    touches combiner arithmetic — weighted_rrf_merge_scored, the RRF constant, or
+    #    fusion_weight_* semantics — MUST build and run a d2-identity harness (20
+    #    in-process comparisons, max_abs_diff == 0.0 at w=1.0, plus a 1-ULP
+    #    perturbation red-check) as a precondition of that change.
     fusion_weight_derived: float = 1.0
     # Sparse-arm selectivity boost (D3): w_sparse resolves to
     # `1.0 + fusion_sparse_boost_alpha * selectivity`, selectivity in [0, 1]
