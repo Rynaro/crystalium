@@ -73,9 +73,15 @@
 # and runs as uid 1000; a root container with default caps gets "Operation not
 # permitted"; only an explicit `--cap-add LINUX_IMMUTABLE`, which appears
 # nowhere in this repo, can set it. So no container this project runs can
-# produce the state. Detecting it would mean shelling out to `lsattr`, which is
-# unavailable or erroring on overlayfs, tmpfs and several common filesystems —
-# trading an unreachable miss for routine false failures.
+# produce the state.
+#
+# Detection would mean shelling out to `lsattr`, which does not exist on macOS
+# and has no cross-platform equivalent — a portability cost paid on every run to
+# catch a state nothing here can reach. (An earlier revision of this comment also
+# claimed `lsattr` errors on overlayfs and tmpfs. That was asserted, not
+# measured, and a checker disproved it: it round-trips cleanly on tmpfs,
+# overlay2 and btrfs. Reachability is the argument; that one was never load
+# bearing and is removed rather than left standing as decoration.)
 
 set -uo pipefail
 

@@ -73,8 +73,8 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   needs `CAP_LINUX_IMMUTABLE`, which is not in Docker's default capability set. Measured — the
   compose service has no `chattr` binary and runs as uid 1000, and a root container with
   default caps gets `Operation not permitted`. No container this project runs can produce the
-  state, and detecting it would require `lsattr`, which errors on overlayfs, tmpfs and several
-  common filesystems.
+  state. Detecting it would require `lsattr`, which does not exist on macOS and has no
+  cross-platform equivalent — a portability cost on every run to catch an unreachable state.
 - **`make fix-ownership`** — one-time migration for checkouts predating this change, using a
   throwaway root container to `chown -h` the tree back to the invoking user (`-h` because
   `.venv/bin/python` and `.venv/lib64` are symlinks a plain `chown` would follow). Verified: 297
