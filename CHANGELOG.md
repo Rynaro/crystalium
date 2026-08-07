@@ -6,6 +6,63 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Containers no longer write into the bind-mounted source tree as root (#66).**
+  `docker-compose.yml` mounts `.:/app` read-write and carried no `user:` key, while the
+  Dockerfile adds no `USER` (so `python:3.12-slim` runs as root). Every `docker compose run`
+  therefore left `__pycache__/`, `.pytest_cache/`, `.ruff_cache/` and `.venv` on the host owned
+  by uid 0 — undeletable by the developer who invoked `make`, and enough to make
+  `git worktree remove` fail partway through and leave a deregistered orphan. Measured: 297
+  root-owned paths in a normal checkout, and 2,353 across 96M of campaign worktrees that could
+  not be reclaimed without `sudo`. The service now runs as the invoking user
+  (`user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"`, exported by `make`).
+
+  Two consequences of running non-root, both handled:
+  - **The data dir moved off `/root`.** `/root` is mode 0700, so a non-root uid could not open
+    SQLite/LanceDB/Kuzu there. The dev volume now mounts at `/data`
+    (`CRYSTALIUM_DATA_DIR=/data/default`), and the dev image pre-creates `/data` as 1777 so a
+    fresh volume is writable by any host uid rather than only 1000.
+  - **`HOME=/tmp`.** `uv` initialises a cache under `$HOME` on startup; as a non-root uid `HOME`
+    defaulted to `/` and `uv` died with `Failed to initialize cache at /.cache/uv` before the
+    entrypoint reached Python.
+
+  **The published image is deliberately unchanged.** It is built from `target: base`, still runs
+  as root, and still resolves its data dir under `$HOME` — so existing MCP wiring that
+  bind-mounts a host directory onto `/root/.crystalium/<project>` keeps working. A `--user` pin
+  belongs on that `docker run` invocation, where the bind mount already carries host ownership.
+
+### Added
+- **`make check-ownership`** — asserts that everything the container wrote into the working tree
+  is deletable by the host user, wired into CI as its own job. Every other CI job runs
+  `docker run` against the baked image with no bind mount, so none of them could observe this
+  defect. Gates on *removability* rather than raw ownership: POSIX removal permission comes from
+  the parent directory's write bit, and Docker creates the `/app/.venv` anonymous-volume
+  mountpoint as root regardless of `user:` — but that is an empty directory in a
+  developer-owned parent, so `rmdir` clears it. Red-checked: removing the `user:` key makes this
+  fail with 22 undeletable paths.
+- **`make fix-ownership`** — one-time migration for checkouts predating this change, using a
+  throwaway root container to `chown -h` the tree back to the invoking user (`-h` because
+  `.venv/bin/python` and `.venv/lib64` are symlinks a plain `chown` would follow). Verified: 297
+  → 0 on a real checkout.
+
+### Changed
+- The dev data volume is now `crystalium_data_v2`. The old `crystalium_data` was populated by
+  root and would fail every write under the non-root user, so a new name gives a
+  correctly-owned store on first run instead of a confusing crash. **This discards local dev
+  crystals** — scratch state for the dev container, never the MCP server's real data. The old
+  volume is not deleted; drop it with `docker volume rm crystalium_data`.
+
+### Notes
+- Running non-root revives **two tests that could never fail as root**:
+  `test_doctor_readonly_data_dir_nonzero` and `test_doctor_fail_shows_fail_marker` self-skipped
+  with *"Running as root; chmod 0o444 does not prevent writes for root"*. They exist to verify
+  `doctor` reports failure on an unwritable data dir — precisely the property root cannot
+  exercise. Measured in one checkout varying only the container user, so the attribution carries
+  no confound: **1095 passed / 6 skipped as root → 1097 passed / 4 skipped as the host user**,
+  a difference of exactly these two tests. (A first comparison against a fresh clone suggested
+  four; two of those were `test_roundtrip_handoff` skipping on *"roster fixtures not mounted"*,
+  an artifact of the clone rather than of the user change.)
+
 ## [2.1.0] — 2026-08-06
 
 Recall **result order and membership change by design.** Minor, not patch: no tool rename, no

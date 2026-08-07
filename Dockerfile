@@ -94,5 +94,26 @@ COPY mcp-server/tests ./tests
 COPY install.sh agent.md AGENTS.md SPEC.md ECL_VERSION ./
 COPY skills ./skills
 
+# Data-dir mountpoint for the compose dev volume (crystalium#66).
+#
+# docker-compose.yml runs this image as the HOST uid (see its `user:` key) so writes
+# into the bind-mounted source tree land owned by the developer rather than by root.
+# That makes the previous data dir unusable: it lived on a named volume at
+# /root/.crystalium, and /root is mode 0700 owned by root, so a non-root uid cannot
+# open SQLite/LanceDB/Kuzu there.
+#
+# Docker seeds a fresh named volume from the image's directory at the mount point,
+# mode included — so pre-creating /data as 1777 (sticky, like /tmp) makes the volume
+# writable by ANY host uid. Hardcoding a uid here would break every developer whose
+# `id -u` is not 1000.
+#
+# DEV STAGE ONLY, deliberately. The published image is built from `base`
+# (release.yml `target: base`) and is left untouched: it still runs as root and still
+# resolves its data dir under $HOME, so existing MCP wiring that bind-mounts a host
+# directory onto /root/.crystalium/<project> keeps working. A `--user` pin belongs on
+# that `docker run` invocation — where the bind mount already carries host ownership —
+# not baked into the image.
+RUN mkdir -p /data && chmod 1777 /data
+
 # For pytest runs via docker compose
 CMD ["pytest", "tests/", "-v"]

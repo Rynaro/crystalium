@@ -69,6 +69,31 @@ jobs:
             crystalium:dev \
             pytest -m conformance -v --tb=short -p no:cacheprovider
 
+  ownership:
+    name: bind-mount ownership (container writes are host-deletable)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        run: docker compose build crystalium
+
+      # crystalium#66. Every other job in this file runs `docker run` against the
+      # baked image with NO bind mount, so none of them can observe this defect —
+      # the tree the container writes into is the image's own filesystem, thrown
+      # away with the container. Only `docker compose run` reproduces the developer
+      # path where /app is the host checkout.
+      #
+      # Red-checked before landing: with the `user:` key removed from
+      # docker-compose.yml this step fails with 22 undeletable paths, so it is a
+      # live gate and not a formality.
+      - name: Assert container writes stay host-deletable
+        run: make check-ownership
+
   schema-validate:
     name: JSON schema validation
     runs-on: ubuntu-latest
