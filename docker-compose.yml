@@ -19,6 +19,18 @@ services:
         # or `make build VARIANT=gpu`.
         TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
     image: crystalium:dev
+    # Run as the HOST user, not root (crystalium#66).
+    #
+    # This service bind-mounts the source tree read-write. Without this key the
+    # container ran as root (python:3.12-slim has no USER, and the Dockerfile adds
+    # none), so every __pycache__/, .pytest_cache/ and .ruff_cache/ it created landed
+    # on the host owned by uid 0 — undeletable by the developer who invoked `make`,
+    # and enough to make `git worktree remove` fail partway through.
+    #
+    # `make` exports DOCKER_UID/DOCKER_GID from `id -u`/`id -g`. The 1000 fallback is
+    # only for a bare `docker compose` invocation; on a host where `id -u` is not 1000
+    # use `make`, or export the two variables yourself.
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     volumes:
       # Source tree (read-write for live dev edits; tests read files directly)
       - .:/app
@@ -27,12 +39,24 @@ services:
       # entrypoint runs `uv run --no-sync` (uses the baked venv as-is, never
       # re-resolves). Without this, the venv would be hidden and `uv run` would
       # fail to find the interpreter.
+      #
+      # The baked venv is root-owned and mode 0755, which is fine: a non-root uid
+      # only needs read+execute on it. `--no-sync` means uv never writes there.
       - /app/.venv
-      # Named volume for runtime artefacts (SQLite, LanceDB, blob tier, KuzuDB)
-      # Mounted at the default data_dir path inside the container
-      - crystalium_data:/root/.crystalium
+      # Named volume for runtime artefacts (SQLite, LanceDB, blob tier, KuzuDB).
+      #
+      # Mounted at /data, NOT the old /root/.crystalium: /root is mode 0700 owned by
+      # root, so the non-root `user:` above could not open any store there. The image
+      # pre-creates /data as 1777 so a fresh volume is writable by any host uid.
+      - crystalium_data_v2:/data
     environment:
-      - CRYSTALIUM_DATA_DIR=/root/.crystalium/default
+      - CRYSTALIUM_DATA_DIR=/data/default
+      # uv initialises a cache under $HOME on every run. As a non-root uid HOME would
+      # default to `/`, and `uv` dies with "Failed to initialize cache at /.cache/uv:
+      # Permission denied" before the entrypoint ever reaches python. /tmp is 1777 in
+      # the image, so this is writable for any uid. Measured: HOME alone is sufficient,
+      # no separate UV_CACHE_DIR needed.
+      - HOME=/tmp
       # Mounted-layout PYTHONPATH: src for `crystalium`, /app for the `evals`
       # package (mirrors the image's baked /app/src:/app). Without /app, the
       # evals-importing tests (test_dream_metrics, test_dream_gate) fail to collect.
@@ -45,5 +69,15 @@ services:
     tty: false
 
 volumes:
-  crystalium_data:
+  # v2 rather than reusing `crystalium_data` (crystalium#66). The old volume's
+  # contents were created by root, so remounting it under the non-root `user:` above
+  # would fail on every write with a bare EACCES. A new volume name gives every
+  # developer a correctly-owned store on first run instead of a confusing crash.
+  #
+  # This DISCARDS local dev crystals. That is deliberate — this volume is scratch
+  # state for the dev container, never the MCP server's real data (which lives on a
+  # host bind mount managed by the eidolons wiring, untouched by this change).
+  # The old volume is not deleted; recover with `docker volume inspect crystalium_data`
+  # or drop it with `docker volume rm crystalium_data`.
+  crystalium_data_v2:
     driver: local
