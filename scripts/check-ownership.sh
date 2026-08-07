@@ -40,6 +40,42 @@
 #
 # find's stderr is captured rather than discarded, and any traversal failure is
 # itself a finding — belt and braces for anything the explicit rules miss.
+#
+# ---------------------------------------------------------------------------
+# .git is NOT pruned, deliberately
+# ---------------------------------------------------------------------------
+# An earlier revision carried `-path ./.git -prune`. That excluded exactly the
+# territory #66 exists to protect: the motivating incident was `git worktree
+# remove` deregistering a worktree and then failing to delete it, and worktree
+# metadata lives in `.git/worktrees/<name>/`. Root-owned residue there reported
+# clean forever:
+#
+#     $ <pruned rule>            -> OK: every path ... is deletable
+#     $ rm -rf .git/worktrees/ghost  -> Permission denied
+#
+# It was also asymmetric with the remedy: `make fix-ownership` runs a bare
+# `find /app -not -user …` with no .git exclusion, so it reaches in and repairs
+# what the audit could not see. An audit narrower than its own remedy will
+# report green on damage the remedy is standing by to fix.
+#
+# ---------------------------------------------------------------------------
+# Known limitation: filesystem attributes are out of model
+# ---------------------------------------------------------------------------
+# Every rule here reasons over POSIX mode bits. A file carrying the immutable
+# attribute (`chattr +i`) looks perfectly normal to all of them and passes,
+# while `rm` fails with EPERM — and `make fix-ownership` cannot repair it either,
+# since even a root container's `chown`/`rm` are refused without an explicit
+# `chattr -i`.
+#
+# Not defended against, on reachability grounds rather than convenience:
+# setting +i needs CAP_LINUX_IMMUTABLE, which is NOT in Docker's default
+# capability set. Measured — the compose service has no `chattr` binary at all
+# and runs as uid 1000; a root container with default caps gets "Operation not
+# permitted"; only an explicit `--cap-add LINUX_IMMUTABLE`, which appears
+# nowhere in this repo, can set it. So no container this project runs can
+# produce the state. Detecting it would mean shelling out to `lsattr`, which is
+# unavailable or erroring on overlayfs, tmpfs and several common filesystems —
+# trading an unreachable miss for routine false failures.
 
 set -uo pipefail
 
@@ -87,7 +123,7 @@ while IFS= read -r -d '' p; do
 	if [ -n "$(ls -A "$p" 2>/dev/null)" ] && [ ! -w "$p" ]; then
 		record "$p  [non-empty directory not writable — children unclearable]"
 	fi
-done < <(find . -path ./.git -prune -o ! -uid "$uid" -print0 2>"$stderr_log")
+done < <(find . ! -uid "$uid" -print0 2>"$stderr_log")
 
 # A traversal error means find could not see into something — treat as a finding
 # rather than letting it vanish into a redirect.
