@@ -47,10 +47,20 @@ uid="$(id -u)"
 stderr_log="$(mktemp)"
 trap 'rm -f "$stderr_log"' EXIT
 
-stuck=""
-record() { stuck="${stuck}${1}\n"; }
+# NUL-delimited throughout. A newline-delimited read splits a filename containing a
+# newline into fragments, and the fragments are then tested as if they were paths:
+# a root-owned undeletable directory named $'ev\nil' was reported as `il/a`, a path
+# that does not exist. It happened to still exit non-zero — `dirname il/a` is `il`,
+# which does not exist and so tests as non-writable — i.e. the gate was right by
+# accident while naming a ghost. Contrive the fragment so it lands on a real writable
+# directory and the same split becomes a MISS.
+#
+# An array, not a string: paths can contain backslashes, and `printf '%b'` on an
+# accumulated string would interpret them.
+stuck=()
+record() { stuck+=("$1"); }
 
-while IFS= read -r p; do
+while IFS= read -r -d '' p; do
 	[ -n "$p" ] || continue
 
 	# A file or directory can only be unlinked if its parent is writable.
@@ -77,7 +87,7 @@ while IFS= read -r p; do
 	if [ -n "$(ls -A "$p" 2>/dev/null)" ] && [ ! -w "$p" ]; then
 		record "$p  [non-empty directory not writable — children unclearable]"
 	fi
-done < <(find . -path ./.git -prune -o ! -uid "$uid" -print 2>"$stderr_log")
+done < <(find . -path ./.git -prune -o ! -uid "$uid" -print0 2>"$stderr_log")
 
 # A traversal error means find could not see into something — treat as a finding
 # rather than letting it vanish into a redirect.
@@ -87,11 +97,10 @@ if [ -s "$stderr_log" ]; then
 	done <"$stderr_log"
 fi
 
-if [ -n "$stuck" ]; then
+if [ "${#stuck[@]}" -gt 0 ]; then
 	echo "FAIL: container left paths the host user (uid $uid) cannot delete:"
-	printf '%b' "$stuck" | grep -v '^$' | head -20
-	total="$(printf '%b' "$stuck" | grep -c -v '^$')"
-	echo "  (total: $total)"
+	printf '%s\n' "${stuck[@]}" | head -20
+	echo "  (total: ${#stuck[@]})"
 	echo "  remedy: make fix-ownership"
 	exit 1
 fi
