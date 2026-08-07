@@ -87,35 +87,20 @@ shell:
 
 ## check-ownership: Assert the container left nothing the host user cannot delete (crystalium#66)
 #
-# Gates on REMOVABILITY, not on raw ownership. Those differ, and the difference is
-# not cosmetic:
+# Gates on REMOVABILITY, not on raw ownership — the two differ, and the difference
+# is not cosmetic. Docker creates the `/app/.venv` anonymous-volume mountpoint as
+# root no matter what `user:` says (the daemon does it, not the container process),
+# but it is an EMPTY directory in a developer-owned parent, so `rmdir` clears it
+# without sudo. An ownership-only gate would flag it and invite an exception list,
+# which is how a gate rots into a formality.
 #
-#   POSIX removal permission comes from the write bit on the PARENT directory, not
-#   from the entry itself. Docker creates the `- /app/.venv` anonymous-volume
-#   mountpoint as root inside the bind-mounted tree, and the `user:` key cannot
-#   change that — the daemon does it, not the container process. But that mountpoint
-#   is an EMPTY directory whose parent the developer owns, so `rmdir .venv` succeeds
-#   without sudo. It is root-owned and harmless.
-#
-#   What actually blocked cleanup in #66 was root-owned content NESTED inside a
-#   root-owned directory: `rm -rf` must unlink the children first, which needs write
-#   on the unwritable parent. That is the property worth gating, so that is the one
-#   measured here — an ownership-only check would flag the harmless mountpoint and
-#   invite an exception list, which is how a gate rots into a formality.
+# The rule itself lives in scripts/check-ownership.sh, which documents why the
+# obvious one-line form has a silent hole for mode-0700 directories.
 check-ownership:
 	@echo "==> forcing the container to write into the bind-mounted tree"
 	@$(RUN) python -c "import compileall; compileall.compile_dir('/app/evals', quiet=2)" >/dev/null || true
 	@echo "==> scanning for paths the host user (uid $$(id -u)) cannot delete"
-	@stuck=$$(find . -path ./.git -prune -o ! -uid $$(id -u) -print 2>/dev/null \
-		| while IFS= read -r p; do [ -w "$$(dirname "$$p")" ] || echo "$$p"; done); \
-	if [ -n "$$stuck" ]; then \
-		echo "FAIL: container left paths the host user cannot delete:"; \
-		echo "$$stuck" | head -20; \
-		echo "  (total: $$(echo "$$stuck" | wc -l))"; \
-		echo "  remedy: docker run --rm -u 0:0 -v \"$$PWD\":/app -w /app crystalium:dev rm -rf <paths>"; \
-		exit 1; \
-	fi
-	@echo "OK: every path the container wrote is deletable by uid $$(id -u)"
+	@bash scripts/check-ownership.sh
 
 ## fix-ownership: Reclaim root-owned files left by containers from before crystalium#66
 #

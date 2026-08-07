@@ -40,6 +40,25 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   mountpoint as root regardless of `user:` — but that is an empty directory in a
   developer-owned parent, so `rmdir` clears it. Red-checked: removing the `user:` key makes this
   fail with 22 undeletable paths.
+- **`scripts/check-ownership.sh`** — the removability rule, extracted from the Makefile after an
+  independent checker found the inline one-liner had a silent blind spot. It flagged a path only
+  when that path's *own* parent was unwritable — the right unlink condition for a file, but
+  incomplete for a directory. A root-owned mode-0700 directory with content, in a host-owned
+  parent, passed the gate while `rm -rf` on it genuinely failed: `find` could not descend into
+  it, and the traversal error went straight into the `2>/dev/null` the check itself installed, so
+  its children were never enumerated. Mode-0700 directories are routine output of
+  `tempfile.mkdtemp`, `.ssh`, `.gnupg` and assorted caches, so this was not a corner case.
+
+  The rule is now stated properly for both kinds — a path is stuck unless its parent is writable
+  **and**, if it is a directory, the host user can actually clear it (readable + traversable +
+  writable, or genuinely empty). Unreadable directories fail closed, since `ls` on one returns
+  nothing and would otherwise read as "empty". `find`'s stderr is captured rather than discarded
+  and any traversal failure is itself a finding. Stating the condition properly also caught a
+  case the checker did not report: a root-owned **0755** non-empty directory — readable and
+  traversable, so `find` enumerates it fine, but not writable, so its children cannot be
+  unlinked. Validated by a 6-case fixture rather than by re-running the single counter-example,
+  which shows the fix does not over-fire: the `.venv` mountpoint still passes with **no**
+  exception entry.
 - **`make fix-ownership`** — one-time migration for checkouts predating this change, using a
   throwaway root container to `chown -h` the tree back to the invoking user (`-h` because
   `.venv/bin/python` and `.venv/lib64` are symlinks a plain `chown` would follow). Verified: 297
