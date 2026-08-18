@@ -1,0 +1,32 @@
+name: EIIS v3
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  package-conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Rynaro/eidolons-eiis
+          ref: agent/eiis-v3-self-contained # Replace with v3.0.0 after release.
+          path: .eiis-checker
+
+      - name: Validate the self-contained package
+        run: bash .eiis-checker/conformance/check.sh .
+
+      - name: ShellCheck the package installer
+        run: shellcheck -x -S error install.sh
+
+      - name: Prove byte-idempotent installation
+        run: |
+          target="$(mktemp -d)/package"
+          bash install.sh --target "$target" --hosts raw --non-interactive --force
+          find "$target" -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/first.sums
+          bash install.sh --target "$target" --hosts raw --non-interactive --force
+          find "$target" -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/second.sums
+          diff /tmp/first.sums /tmp/second.sums

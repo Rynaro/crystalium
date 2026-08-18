@@ -75,7 +75,7 @@ massage a metric to clear a gate.
 - The `enforcement.py` chokepoint is sacred: new behavior goes *behind* it, never around it; its
   invariant tests stay green.
 - ECL v2.0 envelopes on every tool result (11 fields + SHA-256). EIIS v1.4 conformance.
-  `install.sh` bash-3.2-safe. `agent.md` ≤ 1000 tokens. Working set ≤ 3,500 tokens.
+  `install.sh` bash-3.2-safe. `PERSONA.md` ≤ 1000 tokens. Working set ≤ 3,500 tokens.
 - Pointer-indexed storage; episodic payloads stay content-addressed on the blob tier. Local-first;
   no new mandatory external service (optional local Ollama only).
 - Schema-first: add fields now (even unpopulated); bump `crystal.v2.json` only on a breaking change.

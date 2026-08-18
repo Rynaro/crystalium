@@ -14,8 +14,8 @@ FROM python:3.12-slim AS base
 #   docker build --build-arg TORCH_VARIANT=gpu .  # gpu, plain docker
 ARG TORCH_VARIANT=cpu
 
-# Install curl for uv installer (and as a useful tool for the doctor command)
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+# Install curl for uv and jq for the EIIS v3 package installer.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv (fast Python package manager).
@@ -85,13 +85,8 @@ RUN uv sync --extra dev --no-cache \
 # Copy tests into the image
 COPY mcp-server/tests ./tests
 
-# W7: the EIIS/install + host-wiring + frontmatter + deploy tests exercise install.sh
-# and the staged payload sources. Bake those into the dev image so those tests RUN in
-# CI (rather than skip). Dev stage only — NOT in the runtime image or the install
-# target. (The round-trip test needs the .eidolons/ roster fixtures, which stay
-# .dockerignore'd; it skips in this minimal image and runs locally via mounts — its
-# ingest logic is covered in CI by test_ingest_handler with synthesized envelopes.)
-COPY install.sh agent.md AGENTS.md SPEC.md ECL_VERSION ./
+# Bake the canonical EIIS v3 package into the dev image for package smoke tests.
+COPY install.sh PERSONA.md SPEC.md ECL_VERSION manifest.json ./
 COPY skills ./skills
 
 # Data-dir mountpoint for the compose dev volume (crystalium#66).

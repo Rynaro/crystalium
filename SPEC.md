@@ -1,6 +1,6 @@
 # CRYSTALIUM v0.1.0 Specification
 
-The authoritative spec lives at `.spectra/crystalium-v0.1.0-spec.md` (narrative) and `.spectra/crystalium-v0.1.0-spec.yaml` (machine-readable). This file is the EIIS v1.4 install-target source of truth.
+The authoritative spec lives at `.spectra/crystalium-v0.1.0-spec.md` (narrative) and `.spectra/crystalium-v0.1.0-spec.yaml` (machine-readable). This file is the EIIS 3.0 install-target source of truth.
 
 ## Anchor list
 
@@ -24,7 +24,7 @@ The authoritative spec lives at `.spectra/crystalium-v0.1.0-spec.md` (narrative)
 
 - **Build waves W1–W6** — see §8 (sequential; each wave's `container_test` runs inside `docker compose run --rm crystalium`)
 
-- **EIIS v1.4 conformance plan** — see §11 (install-target whitelist + cleanup sweep)
+- **EIIS 3.0 conformance plan** — see §11 (install-target whitelist + cleanup sweep)
 
 - **ECL v2.0 conformance plan** — see §12 (11 required envelope fields + integrity helper)
 
@@ -32,7 +32,7 @@ The authoritative spec lives at `.spectra/crystalium-v0.1.0-spec.md` (narrative)
 
 ## P0 invariants
 
-See `agent.md` §"P0 invariants". All 7 are mechanical, enforced at the chokepoint before any store mutation.
+See `PERSONA.md` §"P0 invariants". All 7 are mechanical, enforced at the chokepoint before any store mutation.
 
 ## Out-of-scope hooks
 

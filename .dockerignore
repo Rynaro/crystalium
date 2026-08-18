@@ -13,11 +13,11 @@ __pycache__/
 .mypy_cache/
 
 # Documentation (large; not needed in runtime image)
-# Keep: SPEC.md, agent.md (install-target references), and README.md
+# Keep: SPEC.md, PERSONA.md (install-target references), and README.md
 # (pyproject.toml [project.readme] points to it; hatchling reads it at build).
 *.md
 !SPEC.md
-!agent.md
+!PERSONA.md
 !README.md
 !AGENTS.md
 

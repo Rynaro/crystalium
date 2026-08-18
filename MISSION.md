@@ -142,7 +142,7 @@ Prompts: `onboard_new_agent`, `audit_memory`, `redact`.
 
 ## Quality bars
 
-- `agent.md` ≤ ~1,000 tokens; composer-proven ≤3,500.
+- `PERSONA.md` ≤ ~1,000 tokens; composer-proven ≤3,500.
 - Every §2.2 invariant has a passing test in `test_enforcement.py`. Any
   failure marks server non-conformant.
 - `install.sh` idempotent (CI second-run-no-diff job).
