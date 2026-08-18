@@ -151,7 +151,8 @@ class TestSchemaFilesAreValidJson:
         "recall-result.v1.json",
         "commit-request.v1.json",
         "commit-result.v1.json",
-        "install.manifest.v1.json",
+        "package-manifest.v3.json",
+        "install-receipt.v1.json",
     ]
 
     @pytest.mark.parametrize("filename", SCHEMA_FILES)

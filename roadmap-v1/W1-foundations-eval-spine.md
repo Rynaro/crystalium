@@ -20,7 +20,7 @@ transport stubbed in v0.1. Build the harness before the brain.
 - Container-first: all Python runs inside Docker via `docker compose run --rm crystalium <cmd>` or
   `make`. Host runs only `docker compose`/`git`/`make`. No host `python`/`pip`/`pytest`/`uv`.
 - The `enforcement.py` chokepoint is sacred — extend behind it, never around it; its tests stay green.
-- ECL v2.0 envelopes (11 fields + SHA-256) on every tool result. EIIS v1.4. `agent.md` ≤ 1000 tokens.
+- ECL v2.0 envelopes (11 fields + SHA-256) on every tool result. EIIS v1.4. `PERSONA.md` ≤ 1000 tokens.
 - Local-first; no new mandatory external service.
 
 ## Objective

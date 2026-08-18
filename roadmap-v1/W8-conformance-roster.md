@@ -13,7 +13,7 @@ bar, and publish to the roster.
 - Approve token: **`APPROVED: BUILD W8`**.
 
 ## Invariants (never violate)
-Container-first (W1 hook). Chokepoint sacred. ECL v2.0 + EIIS v1.4. `agent.md` ≤ 1000 tokens;
+Container-first (W1 hook). Chokepoint sacred. ECL v2.0 + EIIS v1.4. `PERSONA.md` ≤ 1000 tokens;
 working set ≤ 3,500. Local-first.
 
 ## Objective

@@ -23,7 +23,7 @@ replay to continual LLM learning — MEDIUM.)
 
 ## Invariants (never violate)
 Container-first (Docker only; the W1 PreToolUse hook enforces it). Chokepoint sacred. ECL v2.0 +
-EIIS v1.4. `agent.md` ≤ 1000 tokens; working set ≤ 3,500. Local-first. **Ablation-or-revert:** ship
+EIIS v1.4. `PERSONA.md` ≤ 1000 tokens; working set ≤ 3,500. Local-first. **Ablation-or-revert:** ship
 behind a flag default-off; beat baseline or report the null result honestly.
 
 ## Objective

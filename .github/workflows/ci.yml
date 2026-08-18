@@ -152,7 +152,7 @@ jobs:
             -v "/tmp/crystalium-install-test:/tmp/crystalium-install-test" \
             -w /workspace \
             crystalium:dev \
-            install.sh --target /tmp/crystalium-install-test --non-interactive
+            install.sh --target /tmp/crystalium-install-test --non-interactive --force
 
       - name: Snapshot 1
         run: |
@@ -166,7 +166,7 @@ jobs:
             -v "/tmp/crystalium-install-test:/tmp/crystalium-install-test" \
             -w /workspace \
             crystalium:dev \
-            install.sh --target /tmp/crystalium-install-test --non-interactive
+            install.sh --target /tmp/crystalium-install-test --non-interactive --force
 
       - name: Assert no new files appeared
         run: |

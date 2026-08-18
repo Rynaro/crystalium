@@ -1,3 +1,0 @@
-[mcp_servers.atlas-aci]
-command = "docker"
-args = ["run", "--rm", "-i", "--read-only", "-e", "HOME=/tmp", "-v", "/Users/henrique/workspace/oss/agents/crystalium:/repo:ro", "-v", "/Users/henrique/workspace/oss/agents/crystalium/.atlas/memex:/memex", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "ghcr.io/rynaro/atlas-aci@sha256:386677f06b0ce23cb4883f6c0f91d8eac22328cd7d9451ae241e2f183207ad96", "serve", "--repo", "/repo", "--memex-root", "/memex"]

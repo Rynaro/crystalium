@@ -4,7 +4,7 @@ The shared four-layer memory substrate for the Eidolons roster. Stores, gates, r
 
 ## Status
 
-**v1.0.0 — roster member** of the Eidolons roster (`Rynaro/eidolons`, `capability_class: memory`). Every roster Eidolon writes its handoffs into CRYSTALIUM and recalls them back out. EIIS v1.4 + ECL v2.0 conformant; `pytest -m conformance` green (G1–G8 + mechanical invariants, blocking CI job). Container-first — all Python toolchain runs inside Docker; the host runs only `docker compose`, `git`, and `make`.
+**v1.0.0 — roster member** of the Eidolons roster (`Rynaro/eidolons`, `capability_class: memory`). Every roster Eidolon writes its handoffs into CRYSTALIUM and recalls them back out. EIIS 3.0 + ECL v2.0 conformant; `pytest -m conformance` green (G1–G8 + mechanical invariants, blocking CI job). Container-first — all Python toolchain runs inside Docker; the host runs only `docker compose`, `git`, and `make`.
 
 CRYSTALIUM is **infrastructure, not an agent.** It is the bidirectional substrate the roster shares: it stores/gates/retrieves/consolidates/forgets; the reasoning, planning, and code-writing live in the Eidolon that calls `crystalium.recall`, `crystalium.commit`, `crystalium.ingest`, etc.
 
@@ -145,7 +145,7 @@ CRYSTALIUM reached 1.0 over eight waves. The discipline throughout: **neuroscien
 | **W4** | Forgetting as a faculty | FSRS/DSR decay, value-aware eviction, spaced re-surfacing, Ricoeur-protected class, right-to-be-forgotten |
 | **W5** | Retrieval intelligence (Aetheryte II) | Pattern completion, encoding-specificity re-rank, pattern-separation dedup-merge, predictive prefetch |
 | **W6** | Security & integrity hardening | Belief-drift detection, quarantine triage, write-conflict detection, active-only recall, poisoning resistance |
-| **W7** | Eidolons integration | `crystalium.ingest` (8th tool) + EIIS v1.4 finalization (host wiring, AGENTS.md frontmatter, standalone + multi-member verified) |
+| **W7** | Eidolons integration | `crystalium.ingest` (8th tool) + EIIS 3.0 finalization (host wiring, AGENTS.md frontmatter, standalone + multi-member verified) |
 | **W8** | Conformance freeze & roster publication | `conformance` suite + blocking CI, honest canary repair, availability SLO, roster entry published |
 
 ---
@@ -173,7 +173,7 @@ The six nulls are not a weakness — they are the arbiter working. Each faculty 
 ## Conformance & quality
 
 - **`pytest -m conformance` is the contract:** green is conformant. It covers G1–G8 plus the mechanical invariants — path-escape guard, rate limit, ECL 11-field + SHA-256 integrity, trust-tier MIN propagation, never-hard-delete (except audited RTBF), and the working-set ≤3500 cap. Run as a blocking CI job.
-- **`agent.md` ≤1,000 tokens** (CI-verified via tiktoken).
+- **`PERSONA.md` ≤1,000 tokens** (CI-verified via tiktoken).
 - **Composer working set ≤3,500 tokens** (G6 invariant, pinned to the literal 3500).
 - **`install.sh` idempotent** (CI "second-run-no-diff" job).
 - **Never hard-delete** except the one sanctioned, audited right-to-be-forgotten op.
@@ -197,7 +197,7 @@ Both numbers are **[PROXY]** — from a synthetic harness, not production traffi
   - `crystalium forget <id> --reason …` (W4) — the one sanctioned, audited hard-delete (RTBF, T0).
   - `crystalium quarantine list` / `review <id> --accept|--reject --reason …` (W6) — triage the quarantine queue (T0, audited; reject soft-deprecates).
   - `crystalium promote list` / `review <id> [--accept|--reject]` — Semantic promotion inbox.
-- **Install flags (EIIS v1.4):** `install.sh --version` / `--manifest-only` / `--hosts auto` / `--members`.
+- **Install flags (EIIS 3.0):** `install.sh --version` / `--manifest-only` / `--hosts auto` / `--members`.
 - **Config flags:** two default ON (`write_dedup_merge`, `recall_active_only`); the rest OFF. Each augment is toggleable via its `CRYSTALIUM_*` env var — see `MIGRATION.md` for the full per-wave key table.
 - **Host wiring:** `hosts/claude-code.md`, `hosts/cursor.md`, `hosts/copilot.md`, `hosts/opencode.md`.
 
@@ -254,7 +254,7 @@ See `DESIGN-RATIONALE.md` for full citations and the marker legend (`[verified]`
 
 This repo is a published Eidolons roster member (like ATLAS, SPECTRA, APIVR-Δ); it also runs standalone. It depends on:
 
-- **Rynaro/eidolons-eiis** — install contract (EIIS v1.4 conformance).
+- **Rynaro/eidolons-eiis** — install contract (EIIS 3.0 conformance).
 - **Rynaro/eidolons-ecl** — runtime communication contract (ECL v2.0 envelopes).
 - **Rynaro/atlas-aci** — reference for the `enforcement.py` chokepoint pattern.
 - **Rynaro/Junction** — harness used to orchestrate the build.
@@ -303,5 +303,19 @@ See `AGENTS.md` for the full developer onboarding.
 - **Post-1.0 roadmap:** `ROADMAP-POST-1.0.md` (the honest gap ledger the ablation discipline produced)
 - **Bench notes:** `evals/BENCH-NOTES.md` (per-gate A/B verdicts, canary headline, availability SLO)
 - **Developer standard:** `AGENTS.md` (build/test/lint, container-first, commit conventions)
-- **Agent profile:** `agent.md` (always-loaded entry point, ≤1000 tokens)
+- **Agent profile:** `PERSONA.md` (always-loaded entry point, ≤1000 tokens)
 - **Spec:** `.spectra/crystalium-v0.1.0-spec.md` (the decision-ready spec the build implemented wave-by-wave; frozen, historical pointer)
+
+<!-- eiis-v3-package:start -->
+## EIIS v3 package
+
+This repository has the same self-contained package shape as every roster Eidolon:
+
+- `PERSONA.md` — bounded identity, triggers, authority, refusals, and handoffs.
+- `SPEC.md` — the authoritative methodology.
+- `skills/<methodology>/SKILL.md` — unique skill discovery entrypoints.
+- `manifest.json` — immutable package metadata and resource inventory.
+- `install.sh` — package-only installer; the nexus owns vendor adapters.
+
+See [INSTALL.md](INSTALL.md) for nexus and standalone installation.
+<!-- eiis-v3-package:end -->

@@ -26,7 +26,7 @@ recalled from — the long-open "harmonize per-agent memory" thread. Per-agent q
 ## Invariants (never violate)
 Container-first (W1 hook). Chokepoint sacred. **Trust-tier MIN carries across every handoff** — an
 upstream artifact recalled downstream keeps its provenance and minimum tier; no laundering to T0/T1.
-ECL v2.0 + EIIS v1.4. `agent.md` ≤ 1000 tokens.
+ECL v2.0 + EIIS v1.4. `PERSONA.md` ≤ 1000 tokens.
 
 ## Objective
 1. **ECL v2.0 handoff ingestion**: an **adapter layer** that stores/recalls each roster artifact as
@@ -35,7 +35,7 @@ ECL v2.0 + EIIS v1.4. `agent.md` ≤ 1000 tokens.
 2. **Handoff round-trip**: a recalled upstream artifact (e.g. ATLAS `findings.v1`) is retrievable by
    a downstream Eidolon (SPECTRA) with provenance + **MIN trust tier** intact.
 3. **EIIS v1.4 finalization**: emit `install.manifest.v1`; AGENTS.md frontmatter with
-   `handoffs.upstream`/`downstream` split + full-semver `version`; trim `agent.md` to ≤ 1000 tokens
+   `handoffs.upstream`/`downstream` split + full-semver `version`; trim `PERSONA.md` to ≤ 1000 tokens
    if over; all install flags (`--target` default, `--hosts auto`, `--non-interactive`,
    `--manifest-only`, `--version`).
 4. **Partial-team + standalone**: `--members`/scope flags; verify a **2-member** deployment

@@ -1,593 +1,123 @@
 #!/usr/bin/env bash
-# install.sh — CRYSTALIUM EIIS v1.4-conformant installer
-#
-# EIIS references:
-#   §1.8.1    — SPEC.md at <target>/SPEC.md
-#   §1.8.6    — agent.md in files_written[] with role="agent-profile"
-#   §1.9.1    — canonical install-target inventory whitelist
-#   §3.7.1.1  — ECL_VERSION copied to <target>/ECL_VERSION with role="ecl-version"
-#   §6.X      — cleanup sweep: remove non-whitelisted files after staging
-#   §6.Y      — agent.md skill references must resolve to files_written[] entries
-#
-# Usage:
-#   bash install.sh [options]
-#
-# Options:
-#   --scope  <name>          Scope name (unused for standalone Eidolon; reserved)
-#   --members <list>         Members list (no-op for crystalium; reserved)
-#   --profile=local|server   Deployment profile; only 'local' is supported in v0.1
-#   --target <path>          Install target directory (default: ./.eidolons/crystalium/)
-#   --force                  Re-stage files even when already present
-#   --non-interactive        Suppress prompts; proceed with defaults
-#
-# Idempotency (P0-16, EIIS §5):
-#   Re-running with no source changes produces no file changes (no diff).
-#   Verified by CI job "idempotency" which diffs the target before and after
-#   a second run.
-#
-# Bash 3.2 compatible (macOS system shell policy — see CLAUDE.md).
-# No associative arrays, no ${var,,}, no readarray, no &>>.
-#
-# Source-of-truth references:
-#   EIIS v1.4 Appendix A — canonical_inventory_sweep reference implementation
-#   .spectra/crystalium-v0.1.0-spec.yaml eiis_v1_4_conformance block
-
+# Declarative EIIS v3 package installer. Host adapters are nexus-owned.
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-EIIS_VERSION_VALUE="1.4"
-ECL_VERSION_VALUE="2.0"
-
-# Resolve REPO_ROOT — directory containing this script. Defined here (ahead of
-# argument parsing, moved up from its previous single use-site further below)
-# because CRYSTALIUM_VERSION below needs it, and the --version flag (handled
-# inside the argument-parsing loop right after this) needs CRYSTALIUM_VERSION
-# already set under `set -u`.
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Single-source CRYSTALIUM_VERSION from pyproject.toml instead of a
-# hand-maintained literal: this was stale at "1.0.0" since the earliest v1.0
-# releases while the package itself moved on to 1.6.0 — the same class of
-# staleness crystalium/__init__.py's __version__ fix (v1.6, single-sourced via
-# importlib.metadata) closed for the Python package.
-#
-# Two candidate locations, in order:
-#   1. <repo>/mcp-server/pyproject.toml   — git checkout layout
-#   2. <repo>/pyproject.toml              — container image layout (the
-#      Dockerfile COPYs mcp-server/pyproject.toml to /app/pyproject.toml,
-#      and the container test suite runs install.sh from /app)
-# The `|| true` inside the substitution is load-bearing under
-# `set -euo pipefail`: a missing file makes grep exit 2, pipefail propagates
-# it, and a bare failing command substitution in an assignment would abort
-# the whole script (observed as exit 2 across the container CI suite) before
-# the fallback below could ever run.
-_pyproject="${SCRIPT_DIR}/mcp-server/pyproject.toml"
-if [ ! -f "${_pyproject}" ]; then
-    _pyproject="${SCRIPT_DIR}/pyproject.toml"
-fi
-CRYSTALIUM_VERSION=""
-if [ -f "${_pyproject}" ]; then
-    CRYSTALIUM_VERSION="$(grep -m1 '^version' "${_pyproject}" 2>/dev/null | cut -d'"' -f2 || true)"
-fi
-[ -z "${CRYSTALIUM_VERSION}" ] && CRYSTALIUM_VERSION="1.8.0"
-unset _pyproject
-
-# ---------------------------------------------------------------------------
-# Defaults
-# ---------------------------------------------------------------------------
-
-SCOPE=""
-MEMBERS=""
-PROFILE="local"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGE_MANIFEST="$SCRIPT_DIR/manifest.json"
 TARGET=""
-FORCE=0
-NON_INTERACTIVE=0
-MANIFEST_ONLY=0
-HOSTS=""
-HOSTS_DIR=""
+HOSTS="raw"
+FORCE=false
+DRY_RUN=false
+NON_INTERACTIVE=false
+MANIFEST_ONLY=false
 
-# ---------------------------------------------------------------------------
-# Argument parsing
-# ---------------------------------------------------------------------------
+usage() {
+  cat <<'EOF'
+Usage: bash install.sh [OPTIONS]
+  --target DIR
+  --hosts LIST              Accepted for orchestration compatibility; adapters are nexus-owned.
+  --force
+  --non-interactive
+  --dry-run
+  --manifest-only
+  --shared-dispatch         Accepted no-op; root routing is nexus-owned.
+  --no-shared-dispatch      Accepted no-op; root routing is nexus-owned.
+  --version
+  -h, --help
+EOF
+}
+
+pkg_name() { jq -r '.name' "$PACKAGE_MANIFEST"; }
+pkg_version() { jq -r '.version' "$PACKAGE_MANIFEST"; }
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
+tree_sha256() {
+  local root="$1" listing
+  listing="$(mktemp)"
+  find "$root" -type f ! -name install.receipt.json -print | LC_ALL=C sort | while IFS= read -r file; do
+    printf '%s  %s\n' "$(sha256_file "$file")" "${file#"$root/"}"
+  done > "$listing"
+  sha256_file "$listing"
+  rm -f "$listing"
+}
 
 while [ $# -gt 0 ]; do
-    case "$1" in
-        --scope)
-            SCOPE="${2:-}"
-            shift 2
-            ;;
-        --members)
-            MEMBERS="${2:-}"
-            shift 2
-            ;;
-        --profile=*)
-            PROFILE="${1#--profile=}"
-            shift
-            ;;
-        --profile)
-            PROFILE="${2:-local}"
-            shift 2
-            ;;
-        --target)
-            TARGET="${2:-}"
-            [ "${TARGET}" = "default" ] && TARGET=""   # keyword form -> default resolution
-            shift 2
-            ;;
-        --hosts)
-            HOSTS="${2:-}"
-            shift 2
-            ;;
-        --hosts-dir)
-            HOSTS_DIR="${2:-}"
-            shift 2
-            ;;
-        --manifest-only)
-            MANIFEST_ONLY=1
-            shift
-            ;;
-        --version)
-            echo "${CRYSTALIUM_VERSION}"
-            exit 0
-            ;;
-        --force)
-            FORCE=1
-            shift
-            ;;
-        --non-interactive)
-            NON_INTERACTIVE=1
-            shift
-            ;;
-        *)
-            echo "[install.sh] WARNING: unrecognised argument: $1" >&2
-            shift
-            ;;
-    esac
+  case "$1" in
+    --target) TARGET="$2"; shift 2 ;;
+    --hosts) HOSTS="$2"; shift 2 ;;
+    --force) FORCE=true; shift ;;
+    --non-interactive) NON_INTERACTIVE=true; shift ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    --manifest-only) MANIFEST_ONLY=true; shift ;;
+    --shared-dispatch|--no-shared-dispatch) shift ;;
+    --version) pkg_version; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
+  esac
 done
 
-# Profile guard — only 'local' is implemented in v0.1 (FORGE D2, out_of_scope_hooks)
-if [ "${PROFILE}" = "server" ]; then
-    echo "[install.sh] ERROR: --profile=server is not supported in v0.1." >&2
-    echo "  Postgres/Qdrant/Neo4j backend is deferred to v0.2." >&2
-    echo "  Use --profile=local (the default) for the embedded store." >&2
-    exit 1
-fi
-if [ "${PROFILE}" != "local" ]; then
-    echo "[install.sh] ERROR: Unknown profile '${PROFILE}'. Valid: local, server." >&2
-    exit 1
-fi
-
-# Resolve TARGET
-if [ -z "${TARGET}" ]; then
-    TARGET="./.eidolons/crystalium"
+jq empty "$PACKAGE_MANIFEST" >/dev/null
+NAME="$(pkg_name)"
+VERSION="$(pkg_version)"
+[ -n "$TARGET" ] || TARGET="./.eidolons/$NAME"
+MANIFEST_SHA="$(sha256_file "$PACKAGE_MANIFEST")"
+PREVIOUS_INSTALLED_AT=""
+if [ -f "$TARGET/install.receipt.json" ]; then
+  PREVIOUS_INSTALLED_AT="$(jq -r --arg name "$NAME" --arg version "$VERSION" --arg digest "$MANIFEST_SHA" '
+    if .package.name == $name and .package.version == $version and
+       .package.manifest_sha256 == $digest then .installed_at else empty end
+  ' "$TARGET/install.receipt.json" 2>/dev/null || true)"
 fi
 
-# SCRIPT_DIR (REPO_ROOT) is resolved earlier now, in the Constants block above —
-# CRYSTALIUM_VERSION needed it ahead of argument parsing (see --version).
+if [ "$DRY_RUN" = true ]; then
+  printf 'install %s@%s -> %s (package only; hosts=%s)\n' "$NAME" "$VERSION" "$TARGET" "$HOSTS"
+  exit 0
+fi
 
-# ---------------------------------------------------------------------------
-# Helper: say / ok / warn / die
-# ---------------------------------------------------------------------------
+if [ -e "$TARGET" ] && [ "$FORCE" != true ]; then
+  if [ "$NON_INTERACTIVE" = true ]; then
+    printf 'Already installed at %s; pass --force.\n' "$TARGET" >&2
+    exit 3
+  fi
+  printf 'Already installed at %s; pass --force.\n' "$TARGET" >&2
+  exit 3
+fi
 
-say()  { echo "[crystalium install] $*" >&2; }
-ok()   { echo "[crystalium install] OK: $*" >&2; }
-warn() { echo "[crystalium install] WARN: $*" >&2; }
-die()  { echo "[crystalium install] ERROR: $*" >&2; exit 1; }
-
-# ---------------------------------------------------------------------------
-# Helper: SHA-256 of a file (bash 3.2 compatible; prefers shasum, falls back
-# to sha256sum)
-# ---------------------------------------------------------------------------
-
-sha256_file() {
-    local path="$1"
-    if command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "${path}" | awk '{print $1}'
-    elif command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "${path}" | awk '{print $1}'
-    else
-        # [UNVERIFIED fallback] python3 always available in the container
-        python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "${path}"
+mkdir -p "$TARGET"
+if [ "$MANIFEST_ONLY" != true ]; then
+  cp "$SCRIPT_DIR/PERSONA.md" "$TARGET/PERSONA.md"
+  cp "$SCRIPT_DIR/SPEC.md" "$TARGET/SPEC.md"
+  cp "$SCRIPT_DIR/EIIS_VERSION" "$TARGET/EIIS_VERSION"
+  cp "$PACKAGE_MANIFEST" "$TARGET/manifest.json"
+  for dir in skills hooks shared; do
+    if [ -d "$SCRIPT_DIR/$dir" ]; then
+      rm -rf "$TARGET/$dir"
+      cp -R "$SCRIPT_DIR/$dir" "$TARGET/$dir"
     fi
+  done
+  while IFS= read -r resource; do
+    [ -n "$resource" ] || continue
+    case "/$resource/" in */../*|*/./*) printf 'Unsafe package resource: %s\n' "$resource" >&2; exit 2 ;; esac
+    [ -e "$SCRIPT_DIR/$resource" ] || { printf 'Missing package resource: %s\n' "$resource" >&2; exit 2; }
+    mkdir -p "$(dirname "$TARGET/$resource")"
+    rm -rf "$TARGET/$resource"
+    cp -R "$SCRIPT_DIR/$resource" "$TARGET/$resource"
+  done < <(jq -r '.resources[]' "$PACKAGE_MANIFEST")
+fi
+
+TREE_SHA="$(tree_sha256 "$TARGET")"
+INSTALLED_AT="${PREVIOUS_INSTALLED_AT:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
+cat > "$TARGET/install.receipt.json" <<EOF
+{
+  "schema_version": "1.0",
+  "eiis_version": "3.0.0",
+  "package": {"name":"$NAME","version":"$VERSION","manifest_sha256":"$MANIFEST_SHA"},
+  "installed_at": "$INSTALLED_AT",
+  "target": "$TARGET",
+  "tree_sha256": "$TREE_SHA",
+  "adapters": []
 }
-
-# ---------------------------------------------------------------------------
-# FILES_WRITTEN_PATHS — indexed array (bash 3.2 compatible)
-# Also FILES_WRITTEN_JSON — parallel array of JSON entries for manifest
-# ---------------------------------------------------------------------------
-
-FILES_WRITTEN_PATHS=()
-FILES_WRITTEN_JSON=()
-
-add_fw() {
-    # add_fw <abs_path_on_disk> <target_relative_path> <role>
-    local abs_path="$1"
-    local rel_path="$2"
-    local role="$3"
-    local file_sha256=""
-    if [ -f "${abs_path}" ]; then
-        file_sha256="$(sha256_file "${abs_path}")"
-    fi
-    FILES_WRITTEN_PATHS+=("${rel_path}")
-    local entry
-    if [ -n "${file_sha256}" ]; then
-        entry="{\"path\":\"${rel_path}\",\"role\":\"${role}\",\"sha256\":\"${file_sha256}\"}"
-    else
-        # OMIT sha256 when the file isn't on disk (e.g. --manifest-only over an
-        # unstaged target) — sha256 is optional in install.manifest.v1.json and the
-        # schema's 64-hex pattern rejects an empty string (battle-test MED fix).
-        entry="{\"path\":\"${rel_path}\",\"role\":\"${role}\"}"
-    fi
-    FILES_WRITTEN_JSON+=("${entry}")
-}
-
-# ---------------------------------------------------------------------------
-# Helper: copy file if source newer than destination (or --force)
-# ---------------------------------------------------------------------------
-
-copy_if_changed() {
-    # copy_if_changed <src> <dst> <role>
-    local src="$1"
-    local dst="$2"
-    local role="$3"
-
-    [ -f "${src}" ] || die "Source file missing: ${src}"
-
-    local dst_dir
-    dst_dir="$(dirname "${dst}")"
-    mkdir -p "${dst_dir}"
-
-    local should_copy=0
-    if [ "${FORCE}" -eq 1 ]; then
-        should_copy=1
-    elif [ ! -f "${dst}" ]; then
-        should_copy=1
-    else
-        # Compare SHA-256 to determine if content differs
-        local src_sha dst_sha
-        src_sha="$(sha256_file "${src}")"
-        dst_sha="$(sha256_file "${dst}")"
-        if [ "${src_sha}" != "${dst_sha}" ]; then
-            should_copy=1
-        fi
-    fi
-
-    # --manifest-only: register the file in the inventory but never copy (re-emit
-    # the manifest for an existing target without touching staged files).
-    if [ "${MANIFEST_ONLY}" -eq 1 ]; then
-        should_copy=0
-    fi
-
-    if [ "${should_copy}" -eq 1 ]; then
-        cp "${src}" "${dst}"
-        say "wrote ${dst}"
-    fi
-
-    # Compute target-relative path for manifest
-    # Strip TARGET prefix + leading slash to get relative path
-    local target_abs
-    target_abs="$(cd "${TARGET}" && pwd)"
-    local dst_abs
-    dst_abs="$(cd "$(dirname "${dst}")" && pwd)/$(basename "${dst}")"
-    local rel_path="${dst_abs#${target_abs}/}"
-
-    add_fw "${dst}" "${rel_path}" "${role}"
-}
-
-# ---------------------------------------------------------------------------
-# Ensure target directory exists
-# ---------------------------------------------------------------------------
-
-# Interactive safety prompt: when reconciling a non-empty existing target, confirm
-# before proceeding — UNLESS --non-interactive / --force, or stdin is not a TTY
-# (CI, pipes, tests). This is the one place --non-interactive is honored.
-if [ "${MANIFEST_ONLY}" -eq 0 ] && [ "${NON_INTERACTIVE}" -eq 0 ] && [ "${FORCE}" -eq 0 ] \
-   && [ -t 0 ] && [ -d "${TARGET}" ] && [ -n "$(ls -A "${TARGET}" 2>/dev/null)" ]; then
-    printf '[crystalium install] Target %s exists; reconcile (sweep removes non-canonical files)? [y/N] ' "${TARGET}" >&2
-    read -r _ANS
-    case "${_ANS}" in
-        y|Y|yes|YES) ;;
-        *) die "aborted by operator (use --non-interactive or --force to skip this prompt)";;
-    esac
-fi
-
-mkdir -p "${TARGET}"
-TARGET_ABS="$(cd "${TARGET}" && pwd)"
-
-say "Installing CRYSTALIUM v${CRYSTALIUM_VERSION} → ${TARGET_ABS}"
-[ "${MANIFEST_ONLY}" -eq 1 ] && say "manifest-only mode: re-emitting install.manifest.json (no file copy/sweep)"
-say "EIIS_VERSION=${EIIS_VERSION_VALUE}  ECL_VERSION=${ECL_VERSION_VALUE}  profile=${PROFILE}"
-
-# ---------------------------------------------------------------------------
-# Write EIIS_VERSION and ECL_VERSION at source repo root (idempotent)
-# ---------------------------------------------------------------------------
-
-# These files live at the SOURCE REPO ROOT, not in the install target.
-# Write them here so the repo satisfies §1.1 even if they were absent.
-
-EIIS_VERSION_SRC="${SCRIPT_DIR}/EIIS_VERSION"
-ECL_VERSION_SRC="${SCRIPT_DIR}/ECL_VERSION"
-
-if [ ! -f "${EIIS_VERSION_SRC}" ] || [ "$(cat "${EIIS_VERSION_SRC}" | tr -d '\n')" != "${EIIS_VERSION_VALUE}" ]; then
-    printf '%s\n' "${EIIS_VERSION_VALUE}" > "${EIIS_VERSION_SRC}"
-    say "wrote source EIIS_VERSION"
-fi
-if [ ! -f "${ECL_VERSION_SRC}" ] || [ "$(cat "${ECL_VERSION_SRC}" | tr -d '\n')" != "${ECL_VERSION_VALUE}" ]; then
-    printf '%s\n' "${ECL_VERSION_VALUE}" > "${ECL_VERSION_SRC}"
-    say "wrote source ECL_VERSION"
-fi
-
-# ---------------------------------------------------------------------------
-# §1.8.1 + §1.8.6 — Stage agent.md and SPEC.md
-# ---------------------------------------------------------------------------
-
-# agent.md → <target>/agent.md (role="agent-profile", §1.8.6)
-AGENT_MD_SRC="${SCRIPT_DIR}/agent.md"
-AGENT_MD_DST="${TARGET}/agent.md"
-[ -f "${AGENT_MD_SRC}" ] || die "agent.md not found at ${AGENT_MD_SRC}"
-copy_if_changed "${AGENT_MD_SRC}" "${AGENT_MD_DST}" "agent-profile"
-
-# SPEC.md → <target>/SPEC.md (role="spec", §1.8.1)
-# Crystalium's canonical spec is at .spectra/crystalium-v0.1.0-spec.md
-# but is also mirrored to SPEC.md at repo root (as per file_layout in spec.yaml).
-SPEC_MD_SRC="${SCRIPT_DIR}/SPEC.md"
-SPEC_MD_DST="${TARGET}/SPEC.md"
-[ -f "${SPEC_MD_SRC}" ] || die "SPEC.md not found at ${SPEC_MD_SRC}"
-copy_if_changed "${SPEC_MD_SRC}" "${SPEC_MD_DST}" "spec"
-
-# ---------------------------------------------------------------------------
-# §3.7.1 — Stage ECL_VERSION into install target
-# ---------------------------------------------------------------------------
-
-ECL_VERSION_DST="${TARGET}/ECL_VERSION"
-copy_if_changed "${ECL_VERSION_SRC}" "${ECL_VERSION_DST}" "ecl-version"
-
-# ---------------------------------------------------------------------------
-# Skills (if present at source repo skills/) — §1.9.1 "MAY"
-# ---------------------------------------------------------------------------
-
-SKILLS_SRC_DIR="${SCRIPT_DIR}/skills"
-if [ -d "${SKILLS_SRC_DIR}" ]; then
-    for skill_src in "${SKILLS_SRC_DIR}"/*.md; do
-        [ -f "${skill_src}" ] || continue
-        skill_name="$(basename "${skill_src}")"
-        skill_dst="${TARGET}/skills/${skill_name}"
-        copy_if_changed "${skill_src}" "${skill_dst}" "skill"
-    done
-fi
-
-# ---------------------------------------------------------------------------
-# Schemas (auxiliary JSON schemas) — §1.9.1 "SHOULD"/"MAY"
-# ---------------------------------------------------------------------------
-
-SCHEMAS_SRC_DIR="${SCRIPT_DIR}/schemas"
-if [ -d "${SCHEMAS_SRC_DIR}" ]; then
-    for schema_src in "${SCHEMAS_SRC_DIR}"/*.json; do
-        [ -f "${schema_src}" ] || continue
-        schema_name="$(basename "${schema_src}")"
-        # Staged JSON schemas carry role="schema" (the install.manifest.v1.json
-        # files_written role enum; W7 fix — was the out-of-enum "other").
-        schema_role="schema"
-        schema_dst="${TARGET}/schemas/${schema_name}"
-        copy_if_changed "${schema_src}" "${schema_dst}" "${schema_role}"
-    done
-fi
-
-# ---------------------------------------------------------------------------
-# §6.X — canonical_inventory_sweep
-# Remove every file under <target>/ that is NOT in FILES_WRITTEN_PATHS.
-# Appendix A reference implementation (bash 3.2 compatible).
-# ---------------------------------------------------------------------------
-
-canonical_inventory_sweep() {
-    local target="$1"
-    local file_rel
-    local found
-    local known
-
-    if [ -z "${target}" ] || [ ! -d "${target}" ]; then
-        return 0
-    fi
-
-    find "${target}" -type f -print0 | while IFS= read -r -d '' file; do
-        # Skip the manifest itself — it is written AFTER the sweep
-        case "${file}" in
-            */install.manifest.json) continue ;;
-        esac
-
-        file_rel="${file#${target}/}"
-
-        found=0
-        for known in "${FILES_WRITTEN_PATHS[@]}"; do
-            case "${known}" in
-                *"/${file_rel}"|"${file_rel}")
-                    found=1
-                    break
-                    ;;
-            esac
-        done
-
-        if [ "${found}" -eq 0 ]; then
-            rm -f "${file}"
-            warn "sweep: removed non-whitelisted file: ${file}"
-        fi
-    done
-
-    # Remove empty directories left after sweep
-    find "${target}" -mindepth 1 -type d -empty -delete 2>/dev/null || true
-
-    return 0
-}
-
-# --manifest-only never sweeps (it must not delete staged files).
-if [ "${MANIFEST_ONLY}" -eq 0 ]; then
-    canonical_inventory_sweep "${TARGET_ABS}"
-fi
-
-# ---------------------------------------------------------------------------
-# §3 — Generate install.manifest.json
-# MUST be written LAST (after sweep, so the sweep doesn't remove it).
-# Role: "manifest" per §3.3.
-# ---------------------------------------------------------------------------
-
-MANIFEST_PATH="${TARGET}/install.manifest.json"
-
-# Build files_written JSON array from parallel arrays
-FW_ARRAY=""
-FW_IDX=0
-for entry in "${FILES_WRITTEN_JSON[@]}"; do
-    if [ "${FW_IDX}" -gt 0 ]; then
-        FW_ARRAY="${FW_ARRAY},"
-    fi
-    FW_ARRAY="${FW_ARRAY}${entry}"
-    FW_IDX=$((FW_IDX + 1))
-done
-
-# Add manifest itself to files_written[] (role="manifest"). The manifest cannot
-# hash itself (written last), so the optional sha256 field is OMITTED rather than
-# emitted empty — an empty string would fail the schema's 64-hex pattern (W7 fix).
-if [ -n "${FW_ARRAY}" ]; then
-    FW_ARRAY="${FW_ARRAY},"
-fi
-FW_ARRAY="${FW_ARRAY}{\"path\":\"install.manifest.json\",\"role\":\"manifest\"}"
-
-# Write install timestamp to <data_dir>/install.ts (G5 human-confirm window)
-DATA_DIR="${HOME}/.crystalium"
-mkdir -p "${DATA_DIR}"
-INSTALL_TS_PATH="${DATA_DIR}/install.ts"
-INSTALL_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-if [ ! -f "${INSTALL_TS_PATH}" ] || [ "${FORCE}" -eq 1 ]; then
-    printf '%s\n' "${INSTALL_TS}" > "${INSTALL_TS_PATH}"
-    say "wrote install.ts → ${INSTALL_TS_PATH}"
-fi
-
-# Active roster from --members (W7 partial-team/standalone). Empty -> standalone.
-ROSTER_JSON="[]"
-if [ -n "${MEMBERS}" ]; then
-    ROSTER_JSON="["
-    _RFIRST=1
-    _OLD_IFS="${IFS}"; IFS=','
-    for _m in ${MEMBERS}; do
-        _m="$(echo "${_m}" | sed 's/^ *//;s/ *$//')"
-        [ -z "${_m}" ] && continue
-        [ "${_RFIRST}" -eq 0 ] && ROSTER_JSON="${ROSTER_JSON},"
-        ROSTER_JSON="${ROSTER_JSON}\"${_m}\""
-        _RFIRST=0
-    done
-    IFS="${_OLD_IFS}"
-    ROSTER_JSON="${ROSTER_JSON}]"
-fi
-if [ -n "${SCOPE}" ]; then
-    SCOPE_JSON="\"${SCOPE}\""
-else
-    SCOPE_JSON="null"
-fi
-
-# ---------------------------------------------------------------------------
-# Host MCP wiring (W7) — idempotent upsert of a `crystalium` server entry into a
-# host's MCP config. JSON merge runs via python3 (already a dependency of this
-# script's sha fallback) so a second run is byte-identical (sorted keys). Host
-# configs live OUTSIDE the install target — not swept, not in files_written.
-# ---------------------------------------------------------------------------
-
-wire_host() {
-    # wire_host <host> <base_dir_or_empty>
-    local host="$1"
-    local base="$2"
-    local cfg key
-    case "${host}" in
-        claude-code) cfg="${base:-.}/.mcp.json"; key="mcpServers" ;;
-        cursor)      cfg="${base:-${HOME}}/.cursor/mcp.json"; key="mcpServers" ;;
-        copilot)     cfg="${base:-.}/.vscode/mcp.json"; key="servers" ;;
-        opencode)    cfg="${base:-${HOME}}/.config/opencode/config.json"; key="mcp" ;;
-        *) warn "unknown host '${host}' — skipping"; return 0 ;;
-    esac
-    # The JSON merge needs python3. Guard it: on a python3-less host, skip the
-    # automatic merge with a clear pointer rather than failing silently (battle-test
-    # G1). The rest of the install does not require python3.
-    if ! command -v python3 >/dev/null 2>&1; then
-        warn "host wiring for '${host}' skipped: python3 not found (needed to merge ${cfg}). See hosts/${host}.md to wire manually."
-        return 0
-    fi
-    mkdir -p "$(dirname "${cfg}")"
-    CRYS_REPO="${SCRIPT_DIR}" python3 - "${cfg}" "${key}" <<'PY'
-import json, os, sys
-cfg, key = sys.argv[1], sys.argv[2]
-repo = os.environ["CRYS_REPO"]
-try:
-    with open(cfg) as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        data = {}
-except (FileNotFoundError, ValueError):
-    data = {}
-entry = {
-    "command": "docker",
-    "args": ["compose", "-f", os.path.join(repo, "docker-compose.yml"),
-             "run", "--rm", "-i", "crystalium", "python", "-m", "crystalium", "serve"],
-    "type": "stdio",
-}
-servers = data.get(key)
-if not isinstance(servers, dict):
-    servers = {}
-servers["crystalium"] = entry          # upsert (idempotent)
-data[key] = servers
-with open(cfg, "w") as f:
-    json.dump(data, f, indent=2, sort_keys=True)
-    f.write("\n")
-PY
-    say "wired host ${host} -> ${cfg}"
-}
-
-# Build the manifest JSON
-MANIFEST_JSON="{
-  \"eiis_version\": \"${EIIS_VERSION_VALUE}\",
-  \"eidolon\": \"crystalium\",
-  \"version\": \"${CRYSTALIUM_VERSION}\",
-  \"install_ts\": \"${INSTALL_TS}\",
-  \"profile\": \"${PROFILE}\",
-  \"canonical_inventory_strict\": true,
-  \"ecl_version\": \"${ECL_VERSION_VALUE}\",
-  \"roster\": ${ROSTER_JSON},
-  \"scope\": ${SCOPE_JSON},
-  \"files_written\": [${FW_ARRAY}]
-}"
-
-# Write manifest (only if changed, for idempotency)
-MANIFEST_CHANGED=0
-if [ "${FORCE}" -eq 1 ] || [ ! -f "${MANIFEST_PATH}" ]; then
-    MANIFEST_CHANGED=1
-else
-    # Compare content (strip the install_ts line which always differs)
-    EXISTING_MINUS_TS="$(grep -v '"install_ts"' "${MANIFEST_PATH}" 2>/dev/null || true)"
-    NEW_MINUS_TS="$(echo "${MANIFEST_JSON}" | grep -v '"install_ts"')"
-    if [ "${EXISTING_MINUS_TS}" != "${NEW_MINUS_TS}" ]; then
-        MANIFEST_CHANGED=1
-    fi
-fi
-
-if [ "${MANIFEST_CHANGED}" -eq 1 ]; then
-    printf '%s\n' "${MANIFEST_JSON}" > "${MANIFEST_PATH}"
-    say "wrote install.manifest.json"
-fi
-
-# Host wiring (opt-in via --hosts). "auto" wires all four supported hosts.
-if [ -n "${HOSTS}" ] && [ "${MANIFEST_ONLY}" -eq 0 ]; then
-    HOSTS_LIST="${HOSTS}"
-    [ "${HOSTS}" = "auto" ] && HOSTS_LIST="claude-code,cursor,copilot,opencode"
-    _OLD_IFS="${IFS}"; IFS=','
-    for _h in ${HOSTS_LIST}; do
-        _h="$(echo "${_h}" | sed 's/^ *//;s/ *$//')"
-        [ -z "${_h}" ] && continue
-        wire_host "${_h}" "${HOSTS_DIR}"
-    done
-    IFS="${_OLD_IFS}"
-fi
-
-ok "Installation complete."
-ok "  Target: ${TARGET_ABS}"
-ok "  Files written: ${#FILES_WRITTEN_PATHS[@]} source files + manifest"
-ok "  EIIS v${EIIS_VERSION_VALUE} canonical inventory strict: yes"
-ok "  ECL_VERSION: ${ECL_VERSION_VALUE}"
+EOF
+printf '%s@%s installed -> %s\n' "$NAME" "$VERSION" "$TARGET"
