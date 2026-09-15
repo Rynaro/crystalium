@@ -132,6 +132,66 @@ def test_recall_negative_k_clamped(tmp_path: Path) -> None:
     assert res2 is not None
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"query": "findable fact"},
+        {"scope": {}, "query": "findable fact"},
+        {"scope": {"project": "   "}, "query": "findable fact"},
+        {"scope": {"project": "p"}, "query": "   "},
+    ],
+)
+def test_recall_rejects_missing_or_malformed_scope_before_defaulting(
+    tmp_path: Path, args: dict,
+) -> None:
+    """Direct callers get structured input errors and no inferred project scope."""
+    from crystalium.server import _handle_recall
+
+    with pytest.raises(CrystaliumEnforcementError) as exc:
+        _handle_recall(args, MagicMock(), MagicMock(), Tier.T1, Config(data_dir=tmp_path / "scope"))
+    assert exc.value.reason_code == "INVALID_RECALL_INPUT"
+    assert "scope" in exc.value.advice
+
+
+def test_recall_explicit_canonical_scope_reads_normalized_project_only(tmp_path: Path) -> None:
+    """The advertised canonical key retrieves normalized writes but excludes another project."""
+    from crystalium.server import _build_components, _handle_commit, _handle_recall
+
+    cfg = Config(data_dir=tmp_path / "canonical-project", rate_limit_per_minute=10**9)
+    (_e, aetheryte, episodic, _se, _pr, _ex, _g, scheduler, relational) = _build_components(cfg)
+    _handle_commit(
+        {
+            "layer": "episodic",
+            "payload": {
+                "summary": "canonical recall isolation witness",
+                "scope": {"project": "caller-supplied-label"},
+            },
+            "provenance": {"source": "verified_agent", "created_at": _NOW.isoformat()},
+        },
+        episodic,
+        _se,
+        _pr,
+        _ex,
+        Tier.T1,
+        cfg,
+    )
+    relational.insert_crystal(
+        _crystal("foreign-recall", "foreign recall isolation witness", project="other-project")
+    )
+
+    out = _handle_recall(
+        {"scope": {"project": "canonical-project"}, "query": "recall isolation witness"},
+        aetheryte,
+        scheduler,
+        Tier.T1,
+        cfg,
+    )
+
+    summaries = [record["summary"] for record in out["records"]]
+    assert "canonical recall isolation witness" in summaries
+    assert "foreign recall isolation witness" not in summaries
+
+
 # --- Fix #6/#7: Dream — orient 24h window + distinct-run_id enqueue coalescing ---
 
 def test_orient_window_is_true_24h(tmp_path: Path) -> None:

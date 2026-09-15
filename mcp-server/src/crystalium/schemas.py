@@ -196,8 +196,8 @@ class RecallRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scope: Scope
-    query: str = Field(min_length=1, max_length=8192)
-    k: int = Field(ge=1, le=100)
+    query: str = Field(min_length=1, max_length=8192, pattern=r"\S")
+    k: int = Field(default=10, ge=1, le=100)
     layers: Optional[list[LayerLiteral]] = None  # None = all four layers
 
 

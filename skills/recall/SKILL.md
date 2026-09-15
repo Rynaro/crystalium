@@ -7,6 +7,17 @@ Load this skill when planning or debugging a recall call.
 - Diagnosing why recall returned fewer results than expected.
 - Tuning `k` for a given query scope.
 - Understanding slot eviction order.
+- Preparing memory pre-flight before substantive work.
+
+## Calling contract
+
+`scope.project` and `query` are required. `k` defaults to 10; numeric values are clamped to 1–100. Recall never guesses a cross-project scope. Use the canonical key in the server initialization instructions for current records; it is the basename of `CRYSTALIUM_DATA_DIR`.
+
+```json
+{"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":5,"layers":["semantic","episodic","procedural"]}
+```
+
+Correct invalid input once. If recall is unavailable or the corrected call fails, report memory pre-flight unavailable; do not claim it succeeded. The server can enforce calls it receives, not calls an unwired host never makes.
 
 ## Working-set slot caps (P0-9, FORGE D9)
 

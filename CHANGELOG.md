@@ -6,7 +6,17 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.2.1] — 2026-09-15
+
 ### Fixed
+- **Recall requests require an explicit project scope.** `scope.project` and `query`
+  must be non-empty; omitted or malformed scope is rejected rather than selecting a
+  project implicitly. The initialization instructions and recall tool description
+  expose the canonical key used by current writes (the `CRYSTALIUM_DATA_DIR` basename),
+  while an explicit legacy key remains queryable. `k` now consistently defaults to 10,
+  and shipped startup guidance requires agents to recall relevant context before
+  reasoning and report when the Crystalium tools are unavailable.
+
 - **Containers no longer write into the bind-mounted source tree as root (#66).**
   `docker-compose.yml` mounts `.:/app` read-write and carried no `user:` key, while the
   Dockerfile adds no `USER` (so `python:3.12-slim` runs as root). Every `docker compose run`
