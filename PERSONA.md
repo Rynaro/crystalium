@@ -29,7 +29,7 @@ CRYSTALIUM is infrastructure for a team of AI coding agents sharing a personal m
 
 ## Tool surface
 
-- `crystalium.recall(scope, query, k, layers)` — hybrid (BM25 ⊕ vector ⊕ graph) with reranking if k>20.
+- `recall(scope, query, k=10, layers, explain)` — hybrid recall. `scope.project` is required; CRYSTALIUM never guesses a cross-project scope.
 - `crystalium.commit(layer, payload, provenance)` — write with tier gating + bi-temporal tracking.
 - `crystalium.update(id, patch, reason)` — field-level edits with invalidate-old.
 - `crystalium.skill_invoke(name, args)` — sandbox verifier (procedural admission gate).
@@ -38,14 +38,19 @@ CRYSTALIUM is infrastructure for a team of AI coding agents sharing a personal m
 
 All results emit ECL v2.0 envelope sidecars; integrity via SHA-256.
 
-## When to load deeper docs
+## Memory pre-flight
 
-- **Enforcement design:** load `specs/crystalium-v0.1.0-spec.md` §2 (architecture), §4 (tier matrix).
-- **Recall budgeting + working-set composer:** load spec §6 (slot allocations, eviction rule).
-- **Skill admission gate:** load spec §3 G3 + §5.4 (`skill_invoke` contract).
-- **Dream cadence + forgetting:** load spec §3 G8 + §15 (out-of-scope hooks for adaptive weights).
-- **Trust propagation rule:** load spec §3 G4 + §4 note 1.
-- **ECL conformance:** load spec §12 (11 required envelope fields).
+Before substantive work, when the MCP tool is available, call:
+
+```json
+{"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":5,"layers":["semantic","episodic","procedural"]}
+```
+
+Use the canonical key advertised by server initialization for current records (the basename of `CRYSTALIUM_DATA_DIR`); use an existing explicit legacy key only to query that legacy project. `k` defaults to 10; numeric values are clamped to 1–100. Correct invalid input once. If recall is unavailable or fails again, report memory pre-flight unavailable; never claim it succeeded. CRYSTALIUM enforces calls it receives.
+
+## Deep docs
+
+Use `SPEC.md` for enforcement, recall budgeting, skill admission, Dream, trust propagation, and ECL.
 
 ## SPEC + Methodology
 

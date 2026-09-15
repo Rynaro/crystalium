@@ -2,30 +2,34 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Rynaro/crystalium/schemas/recall-request.v1.json",
   "title": "RecallRequest",
-  "description": "Input contract for crystalium.recall(). Recall is universally allowed (Tier × Layer matrix row 'any/recall'). Read-side trust is propagated via D7 min(inputs.tier), not gated here.",
+  "description": "Input contract for crystalium.recall(). Recall is universally allowed (Tier × Layer matrix row 'any/recall'). Read-side trust is propagated via D7 min(inputs.tier), not gated here. scope.project is required: recall never guesses a cross-project scope.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["scope", "query", "k"],
+  "required": ["scope", "query"],
   "properties": {
     "scope": {
       "type": "object",
-      "description": "Scope triple used to filter crystals by project, agent class, and sensitivity.",
+      "description": "Project-isolation filter. Provide a non-empty project, for example {\"project\": \"crystalium\", \"agent_class_visibility\": \"vigil\"}.",
       "additionalProperties": false,
       "required": ["project"],
       "properties": {
         "project": {
           "type": "string",
-          "description": "Project identifier.",
-          "minLength": 1
+          "description": "Non-empty project identifier. Results are limited to this project.",
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "agent_class_visibility": {
           "type": "string",
-          "description": "Agent class that may see these results. null = no filter.",
-          "minLength": 1
+          "description": "Optional agent-class visibility filter, such as an Eidolon name.",
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "sensitivity_tag": {
           "type": "string",
-          "description": "Sensitivity filter applied by the redactor before results are returned."
+          "description": "Sensitivity filter applied by the redactor before results are returned.",
+          "minLength": 1,
+          "pattern": "\\S"
         }
       }
     },
@@ -33,13 +37,15 @@
       "type": "string",
       "description": "Natural-language probe for hybrid BM25 + vector retrieval.",
       "minLength": 1,
-      "maxLength": 8192
+      "maxLength": 8192,
+      "pattern": "\\S"
     },
     "k": {
       "type": "integer",
       "description": "Maximum number of results to return.",
       "minimum": 1,
-      "maximum": 100
+      "maximum": 100,
+      "default": 10
     },
     "layers": {
       "type": "array",

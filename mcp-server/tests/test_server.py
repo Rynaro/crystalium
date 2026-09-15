@@ -197,6 +197,33 @@ def test_http_smoke_initialize(tmp_path: Path) -> None:
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["result"]["serverInfo"]["name"] == "crystalium", body
+    assert 'scope={"project":"http_data"}' in body["result"]["instructions"]
+
+
+def test_recall_manifest_requires_explicit_scope_and_defaults_k(tmp_path: Path) -> None:
+    """The advertised MCP contract rejects query-only recall before dispatch."""
+    from jsonschema import Draft202012Validator
+
+    cfg = _http_config(tmp_path)
+    recall = next(tool for tool in build_tool_manifest(cfg) if tool["name"] == "recall")
+    schema = recall["inputSchema"]
+
+    assert schema["required"] == ["scope", "query"]
+    assert schema["properties"]["k"]["default"] == 10
+    assert schema["properties"]["scope"]["required"] == ["project"]
+    assert schema["properties"]["scope"]["properties"]["sensitivity_tag"]["type"] == [
+        "string",
+        "null",
+    ]
+    assert '"project":"http_data"' in recall["description"]
+
+    validator = Draft202012Validator(schema)
+    assert list(validator.iter_errors({"query": "Rollbar noise reduction"}))
+    assert not list(
+        validator.iter_errors(
+            {"scope": {"project": "http_data"}, "query": "Rollbar noise reduction"}
+        )
+    )
 
 
 def test_http_caller_identity_no_escalation() -> None:
@@ -235,6 +262,22 @@ def _drive_call_tool(server, name: str, arguments: dict):
     entry = server.get_request_handler("tools/call")
     params = mt.CallToolRequestParams(name=name, arguments=arguments)
     return asyncio.run(entry.handler(None, params))
+
+
+def test_recall_query_only_is_rejected_by_registered_mcp_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registered MCP2 dispatch returns an actionable schema error for query-only recall."""
+    monkeypatch.setenv("CRYSTALIUM_SKIP_SLOW", "1")
+    from crystalium.server import _build_server
+
+    server, _scheduler = _build_server(_http_config(tmp_path))
+    result = _drive_call_tool(server, "recall", {"query": "Rollbar noise reduction"})
+
+    assert result.is_error is True
+    assert "Input validation error" in result.content[0].text
+    assert "scope" in result.content[0].text
+    assert 'scope={"project":"http_data"}' in result.content[0].text
 
 
 def test_record_activity_called_on_commit(tmp_path: Path, monkeypatch) -> None:

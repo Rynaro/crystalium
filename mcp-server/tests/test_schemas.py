@@ -286,6 +286,12 @@ class TestRecallRequestSchema:
             },
         )
 
+    def test_k_defaults_to_ten_when_omitted(self) -> None:
+        validate(
+            self.schema,
+            {"scope": {"project": "eidolons"}, "query": "project conventions"},
+        )
+
     def test_k_out_of_range_rejected(self) -> None:
         assert_invalid(
             self.schema,
@@ -303,6 +309,19 @@ class TestRecallRequestSchema:
             self.schema,
             {"query": "q", "k": 5},
             "scope is required",
+        )
+
+    def test_scope_and_query_reject_empty_or_whitespace_values(self) -> None:
+        assert_invalid(self.schema, {"scope": {}, "query": "q"}, "scope.project is required")
+        assert_invalid(
+            self.schema,
+            {"scope": {"project": "   "}, "query": "q"},
+            "scope.project cannot be whitespace-only",
+        )
+        assert_invalid(
+            self.schema,
+            {"scope": {"project": "p"}, "query": "   "},
+            "query cannot be whitespace-only",
         )
 
 
@@ -435,6 +454,14 @@ class TestPydanticRoundTrips:
         req = RecallRequest.model_validate(data)
         assert req.k == 5
         assert req.layers == ["semantic"]
+
+    def test_recall_request_defaults_k_to_ten(self) -> None:
+        from crystalium.schemas import RecallRequest
+
+        req = RecallRequest.model_validate(
+            {"scope": {"project": "eidolons"}, "query": "project conventions"}
+        )
+        assert req.k == 10
 
     def test_commit_result_committed(self) -> None:
         from crystalium.schemas import CommitResultCommitted

@@ -53,7 +53,7 @@ from crystalium.config import Config
 from crystalium.dream.scheduler import DreamScheduler
 from crystalium.dream.worker import DreamWorker
 from crystalium.ecl import build_for_tool_result, emit_sidecar
-from crystalium.enforcement import Enforcement
+from crystalium.enforcement import CrystaliumEnforcementError, Enforcement
 from crystalium.export.graph_export import ExportFlags, GraphExporter
 from crystalium.gate import PromotionGate
 from crystalium.evb import make_evb_scorer
@@ -65,7 +65,7 @@ from crystalium.layers.procedural import ProceduralLayer
 from crystalium.layers.semantic import SemanticLayer
 from crystalium.quality import POOR_SUMMARY_ADVICE, is_poor_summary
 from crystalium.schemas import Provenance, Scope
-from crystalium.scope import canonical_project_key, default_recall_project, normalize_write_scope
+from crystalium.scope import canonical_project_key, normalize_write_scope
 from crystalium.storage.blob import BlobStore
 from crystalium.storage.graph import GraphStore
 from crystalium.storage.relational import RelationalStore
@@ -180,11 +180,18 @@ def _caller_tier(caller: dict[str, Any]) -> Tier:
 # ---------------------------------------------------------------------------
 
 
-def build_tool_manifest() -> list[dict[str, Any]]:
+def build_tool_manifest(config: Config | None = None) -> list[dict[str, Any]]:
     """Return the nine tool descriptors served via tools/list.
 
     Descriptions include enforcement bounds per spec.yaml §tool_surface.
     """
+    canonical_project = (
+        canonical_project_key(config.data_dir) if config is not None else "<canonical-project-key>"
+    )
+    scope_example = json.dumps(
+        {"project": canonical_project, "agent_class_visibility": "vigil"},
+        separators=(",", ":"),
+    )
     return [
         {
             "name": "recall",
@@ -192,7 +199,8 @@ def build_tool_manifest() -> list[dict[str, Any]]:
                 "Hybrid BM25 + dense + graph recall from CRYSTALIUM memory. "
                 "Returns slot-budgeted, redacted CrystalSummary records. "
                 "Universally allowed (all tiers). "
-                "Rate-limited (200 calls/min). "
+                "Rate-limited (200 calls/min). scope.project is required; CRYSTALIUM never "
+                f"guesses a cross-project scope. Use scope={scope_example}. "
                 "explain=true (v1.6) adds a diagnostic `explain` object to the "
                 "result so a zero-record recall against a non-empty store is "
                 "diagnosable without a separate `doctor` call. "
@@ -218,24 +226,51 @@ def build_tool_manifest() -> list[dict[str, Any]]:
             ),
             "inputSchema": {
                 "type": "object",
+                "additionalProperties": False,
                 "required": ["scope", "query"],
                 "properties": {
                     "scope": {
                         "type": "object",
+                        "additionalProperties": False,
+                        "required": ["project"],
                         "description": (
-                            "Scope filter: {project, agent_class_visibility, "
-                            "sensitivity_tag}. project defaults to the canonical "
-                            "(data-dir-derived) project key when omitted."
+                            "Project-isolation filter. Provide a non-empty project; for example "
+                            f"{scope_example}."
                         ),
+                        "properties": {
+                            "project": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": r"\S",
+                                "description": "Results never cross this project boundary.",
+                            },
+                            "agent_class_visibility": {
+                                "type": ["string", "null"],
+                                "minLength": 1,
+                                "pattern": r"\S",
+                                "description": "Optional agent-class visibility filter.",
+                            },
+                            "sensitivity_tag": {
+                                "type": ["string", "null"],
+                                "minLength": 1,
+                                "pattern": r"\S",
+                                "description": "Optional redaction sensitivity filter.",
+                            },
+                        },
                     },
-                    "query": {"type": "string", "description": "Free-text recall query"},
+                    "query": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8192,
+                        "pattern": r"\S",
+                        "description": "Free-text recall query",
+                    },
                     "k": {
                         "type": "integer",
                         "default": 10,
                         "description": (
                             "Max records to return (hard cap when relevance-primary "
-                            "composition is active, the default). Clamped to [1, 100]; "
-                            "a non-numeric/non-coercible value falls back to 10."
+                            "composition is active). Numeric values are clamped to [1, 100]."
                         ),
                     },
                     "layers": {
@@ -754,7 +789,19 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
     # .Server.create_initialization_options() falls back to the installed `mcp`
     # SDK package's own version for serverInfo — silently reporting the wrong
     # component's version to MCP clients, not even the stale crystalium literal.
-    server = Server("crystalium", version=__version__)
+    canonical_project = canonical_project_key(config.data_dir)
+    scope_example = json.dumps({"project": canonical_project}, separators=(",", ":"))
+    server = Server(
+        "crystalium",
+        version=__version__,
+        instructions=(
+            "Before substantive work, when recall is available, call it with a non-empty "
+            "query "
+            f"and scope={scope_example}; k defaults to 10. Correct one input "
+            "error and retry once. If recall is unavailable or fails again, report memory pre-flight "
+            "unavailable."
+        ),
+    )
 
     (
         enforcement,
@@ -784,13 +831,13 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
     # replicated below so a schema-violating call keeps its 1.x wire shape
     # (isError=true, "Input validation error: <message>") byte-identically.
     _tool_schemas: dict[str, dict[str, Any]] = {
-        t["name"]: t["inputSchema"] for t in build_tool_manifest()
+        t["name"]: t["inputSchema"] for t in build_tool_manifest(config)
     }
 
     async def _list_tools(
         _ctx: Any, _params: PaginatedRequestParams
     ) -> ListToolsResult:
-        return ListToolsResult(tools=[Tool(**t) for t in build_tool_manifest()])
+        return ListToolsResult(tools=[Tool(**t) for t in build_tool_manifest(config)])
 
     async def _call_tool(_ctx: Any, params: CallToolRequestParams) -> CallToolResult:
         name = params.name
@@ -828,8 +875,13 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
             try:
                 jsonschema.validate(instance=arguments, schema=schema)
             except jsonschema.ValidationError as exc:
+                message = exc.message
+                if name == "recall":
+                    message = (
+                        f"{message}. Retry with scope={scope_example} and a non-empty query."
+                    )
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"Input validation error: {exc.message}")],
+                    content=[TextContent(type="text", text=f"Input validation error: {message}")],
                     is_error=True,
                 )
 
@@ -1137,19 +1189,34 @@ def _handle_recall(
     config: Config,
 ) -> Any:
     """Handle crystalium.recall."""
-    raw_scope = args.get("scope", {})
-    # v1.6: an omitted scope.project defaults to the canonical (data-dir-derived)
-    # project key, not the literal string "default". An EXPLICIT scope.project is
-    # never rewritten here — recall is a read filter, not a write of record, and
-    # legacy/fragmented project keys must stay queryable (recall --explain
-    # diagnoses that fragmentation instead of papering over it).
-    canonical_project = canonical_project_key(config.data_dir)
+    raw_scope = args.get("scope")
+    if not isinstance(raw_scope, dict):
+        raise CrystaliumEnforcementError(
+            "Invalid recall input: scope must be an object with a project.",
+            reason_code="INVALID_RECALL_INPUT",
+            advice="Provide scope={\"project\": \"<project-id>\"} and a non-empty query.",
+        )
+    explicit_project = raw_scope.get("project")
+    if not isinstance(explicit_project, str) or not explicit_project.strip():
+        raise CrystaliumEnforcementError(
+            "Invalid recall input: scope.project must be a non-empty string.",
+            reason_code="INVALID_RECALL_INPUT",
+            advice="Provide scope={\"project\": \"<project-id>\"} and a non-empty query.",
+        )
+    query = args.get("query", "")
+    if not isinstance(query, str) or not query.strip():
+        raise CrystaliumEnforcementError(
+            "Invalid recall input: query must be a non-empty string.",
+            reason_code="INVALID_RECALL_INPUT",
+            advice="Provide a non-empty query and scope={\"project\": \"<project-id>\"}.",
+        )
+    # Recall reads the explicit project boundary verbatim. This keeps legacy
+    # keys diagnosable without permitting a missing scope to select a default.
     scope = Scope(
-        project=default_recall_project(raw_scope, canonical_project),
+        project=explicit_project,
         agent_class_visibility=raw_scope.get("agent_class_visibility"),
         sensitivity_tag=raw_scope.get("sensitivity_tag"),
     )
-    query = args.get("query", "")
     # crystalium#36 / DP-3d / C-11: clamp to [1,100]; non-coercible -> default 10.
     k = normalize_k(args.get("k", _K_DEFAULT))
     layers = args.get("layers")

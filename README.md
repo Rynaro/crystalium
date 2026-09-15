@@ -117,9 +117,19 @@ docker build --build-arg TORCH_VARIANT=gpu -t crystalium:gpu .
 
 ## Tool surface (9 MCP tools)
 
+### Recall pre-flight
+
+Before substantive agent work, use the injected `recall` tool when available:
+
+```json
+{"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":5,"layers":["semantic","episodic","procedural"]}
+```
+
+`scope.project` and `query` are required; `k` defaults to 10 and numeric values are clamped to 1–100. Use the canonical project key in the server initialization instructions for current records: it is the basename of `CRYSTALIUM_DATA_DIR`. Correct an input error once. If the tool is unavailable or the corrected call fails, report that memory pre-flight was unavailable. Host wiring must expose and invoke the tool; the server only validates calls it receives.
+
 | Tool | Purpose | Gated by |
 |---|---|---|
-| `recall(scope, query, k, layers, explain)` | Hybrid BM25+vector+graph retrieval with reranking; active-only by default; `explain=true` (v1.6) attaches a diagnostic object | Rate limit only |
+| `recall(scope, query, k=10, layers, explain)` | Hybrid BM25+vector+graph retrieval with reranking; explicit `scope.project` isolates results; `explain=true` attaches a diagnostic object | Rate limit only |
 | `commit(layer, payload, provenance)` | Write with tier enforcement + bi-temporal tracking | Tier matrix (G1–G4) |
 | `ingest(envelope, payload)` | Ingest a roster ECL handoff (v1.x/v2.x) → `crystal.v1`; native artifact preserved verbatim in `encoding_context`; commits through the chokepoint (MIN trust tier; T3 → episodic-quarantine) | Tier matrix (G1) |
 | `update(id, patch, reason)` | Field edits with invalidate-old; never hard-delete | Tier matrix (G1, G4) |
