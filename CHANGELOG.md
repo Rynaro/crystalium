@@ -6,6 +6,15 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- **Structured repair records (#73).** Add typed `fix_span.v1` facts, bounded
+  fields and confined historical anchors, compatible storage migration, and
+  validation across write/update paths. Preserve least-trusted source identity,
+  structured records through dedup/Dream, and redacted rendering/token accounting.
+  Writes and deterministic ECL proposals default off; persisted repairs remain
+  readable. Proposals require explicit recommit with verified source provenance.
+  See [structured repair records](docs/fix-spans.md).
+
 ## [2.3.0] — 2026-10-18
 
 ### Added

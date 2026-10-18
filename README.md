@@ -133,6 +133,8 @@ project key in the server initialization instructions (the `CRYSTALIUM_DATA_DIR`
 basename). Correct an input error once; report unavailable or repeatedly failed
 tools. Host wiring must expose and invoke the appropriate tool.
 See [memory injection migration, configuration, and evaluation](docs/memory-injection.md).
+For typed repair facts and optional ingest proposals, see
+[structured repair records](docs/fix-spans.md) (both feature flags default off).
 
 | Tool | Purpose | Gated by |
 |---|---|---|

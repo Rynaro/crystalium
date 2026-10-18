@@ -1,0 +1,119 @@
+{
+  "$defs": {
+    "Anchor": {
+      "additionalProperties": false,
+      "description": "A historical file, directory, or qualified symbol reference.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "file",
+            "dir",
+            "symbol"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "Anchor",
+      "type": "object"
+    },
+    "Locator": {
+      "additionalProperties": false,
+      "description": "An inert origin reference, never fetched or executed.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "commit",
+            "pr",
+            "handoff"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "Locator",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Complete repair facts; trust and provenance belong to the outer crystal.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "symptom": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Symptom",
+      "type": "string"
+    },
+    "root_cause": {
+      "maxLength": 300,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Root Cause",
+      "type": "string"
+    },
+    "fix_pattern": {
+      "maxLength": 400,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Fix Pattern",
+      "type": "string"
+    },
+    "anchors": {
+      "items": {
+        "$ref": "#/$defs/Anchor"
+      },
+      "minItems": 1,
+      "title": "Anchors",
+      "type": "array"
+    },
+    "constraints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "locator": {
+      "$ref": "#/$defs/Locator"
+    }
+  },
+  "required": [
+    "symptom",
+    "root_cause",
+    "fix_pattern",
+    "anchors",
+    "constraints",
+    "locator"
+  ],
+  "title": "FixSpan",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crystalium.dev/schemas/fix-span.v1.json"
+}

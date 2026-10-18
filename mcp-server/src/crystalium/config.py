@@ -257,6 +257,8 @@ class Config:
     recall_prefetch: bool = False          # protention: pre-warm recall cache on plan_checkpoint
     # Task-context assembly only; explicit recall remains available in every mode.
     memory_injection_mode: str = "gated"
+    fix_span_enabled: bool = False
+    fix_span_extractor_enabled: bool = False
 
     # crystalium#36 fix (v1.9.0): relevance is the primary composition signal (the
     # RRF-fused query relevance gates + orders the working set), importance is
@@ -420,6 +422,8 @@ class Config:
     def from_env(cls) -> "Config":
         """Build config purely from environment variables (useful for tests)."""
         return cls(
+            fix_span_enabled=_env_bool("CRYSTALIUM_FIX_SPAN_ENABLED", False),
+            fix_span_extractor_enabled=_env_bool("CRYSTALIUM_FIX_SPAN_EXTRACTOR_ENABLED", False),
             memory_injection_mode=_env("CRYSTALIUM_MEMORY_INJECTION_MODE", "gated"),
             transport=_env("CRYSTALIUM_TRANSPORT", "stdio") or "stdio",
             http_host=_env("CRYSTALIUM_HTTP_HOST", "127.0.0.1") or "127.0.0.1",
@@ -490,6 +494,8 @@ class Config:
 
         for simple in (
             "memory_injection_mode",
+            "fix_span_enabled",
+            "fix_span_extractor_enabled",
             "transport",
             "ecl_version",
             "embed_backend",

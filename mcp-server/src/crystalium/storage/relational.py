@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS crystals (
     memory_dynamics  TEXT,             -- JSON, nullable (W2: stability/retrievability/difficulty/evb/...)
     protected        INTEGER NOT NULL DEFAULT 0,  -- W4 Ricoeur-protected: exempt from decay/eviction
     tags             TEXT,             -- JSON array, nullable (W4)
+    kind             TEXT,
+    fix_span         TEXT,
     encoding_context TEXT,             -- JSON, nullable (W5 encoding-specificity context)
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
@@ -302,6 +304,10 @@ class RelationalStore:
         if "tags" not in cols:
             conn.execute("ALTER TABLE crystals ADD COLUMN tags TEXT")
             conn.commit()
+        for column in ("kind", "fix_span"):
+            if column not in cols:
+                conn.execute("ALTER TABLE crystals ADD COLUMN " + column + " TEXT")
+                conn.commit()
         # W5: encoding_context (added to crystal.v1.json in W1, persisted now).
         if "encoding_context" not in cols:
             conn.execute("ALTER TABLE crystals ADD COLUMN encoding_context TEXT")
@@ -321,14 +327,19 @@ class RelationalStore:
                     (id, layer, trust_tier, validation_state, status, importance,
                      summary, content_ref, embedding_ref,
                      scope, provenance, utility, temporal, memory_dynamics,
-                     protected, tags, encoding_context, created_at, updated_at)
+                     protected, tags, encoding_context, kind, fix_span, created_at, updated_at)
                 VALUES
                     (:id, :layer, :trust_tier, :validation_state, :status, :importance,
                      :summary, :content_ref, :embedding_ref,
                      :scope, :provenance, :utility, :temporal, :memory_dynamics,
-                     :protected, :tags, :encoding_context, :created_at, :updated_at)
+                     :protected, :tags, :encoding_context, :kind, :fix_span,
+                     :created_at, :updated_at)
                 """,
                 {
+                    "kind": crystal.get("kind"),
+                    "fix_span": (
+                        _to_json(crystal["fix_span"]) if crystal.get("fix_span") else None
+                    ),
                     "id": crystal["id"],
                     "layer": crystal["layer"],
                     "trust_tier": crystal["trust_tier"],
@@ -370,12 +381,41 @@ class RelationalStore:
             return None
         return self._row_to_dict(row)
 
+    def get_active_scoped_crystal(
+        self, crystal_id: str, scope: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Resolve a contributing source under active project and visibility guards.
+
+        The project restriction is in the SQL read, never an unscoped ID fetch.
+        Restricted sources require a matching declared audience. Expired and
+        superseded rows cannot establish provenance for new repair proposals.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM crystals WHERE id=? AND status='active' "
+                "AND json_extract(scope, '$.project')=? "
+                "AND json_extract(temporal, '$.superseded_by') IS NULL "
+                "AND (json_extract(temporal, '$.t_valid_to') IS NULL "
+                "OR json_extract(temporal, '$.t_valid_to') > ?)",
+                (crystal_id, scope.get("project"), _now_iso()),
+            ).fetchone()
+        if row is None:
+            return None
+        result = self._row_to_dict(row)
+        audience = (result.get("scope") or {}).get("agent_class_visibility")
+        if audience not in (None, "all", scope.get("agent_class_visibility")):
+            return None
+        return result
+
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
         for json_col in ("scope", "provenance", "utility", "temporal", "memory_dynamics",
-                         "tags", "encoding_context"):
+                         "tags", "encoding_context", "fix_span"):
             if d.get(json_col):
                 d[json_col] = _from_json(d[json_col])
+        for optional in ("kind", "fix_span"):
+            if d.get(optional) is None:
+                d.pop(optional, None)
         if "protected" in d:
             d["protected"] = bool(d["protected"])
         return d
