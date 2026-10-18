@@ -98,6 +98,9 @@ class ProceduralLayer:
             CommitResult dict.
         """
         try:
+            payload, caller_tier = self.enforcement.validate_structured_payload(
+                payload, caller_tier, "procedural", self.relational
+            )
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
 
@@ -179,6 +182,8 @@ class ProceduralLayer:
                 "encoding_context": enc_ctx,
             }
 
+            if payload.get("kind") == "fix_span":
+                crystal_record.update(kind="fix_span", fix_span=payload["fix_span"])
             self.relational.insert_crystal(crystal_record)
 
             log.info(

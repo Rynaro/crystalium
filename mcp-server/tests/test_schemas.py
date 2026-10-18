@@ -146,6 +146,7 @@ class TestSchemaFilesAreValidJson:
 
     SCHEMA_FILES = [
         "crystal.v1.json",
+        "fix-span.v1.json",
         "skill.v1.json",
         "recall-request.v1.json",
         "recall-result.v1.json",

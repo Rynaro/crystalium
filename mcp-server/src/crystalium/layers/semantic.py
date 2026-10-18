@@ -107,6 +107,8 @@ class SemanticLayer:
                 if not (self.conflict_tau_lo <= sim < self.sep_threshold):
                     continue
                 prior = self.relational.get_crystal(hit.get("id"))
+                if prior and prior.get("kind") == "fix_span":
+                    continue
                 if not prior or prior.get("status") != "active":
                     continue
                 pscope = prior.get("scope") or {}
@@ -137,7 +139,9 @@ class SemanticLayer:
             if hits:
                 dist = hits[0].get("_distance")
                 if dist is not None and (1.0 - float(dist)) > self.sep_threshold:
-                    return hits[0].get("id")
+                    candidate = self.relational.get_crystal(hits[0].get("id"))
+                    if candidate and candidate.get("kind") != "fix_span":
+                        return hits[0].get("id")
         except Exception as exc:  # noqa: BLE001
             log.debug("dedup_check_skipped", error=str(exc))
         return None
@@ -195,6 +199,9 @@ class SemanticLayer:
         error_code: str | None = None
 
         try:
+            payload, caller_tier = self.enforcement.validate_structured_payload(
+                payload, caller_tier, "semantic", self.relational
+            )
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
 
@@ -222,6 +229,8 @@ class SemanticLayer:
             # a blind append. After the chokepoint (rate-limit + tier + ceiling),
             # before the gate/insert. Off / null vector store -> normal flow.
             dup_id = self._dedup_target(payload.get("summary", "") or str(payload)[:256], "semantic")
+            if payload.get("kind") == "fix_span":
+                dup_id = None
             if dup_id is not None:
                 self.relational.merge_provenance(dup_id, prov_dict)
                 log.info("semantic_dedup_merged", merged_into=dup_id)
@@ -252,6 +261,9 @@ class SemanticLayer:
                 payload.get("summary", "") or str(payload)[:256],
                 payload.get("scope", {}),
             )
+
+            if payload.get("kind") == "fix_span":
+                conflict_loser = None
 
             # Build a stub crystal for the gate
             crystal_id = str(uuid.uuid4())
@@ -328,6 +340,8 @@ class SemanticLayer:
             }
 
             # 5. Insert stores
+            if payload.get("kind") == "fix_span":
+                crystal_record.update(kind="fix_span", fix_span=payload["fix_span"])
             self.relational.insert_crystal(crystal_record)
 
             # W6 conflict resolution: last-write-wins. The new (just-inserted)
@@ -474,6 +488,14 @@ class SemanticLayer:
                     f"Crystal not found: {record_id!r}", reason_code="CRYSTAL_NOT_FOUND"
                 )
 
+            from crystalium.fix_span import is_structured
+            structured_update = is_structured(existing) or is_structured(patch)
+            validated_candidate = None
+            if structured_update:
+                validated_candidate, caller_tier = self.enforcement.validate_structured_payload(
+                    {**existing, **patch}, caller_tier, "semantic", self.relational, existing
+                )
+
             now = datetime.now(timezone.utc)
             new_id = str(uuid.uuid4())
 
@@ -481,8 +503,9 @@ class SemanticLayer:
             self.relational.mark_superseded(record_id, new_id, now)
 
             # 5. Build and insert new revision
-            new_record = dict(existing)
-            new_record.update(patch)
+            new_record = dict(validated_candidate or existing)
+            if not structured_update:
+                new_record.update(patch)
             new_record["id"] = new_id
             new_record["status"] = "active"
 
@@ -495,7 +518,8 @@ class SemanticLayer:
             temporal["superseded_by"] = None
             new_record["temporal"] = temporal
             new_record["trust_tier"] = str(caller_tier)
-            new_record["validation_state"] = "validated"
+            if not structured_update:
+                new_record["validation_state"] = "validated"
 
             # Update utility timestamp
             utility = new_record.get("utility") or {}

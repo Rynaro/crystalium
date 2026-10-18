@@ -185,6 +185,9 @@ class ExecutionLayer:
         error_code: str | None = None
 
         try:
+            state, caller_tier = self.enforcement.validate_structured_payload(
+                state, caller_tier, "execution", self.relational
+            )
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
 
@@ -256,6 +259,12 @@ class ExecutionLayer:
                 "status": "active",
             }
 
+            if state.get("kind") == "fix_span":
+                crystal_record.update(
+                    kind="fix_span", fix_span=state["fix_span"],
+                    encoding_context=state.get("encoding_context"),
+                    validation_state=state.get("validation_state", "validated"),
+                )
             self.relational.insert_crystal(crystal_record)
 
             # W5 prefetch (default off): pre-warm the recall cache for the plan's
@@ -344,6 +353,18 @@ class ExecutionLayer:
         error_code: str | None = None
 
         try:
+            previous = (
+                self.relational.get_crystal(diff["supersedes_id"])
+                if diff.get("supersedes_id") else None
+            )
+            from crystalium.fix_span import is_structured
+            if previous is not None and (is_structured(previous) or is_structured(diff)):
+                diff, caller_tier = self.enforcement.validate_structured_payload(
+                    {**previous, **diff}, caller_tier, "execution", self.relational, previous
+                )
+            diff, caller_tier = self.enforcement.validate_structured_payload(
+                diff, caller_tier, "execution", self.relational
+            )
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
 
@@ -410,6 +431,12 @@ class ExecutionLayer:
                 "status": "active",
             }
 
+            if diff.get("kind") == "fix_span":
+                crystal_record.update(
+                    kind="fix_span", fix_span=diff["fix_span"],
+                    encoding_context=diff.get("encoding_context"),
+                    validation_state=diff.get("validation_state", "validated"),
+                )
             self.relational.insert_crystal(crystal_record)
 
             log.info(

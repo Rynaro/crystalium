@@ -85,7 +85,9 @@ class EpisodicLayer:
             if hits:
                 dist = hits[0].get("_distance")
                 if dist is not None and (1.0 - float(dist)) > self.sep_threshold:
-                    return hits[0].get("id")
+                    candidate = self.relational.get_crystal(hits[0].get("id"))
+                    if candidate and candidate.get("kind") != "fix_span":
+                        return hits[0].get("id")
         except Exception as exc:  # noqa: BLE001
             log.debug("dedup_check_skipped", error=str(exc))
         return None
@@ -133,6 +135,9 @@ class EpisodicLayer:
             CommitResult dict with status, id, layer, validation_state, importance.
         """
         try:
+            payload, caller_tier = self.enforcement.validate_structured_payload(
+                payload, caller_tier, "episodic", self.relational
+            )
             # 1. Rate limit
             self.enforcement.assert_rate_limit()
 
@@ -162,6 +167,8 @@ class EpisodicLayer:
             # Runs AFTER the chokepoint (rate-limit + tier) above, so the gate is
             # preserved. Off / null vector store -> normal append.
             dup_id = self._dedup_target(payload.get("summary", "") or str(payload)[:256], "episodic")
+            if payload.get("kind") == "fix_span":
+                dup_id = None
             if dup_id is not None:
                 self.relational.merge_provenance(dup_id, prov_dict)
                 log.info("episodic_dedup_merged", merged_into=dup_id)
@@ -238,6 +245,8 @@ class EpisodicLayer:
             }
 
             # 5. Insert into relational store
+            if payload.get("kind") == "fix_span":
+                crystal_record.update(kind="fix_span", fix_span=payload["fix_span"])
             self.relational.insert_crystal(crystal_record)
 
             # Vector + graph stores are optional (may not be available in tests).

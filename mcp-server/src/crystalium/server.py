@@ -1568,6 +1568,16 @@ def _handle_ingest(
         "envelope_version": str(envelope.get("envelope_version", "")),
         "commit_status": commit_result.get("status"),
     }
+    if config.fix_span_enabled and config.fix_span_extractor_enabled:
+        from crystalium.fix_span_proposal import propose_fix_span
+
+        proposal = propose_fix_span(
+            (crystal_payload.get("encoding_context") or {}).get("native_artifact"),
+            result.get("id"), normalized_scope, caller_tier,
+            episodic.enforcement, episodic.relational,
+        )
+        if proposal is not None:
+            result["fix_span_proposal"] = proposal
     # v1.6 item 1: additive advisory, byte-identical result on the clean path.
     if scope_normalized:
         result["scope_normalized"] = True
@@ -1626,6 +1636,15 @@ def _handle_update(
         raise CrystaliumEnforcementError(
             f"Crystal not found: {crystal_id!r}",
             reason_code="CRYSTAL_NOT_FOUND",
+        )
+
+    from crystalium.fix_span import is_structured
+    structured_update = is_structured(existing) or is_structured(patch)
+    validated_candidate = None
+    if structured_update:
+        validated_candidate, caller_tier = enforcement.validate_structured_payload(
+            {**existing, **patch}, caller_tier, existing.get("layer", "episodic"),
+            relational, existing,
         )
 
     # W2 outcome event: an outcome-only patch records utility.outcome_success_score
@@ -1696,8 +1715,9 @@ def _handle_update(
         safe_patch = {k: v for k, v in patch.items() if k not in _UPDATE_PROTECTED_FIELDS}
 
         # Apply patch to existing record
-        new_record = dict(existing)
-        new_record.update(safe_patch)
+        new_record = dict(validated_candidate or existing)
+        if not structured_update:
+            new_record.update(safe_patch)
         new_record["id"] = new_id
         new_record["status"] = "active"
 

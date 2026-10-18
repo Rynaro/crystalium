@@ -667,6 +667,7 @@ class DreamWorker:
             Proposed crystal dict if proposal was made; None if cluster was empty
             or all records were too low-trust for Semantic admission.
         """
+        cluster = [rec for rec in cluster if rec.get("kind") != "fix_span"]
         if not cluster:
             return None
 
@@ -825,7 +826,7 @@ class DreamWorker:
                 with self.relational._connect() as conn:
                     rows = conn.execute(
                         "SELECT id, utility, status, memory_dynamics, protected, scope "
-                        "FROM crystals WHERE layer=? AND status='active'",
+                        "FROM crystals WHERE layer=? AND status='active' AND kind IS NULL",
                         (layer,),
                     ).fetchall()
 

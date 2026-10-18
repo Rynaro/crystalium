@@ -190,4 +190,12 @@ def map_envelope_to_crystal(
             "source_performative": envelope.get("performative"),
         },
     }
+    # Native declared repairs retain typed facts while outer envelope identity
+    # remains authoritative. Candidate proposals stay opaque until explicit opt-in.
+    if isinstance(native, dict) and (native.get("kind") == "fix_span" or "fix_span" in native):
+        crystal_payload["kind"] = native.get("kind")
+        crystal_payload["fix_span"] = native.get("fix_span")
+        native_ctx = native.get("encoding_context") or {}
+        if isinstance(native_ctx, dict) and "fix_span_sources" in native_ctx:
+            crystal_payload["encoding_context"]["fix_span_sources"] = native_ctx["fix_span_sources"]
     return layer_for_kind(kind), crystal_payload

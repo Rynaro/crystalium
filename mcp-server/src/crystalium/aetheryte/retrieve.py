@@ -29,6 +29,7 @@ import structlog
 
 from crystalium.enforcement import Enforcement
 from crystalium.aetheryte.redact import Redactor
+from crystalium.fix_span import render_fix_span
 from crystalium.schemas import Budget, RecallResult, SlotBreakdown, CrystalSummary, Scope
 from crystalium.trust import Tier
 
@@ -1196,12 +1197,16 @@ class Aetheryte:
                 return _ComposerRecord(
                     id=crystal["id"],
                     layer=crystal.get("layer", "episodic"),
-                    summary=crystal.get("summary", ""),
+                    summary=self.redactor.redact(
+                        render_fix_span(crystal),
+                        raw_scope.get("sensitivity_tag") or "none",
+                    ) if crystal.get("kind") == "fix_span" else crystal.get("summary", ""),
                     trust_tier=crystal.get("trust_tier", "T1"),
                     validation_state=crystal.get("validation_state", "unverified"),
                     importance=importance_val,
                     last_access=last_access_dt,
                     content_ref=crystal.get("content_ref"),
+                    summary_redacted=crystal.get("kind") == "fix_span",
                     scope_sensitivity_tag=(raw_scope.get("sensitivity_tag") or "none"),
                     slot_override=raw_scope.get("slot"),
                     relevance_score=relevance_score,
@@ -1288,7 +1293,7 @@ class Aetheryte:
             # 8. Redactor: per-record summary redaction (P0-12)
             result_records: list[CrystalSummary] = []
             for rec in composed.records:
-                redacted_summary = self.redactor.redact(
+                redacted_summary = rec.summary if rec.summary_redacted else self.redactor.redact(
                     rec.summary, rec.scope_sensitivity_tag
                 )
                 result_records.append(
@@ -1516,6 +1521,7 @@ class _ComposerRecord:
         "last_access",
         "content_ref",
         "scope_sensitivity_tag",
+        "summary_redacted",
         "slot_override",
         # MemoryRecord protocol fields (for importance_score compatibility)
         "access_count",
@@ -1545,10 +1551,12 @@ class _ComposerRecord:
         slot_override: str | None = None,
         relevance_score: float = 0.0,
         relevance_rank: int = 0,
+        summary_redacted: bool = False,
     ) -> None:
         self.id = id
         self.layer = layer
         self.summary = summary
+        self.summary_redacted = summary_redacted
         self.trust_tier = trust_tier
         self.validation_state = validation_state
         self.importance = importance

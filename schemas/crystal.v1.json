@@ -26,11 +26,16 @@
     "layer": {
       "type": "string",
       "description": "Memory layer this crystal belongs to.",
-      "enum": ["episodic", "semantic", "procedural", "execution"]
+      "enum": [
+        "episodic",
+        "semantic",
+        "procedural",
+        "execution"
+      ]
     },
     "content_ref": {
       "type": "string",
-      "description": "SHA-256 blob-tier address of the full content payload. REQUIRED when layer=episodic. Index→pointer→content pattern (MISSION.md §Index→pointer→content).",
+      "description": "SHA-256 blob-tier address of the full content payload. REQUIRED when layer=episodic. Index\u2192pointer\u2192content pattern (MISSION.md \u00a7Index\u2192pointer\u2192content).",
       "minLength": 64,
       "maxLength": 64,
       "pattern": "^[0-9a-f]{64}$"
@@ -50,12 +55,20 @@
       "type": "object",
       "description": "Who wrote this crystal, when, and from what source.",
       "additionalProperties": false,
-      "required": ["source", "created_at"],
+      "required": [
+        "source",
+        "created_at"
+      ],
       "properties": {
         "source": {
           "type": "string",
           "description": "Trust-tier classification of the originating source.",
-          "enum": ["human", "verified_agent", "unverified_agent", "environment"]
+          "enum": [
+            "human",
+            "verified_agent",
+            "unverified_agent",
+            "environment"
+          ]
         },
         "author_agent": {
           "type": "string",
@@ -76,19 +89,31 @@
     },
     "trust_tier": {
       "type": "string",
-      "description": "Trust tier at admission time. Carries through cross-agent reads and summarization (MISSION.md §Trust tier carries through). Takes MIN of all input tiers on consolidation.",
-      "enum": ["T0", "T1", "T2", "T3"]
+      "description": "Trust tier at admission time. Carries through cross-agent reads and summarization (MISSION.md \u00a7Trust tier carries through). Takes MIN of all input tiers on consolidation.",
+      "enum": [
+        "T0",
+        "T1",
+        "T2",
+        "T3"
+      ]
     },
     "validation_state": {
       "type": "string",
       "description": "Current admission state of this crystal.",
-      "enum": ["validated", "unverified", "quarantined", "candidate"]
+      "enum": [
+        "validated",
+        "unverified",
+        "quarantined",
+        "candidate"
+      ]
     },
     "scope": {
       "type": "object",
-      "description": "Scope triple controlling access, isolation, and redaction (MISSION.md §Scope+redaction).",
+      "description": "Scope triple controlling access, isolation, and redaction (MISSION.md \u00a7Scope+redaction).",
       "additionalProperties": false,
-      "required": ["project"],
+      "required": [
+        "project"
+      ],
       "properties": {
         "project": {
           "type": "string",
@@ -114,9 +139,11 @@
     },
     "temporal": {
       "type": "object",
-      "description": "Bi-temporal validity window (MISSION.md §Updates are bi-temporal). Never hard-delete.",
+      "description": "Bi-temporal validity window (MISSION.md \u00a7Updates are bi-temporal). Never hard-delete.",
       "additionalProperties": false,
-      "required": ["t_valid_from"],
+      "required": [
+        "t_valid_from"
+      ],
       "properties": {
         "t_valid_from": {
           "type": "string",
@@ -124,12 +151,18 @@
           "format": "date-time"
         },
         "t_valid_to": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "RFC 3339 timestamp until which this crystal was valid. null = currently valid.",
           "format": "date-time"
         },
         "superseded_by": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "ID of the crystal that supersedes this one. null = not superseded."
         }
       }
@@ -138,7 +171,12 @@
       "type": "object",
       "description": "Utility signals used by the importance function (FORGE D6) and Dream eviction.",
       "additionalProperties": false,
-      "required": ["access_count", "last_access", "importance", "novelty_at_write"],
+      "required": [
+        "access_count",
+        "last_access",
+        "importance",
+        "novelty_at_write"
+      ],
       "properties": {
         "access_count": {
           "type": "integer",
@@ -151,7 +189,10 @@
           "format": "date-time"
         },
         "outcome_success_score": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "Normalised outcome success score [0, 1]. null = unscored.",
           "minimum": 0,
           "maximum": 1
@@ -173,31 +214,53 @@
     "status": {
       "type": "string",
       "description": "Lifecycle status of this crystal.",
-      "enum": ["candidate", "active", "deprecated"]
+      "enum": [
+        "candidate",
+        "active",
+        "deprecated"
+      ]
     },
     "memory_dynamics": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Memory-dynamics signals consumed by later-wave algorithms. UNPOPULATED in v0.2.0 (schema-first migration); no code reads or writes these yet. Bounds are intentionally left open to avoid a breaking bump when waves W2/W4 fix their ranges.",
       "additionalProperties": false,
       "properties": {
         "stability": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "FSRS memory stability (W4 forgetting faculty). null = uncomputed."
         },
         "retrievability": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "FSRS retrievability at last access (W4). null = uncomputed."
         },
         "difficulty": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "FSRS item difficulty (W4). null = uncomputed."
         },
         "evb": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "Expected Value of Backup importance signal (W2). null = uncomputed."
         },
         "prediction_error": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "Encoding-time prediction error / surprise signal (W2/W3). null = uncomputed."
         }
       }
@@ -205,7 +268,9 @@
     "tags": {
       "type": "array",
       "description": "Free-form retrieval tags. UNPOPULATED in v0.2.0; defaults to empty.",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string"
+      },
       "default": []
     },
     "protected": {
@@ -214,18 +279,191 @@
       "default": false
     },
     "encoding_context": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Context captured at encoding time for context-dependent recall (W5). UNPOPULATED in v0.2.0; shape intentionally open for later waves. null = none.",
       "default": null
+    },
+    "kind": {
+      "enum": [
+        "fix_span",
+        null
+      ]
+    },
+    "fix_span": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FixSpan"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "if": {
     "properties": {
-      "layer": {"const": "episodic"}
+      "layer": {
+        "const": "episodic"
+      }
     },
-    "required": ["layer"]
+    "required": [
+      "layer"
+    ]
   },
   "then": {
-    "required": ["content_ref"]
-  }
+    "required": [
+      "content_ref"
+    ]
+  },
+  "$defs": {
+    "Anchor": {
+      "additionalProperties": false,
+      "description": "A historical file, directory, or qualified symbol reference.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "file",
+            "dir",
+            "symbol"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "Anchor",
+      "type": "object"
+    },
+    "Locator": {
+      "additionalProperties": false,
+      "description": "An inert origin reference, never fetched or executed.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "commit",
+            "pr",
+            "handoff"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "Locator",
+      "type": "object"
+    },
+    "FixSpan": {
+      "additionalProperties": false,
+      "description": "Complete repair facts; trust and provenance belong to the outer crystal.",
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "symptom": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Symptom",
+          "type": "string"
+        },
+        "root_cause": {
+          "maxLength": 300,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Root Cause",
+          "type": "string"
+        },
+        "fix_pattern": {
+          "maxLength": 400,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Fix Pattern",
+          "type": "string"
+        },
+        "anchors": {
+          "items": {
+            "$ref": "#/$defs/Anchor"
+          },
+          "minItems": 1,
+          "title": "Anchors",
+          "type": "array"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Constraints",
+          "type": "array"
+        },
+        "locator": {
+          "$ref": "#/$defs/Locator"
+        }
+      },
+      "required": [
+        "symptom",
+        "root_cause",
+        "fix_pattern",
+        "anchors",
+        "constraints",
+        "locator"
+      ],
+      "title": "FixSpan",
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "fix_span"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "fix_span"
+        ],
+        "properties": {
+          "fix_span": {
+            "$ref": "#/$defs/FixSpan"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "fix_span": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
 }

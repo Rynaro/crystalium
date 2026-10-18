@@ -406,6 +406,130 @@ class Enforcement:
             maxlen=max(1, config.rate_limit_per_minute)
         )
 
+    def validate_structured_payload(
+        self, payload: dict[str, Any], caller_tier: Tier, layer: str,
+        relational: Any = None, existing: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], Tier]:
+        """Validate a merged repair and authoritative sources before any mutation.
+
+        Legacy opaque payloads pass unchanged. Structured revisions retain identity,
+        least trust and quarantine. Every layer calls this before its own admission
+        checks; proposal display tiers never establish write authority.
+        """
+        from copy import deepcopy
+
+        from pydantic import ValidationError
+
+        from crystalium.fix_span import FixSpan, is_structured, normalize_anchor, render_fix_span
+
+        structured = is_structured(payload) or (existing is not None and is_structured(existing))
+        if not structured:
+            return payload, caller_tier
+        outcome, reason = "accepted", "valid"
+        effective = caller_tier
+        try:
+            def reject(code: str) -> None:
+                raise CrystaliumEnforcementError(
+                    "Structured repair rejected: " + code, reason_code=code
+                )
+
+            if not self.config.fix_span_enabled:
+                reject("fix_span_disabled")
+            candidate = deepcopy(payload)
+            span_raw = candidate.get("fix_span")
+            if isinstance(span_raw, dict) and not span_raw.get("anchors"):
+                reject("missing_anchor")
+            if isinstance(span_raw, dict):
+                for key, cap in (("symptom", 200), ("root_cause", 300), ("fix_pattern", 400)):
+                    value = span_raw.get(key)
+                    if isinstance(value, str) and len(value) > cap:
+                        reject("cap")
+            if candidate.get("kind") != "fix_span" or not isinstance(span_raw, dict):
+                reject("malformed")
+            try:
+                span = FixSpan.model_validate(span_raw)
+                span.anchors = [normalize_anchor(a, self.config.repo_root) for a in span.anchors]
+            except ValidationError as exc:
+                raise CrystaliumEnforcementError(
+                    "Malformed structured repair", reason_code="malformed"
+                ) from exc
+            except ValueError as exc:
+                raise CrystaliumEnforcementError(
+                    "Unsafe repair anchor", reason_code="path"
+                ) from exc
+            if existing is not None:
+                effective = max(effective, Tier.from_str(existing["trust_tier"]))
+                for key in ("id", "layer", "provenance", "protected", "status"):
+                    if key in existing:
+                        candidate[key] = deepcopy(existing[key])
+                # A content patch cannot discard verified contributing provenance.
+                old_ctx = existing.get("encoding_context") or {}
+                if not isinstance(old_ctx, dict):
+                    reject("malformed")
+                if "fix_span_sources" in old_ctx:
+                    ctx = candidate.get("encoding_context") or {}
+                    if not isinstance(ctx, dict):
+                        reject("malformed")
+                    old_sources = old_ctx["fix_span_sources"]
+                    incoming_sources = ctx.get("fix_span_sources", [])
+                    if not isinstance(old_sources, list) or not isinstance(incoming_sources, list):
+                        reject("malformed")
+                    combined_sources = old_sources + incoming_sources
+                    if any(not isinstance(cid, str) or not cid for cid in combined_sources):
+                        reject("malformed")
+                    candidate["encoding_context"] = {
+                        **ctx, "fix_span_sources": list(dict.fromkeys(combined_sources))
+                    }
+            context = candidate.get("encoding_context") or {}
+            if not isinstance(context, dict):
+                reject("malformed")
+            if "fix_span_sources" in context:
+                effective = self.resolve_fix_span_sources(
+                    context["fix_span_sources"], candidate.get("scope") or {}, effective, relational
+                )
+            self.assert_tier_allowed("fix_span", layer, effective, "commit")
+            self.assert_tier_within_layer_ceiling(effective, layer)
+            candidate["fix_span"] = span.model_dump()
+            candidate["summary"] = render_fix_span(candidate)
+            if existing is not None:
+                candidate["trust_tier"] = str(effective)
+                candidate["validation_state"] = (
+                    "quarantined" if effective == Tier.T3
+                    or existing.get("validation_state") == "quarantined"
+                    else existing.get("validation_state", "unverified")
+                )
+            if effective > caller_tier:
+                outcome, reason = "downgraded", "source_trust"
+            return candidate, effective
+        except Exception as exc:
+            outcome, reason = "rejected", getattr(exc, "reason_code", "malformed")
+            raise
+        finally:
+            self.record("fix_span", layer, effective, "validate", outcome, 0.0, error=reason)
+
+    def resolve_fix_span_sources(
+        self, source_ids: Any, scope: dict[str, Any], caller_tier: Tier, relational: Any,
+    ) -> Tier:
+        """Re-resolve active scoped references; failures reveal no source content."""
+        from crystalium.scope import canonical_project_key
+
+        if (relational is None or not isinstance(source_ids, list) or not source_ids
+                or any(not isinstance(cid, str) or not cid for cid in source_ids)
+                or scope.get("project") != canonical_project_key(self.config.data_dir)):
+            raise CrystaliumEnforcementError("Unverified repair sources", reason_code="malformed")
+        effective = caller_tier
+        for cid in source_ids:
+            source = relational.get_active_scoped_crystal(cid, scope)
+            try:
+                if source is None:
+                    raise ValueError("unavailable")
+                effective = max(effective, Tier.from_str(source["trust_tier"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise CrystaliumEnforcementError(
+                    "Unverified repair sources", reason_code="malformed"
+                ) from exc
+        return effective
+
     # ------------------------------------------------------------------
     # Tier matrix gate (D1)
     # ------------------------------------------------------------------

@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
+from crystalium.fix_span import FixSpan
+
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 
@@ -102,6 +104,16 @@ class Crystal(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["fix_span"] | None = None
+    fix_span: FixSpan | None = None
+
+    @model_validator(mode="after")
+    def check_fix_span_pair(self) -> Crystal:
+        """Typed repair discriminator and facts must occur together."""
+        if (self.kind is None) != (self.fix_span is None):
+            raise ValueError("kind and fix_span must occur together")
+        return self
 
     id: str = Field(min_length=1)
     layer: LayerLiteral
@@ -364,6 +376,11 @@ class CommitResultRejected(BaseModel):
         "RATE_LIMIT",
         "PATH_ESCAPE",
         "PROMOTION_PENDING",
+        "fix_span_disabled",
+        "missing_anchor",
+        "cap",
+        "path",
+        "malformed",
     ]
     detail: str = Field(min_length=1)
 
