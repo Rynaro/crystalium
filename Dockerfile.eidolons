@@ -1,0 +1,14 @@
+# Optional project tooling; build crystalium:dev first (docker compose build).
+FROM crystalium:dev AS dev
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+ENV EIDOLONS_HOME=/opt/eidolons EIDOLONS_BIN_DIR=/usr/local/bin
+ARG EIDOLONS_REF=v4.6.2
+RUN curl -fsSL "https://raw.githubusercontent.com/Rynaro/eidolons/${EIDOLONS_REF}/cli/install.sh" \
+      -o /tmp/eidolons-install.sh \
+    && bash /tmp/eidolons-install.sh \
+    && rm /tmp/eidolons-install.sh \
+    && chmod -R a+rwX /opt/eidolons \
+    && git config --system --add safe.directory /opt/eidolons/nexus \
+    && git config --system --add safe.directory /app

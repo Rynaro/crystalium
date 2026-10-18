@@ -1,0 +1,9 @@
+# Optional CLI tooling layered on the normal development service.
+services:
+  crystalium:
+    image: crystalium:eidolons
+    build:
+      dockerfile: Dockerfile.eidolons
+      target: null
+    environment:
+      EIDOLONS_HOME: /opt/eidolons

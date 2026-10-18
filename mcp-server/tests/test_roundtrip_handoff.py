@@ -1,6 +1,6 @@
 """W7 C13 — DoD round-trip gate: ATLAS→SPECTRA→APIVR-Δ→IDG through CRYSTALIUM.
 
-Drives the REAL vendored roster fixtures (ECL v1.0) through crystalium.ingest, then
+Drives the REAL vendored roster fixtures through crystalium.ingest, then
 asserts every handoff recalls with provenance + MIN trust tier intact and the native
 artifact preserved verbatim. The available fixtures are from atlas/spectra/forge/
 vigil — the four pipeline hops; assertions key on each fixture's actual from.eidolon.
@@ -80,7 +80,7 @@ def test_pipeline_round_trips_with_provenance_and_min_tier(tmp_path: Path) -> No
         assert receipt["trust_tier"] == "T1", f"{name}: roster artifact must be T1"
         assert receipt["validation_state"] == "unverified"
         assert receipt["source_eidolon"] == eidolon
-        assert receipt["envelope_version"].startswith("1.")   # v1.0 fixture ingested
+        assert receipt["envelope_version"] == env["envelope_version"]
 
         # 2. verbatim native artifact preserved
         crystal = relational.get_crystal(receipt["id"])
