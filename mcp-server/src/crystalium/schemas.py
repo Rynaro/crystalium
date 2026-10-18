@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +271,49 @@ class RecallResult(BaseModel):
     # Free-form dict (not schema-pinned) — see aetheryte/retrieve.py::recall()
     # docstring for the exact shape.
     explain: Optional[dict[str, Any]] = None
+
+
+class AssemblyScope(BaseModel):
+    """Explicit read scope; excludes write-only project_raw metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+    project: str = Field(min_length=1, pattern=r"\S")
+    agent_class_visibility: str | None = Field(default=None, min_length=1, pattern=r"\S")
+    sensitivity_tag: str | None = Field(default=None, min_length=1, pattern=r"\S")
+
+
+class AssembleContextRequest(BaseModel):
+    """Additive context assembly contract; mode is an operator configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+    scope: AssemblyScope
+    query: str = Field(min_length=1, max_length=8192, pattern=r"\S")
+    k: int = Field(default=3, ge=1, le=100, strict=True)
+    layers: list[LayerLiteral] | None = Field(
+        default=None, min_length=1, max_length=4, json_schema_extra={"uniqueItems": True}
+    )
+    needs_memory: StrictBool = False
+    prior_failure: StrictBool = False
+
+    @field_validator("layers")
+    @classmethod
+    def unique_layers(cls, value: list[LayerLiteral] | None) -> list[LayerLiteral] | None:
+        """Reject duplicate layer selectors."""
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("layers must be unique")
+        return value
+
+
+class AssembleContextResult(BaseModel):
+    """Only selected, redacted summaries and their summary token accounting."""
+
+    model_config = ConfigDict(extra="forbid")
+    records: list[CrystalSummary]
+    gate_open: bool
+    gate_reason: Literal["off", "always_on", "needs_memory", "prior_failure", "no_signal"]
+    mode: Literal["gated", "always_on", "off"]
+    k_requested: int = Field(ge=1, le=100)
+    injected_token_count: int = Field(ge=0)
 
 
 # ---------------------------------------------------------------------------

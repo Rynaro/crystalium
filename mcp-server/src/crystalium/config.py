@@ -255,6 +255,9 @@ class Config:
     write_dedup_merge: bool = True         # W5 gate PASS (confound-free): merge near-dups at write
     sep_threshold: float = 0.92            # cosine above which a commit is a near-duplicate
     recall_prefetch: bool = False          # protention: pre-warm recall cache on plan_checkpoint
+    # Task-context assembly only; explicit recall remains available in every mode.
+    memory_injection_mode: str = "gated"
+
     # crystalium#36 fix (v1.9.0): relevance is the primary composition signal (the
     # RRF-fused query relevance gates + orders the working set), importance is
     # retained as the secondary/tiebreak signal. Gates seams 3+4+5 (top-k truncation,
@@ -383,6 +386,8 @@ class Config:
     repo_root: Path | None = None
 
     def __post_init__(self) -> None:
+        if self.memory_injection_mode not in ("gated", "always_on", "off"):
+            raise ValueError("memory_injection_mode must be gated, always_on, or off")
         self.data_dir = self.data_dir.expanduser().resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -415,6 +420,7 @@ class Config:
     def from_env(cls) -> "Config":
         """Build config purely from environment variables (useful for tests)."""
         return cls(
+            memory_injection_mode=_env("CRYSTALIUM_MEMORY_INJECTION_MODE", "gated"),
             transport=_env("CRYSTALIUM_TRANSPORT", "stdio") or "stdio",
             http_host=_env("CRYSTALIUM_HTTP_HOST", "127.0.0.1") or "127.0.0.1",
             http_port=_env_int("CRYSTALIUM_HTTP_PORT", 8848),
@@ -483,6 +489,7 @@ class Config:
         kwargs: dict[str, Any] = {}
 
         for simple in (
+            "memory_injection_mode",
             "transport",
             "ecl_version",
             "embed_backend",
