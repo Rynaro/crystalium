@@ -8,7 +8,8 @@ Resolved member versions and integrity receipts live in `eidolons.lock`.
 ## Bootstrap before opening a coding-host session
 
 Generated host adapters reference `.eidolons/` packages and hook shims. These
-runtime files are ignored by Git; a fresh checkout must install them before
+runtime files and the generated root `EIDOLONS.md` are ignored by Git; EIIS v3
+forbids shipping a root cortex in a member package. A fresh checkout must install them before
 using the adapters. All tooling runs inside the development container:
 
 ```sh

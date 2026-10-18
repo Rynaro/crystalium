@@ -35,6 +35,8 @@ evals/results/*.json
 .idea/
 .vscode/
 .claude/settings.local.json
+# Generated project cortex; EIIS v3 forbids shipping it in a member package.
+/EIDOLONS.md
 *.swp
 *.swo
 
