@@ -6,6 +6,8 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-10-18
+
 ### Added
 - **Structured repair records (#73).** Add typed `fix_span.v1` facts, bounded
   fields and confined historical anchors, compatible storage migration, and

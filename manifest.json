@@ -3,7 +3,7 @@
   "schema_version": "3.0",
   "eiis_version": "3.0.0",
   "name": "crystalium",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "methodology": "CRYSTALIUM",
   "entrypoints": {
     "persona": "PERSONA.md",
