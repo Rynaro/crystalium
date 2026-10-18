@@ -6,6 +6,8 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-10-18
+
 ### Added
 - **Conditional memory context (#71).** Add `assemble_context` with explicit
   `needs_memory` / `prior_failure` signals, default `k=3`, strict 1–100 bounds,
@@ -14,6 +16,10 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   fix/outcome summaries within anchored 10% relevance bands, and cap final records.
   Explicit `recall` remains unchanged. Document migration and add a deterministic
   synthetic policy comparison; its label-based rates are not coding benchmark gains.
+
+### Changed
+- **Eidolons tooling (#75).** Upgrade to Eidolons 4.6.2 and the latest roster,
+  with a container bootstrap for repository tooling.
 
 ## [2.2.1] — 2026-09-15
 
