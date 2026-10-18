@@ -23,7 +23,7 @@ Tests (AC-101..AC-116 of spec-crystalium-1.8.criteria.md):
   test_format_text_prints_only_id                                 — AC-112
   test_no_summary_gate_on_ingest_path                             — AC-113
   test_ingest_help_no_heavy_imports                               — AC-114
-  test_mcp_tool_surface_unchanged_9_tools                         — AC-115
+  test_ingest_cli_aliases_do_not_add_mcp_tools                         — AC-115
   test_caller_tier_env_ignored_tier_is_envelope_derived           — AC-116
 
 Container-first: run via
@@ -545,19 +545,21 @@ def test_ingest_help_no_heavy_imports() -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC-115 — MCP tool surface stays at exactly 9 tools (ingest ships CLI-side only)
+# AC-115 — ingest CLI aliases add no MCP tools; assembly is an additive API
 # ---------------------------------------------------------------------------
 
 
-def test_mcp_tool_surface_unchanged_9_tools() -> None:
+def test_ingest_cli_aliases_do_not_add_mcp_tools() -> None:
     from crystalium.server import build_tool_manifest
 
     tools = build_tool_manifest()
-    names = [t.get("name") for t in tools] if tools and isinstance(tools[0], dict) else tools
-    assert len(tools) == 9, (
-        f"Expected exactly 9 MCP tools (ingest ships CLI-side only at 1.8.0); "
-        f"got {len(tools)}: {names}"
-    )
+    names = {tool["name"] for tool in tools}
+    expected = {
+        "assemble_context", "recall", "commit", "ingest", "update", "skill_invoke",
+        "plan_checkpoint", "plan_replan", "session_end", "graph_export",
+    }
+    assert names == expected, "Ingest CLI aliases must not enlarge the MCP tool surface"
+    assert len(tools) == len(expected), "MCP tool names must be unique"
 
 
 # ---------------------------------------------------------------------------

@@ -108,7 +108,7 @@ Redaction re-applies at every cross-agent handoff (when CRYSTALIUM emits a resul
 
 ## Constrained interfaces over autonomy
 
-CRYSTALIUM is infrastructure, not an autonomous system. The tool surface is **pull, not push**. Agents call `recall` when they need memory; CRYSTALIUM does not proactively interrupt with "you might want to remember X." This mirrors the SWE-agent ACI thesis: a tool that does less, mechanically, is more trustworthy than a tool that tries to be smart.
+CRYSTALIUM is infrastructure, not an autonomous system. The tool surface is **pull, not push**. Agents call `assemble_context` for task context with explicit need/failure signals, or `recall` for explicit memory search; CRYSTALIUM does not proactively interrupt with "you might want to remember X." Default gated assembly returns no memories without a signal and recommends at most three records; see [memory injection policy](docs/memory-injection.md). This mirrors the SWE-agent ACI thesis: a tool that does less, mechanically, is more trustworthy than a tool that tries to be smart.
 
 Similarly, Procedural skills are **not auto-invoked**. An agent calls `skill_invoke(skill_id, args)` explicitly. The operator or a T1 verifier gates admission — CRYSTALIUM does not infer "this task looks like a refactoring; I'll invoke the refactoring skill." Constrained interfaces let the agent retain agency.
 

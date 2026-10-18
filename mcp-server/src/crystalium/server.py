@@ -48,6 +48,7 @@ from crystalium import __version__
 from crystalium.aetheryte.cache import RecallCache
 from crystalium.aetheryte.redact import Redactor
 from crystalium.aetheryte.retrieve import Aetheryte
+from crystalium.assembly import assemble_context
 from crystalium.composer import Composer
 from crystalium.config import Config
 from crystalium.dream.scheduler import DreamScheduler
@@ -64,7 +65,7 @@ from crystalium.layers.execution import ExecutionLayer
 from crystalium.layers.procedural import ProceduralLayer
 from crystalium.layers.semantic import SemanticLayer
 from crystalium.quality import POOR_SUMMARY_ADVICE, is_poor_summary
-from crystalium.schemas import Provenance, Scope
+from crystalium.schemas import AssembleContextRequest, Provenance, Scope
 from crystalium.scope import canonical_project_key, normalize_write_scope
 from crystalium.storage.blob import BlobStore
 from crystalium.storage.graph import GraphStore
@@ -181,7 +182,7 @@ def _caller_tier(caller: dict[str, Any]) -> Tier:
 
 
 def build_tool_manifest(config: Config | None = None) -> list[dict[str, Any]]:
-    """Return the nine tool descriptors served via tools/list.
+    """Return the ten tool descriptors served via tools/list.
 
     Descriptions include enforcement bounds per spec.yaml §tool_surface.
     """
@@ -193,6 +194,17 @@ def build_tool_manifest(config: Config | None = None) -> list[dict[str, Any]]:
         separators=(",", ":"),
     )
     return [
+        {
+            "name": "assemble_context",
+            "description": (
+                "Assemble task-conditional memory context. In gated mode (default), "
+                "needs_memory or prior_failure enables protected hybrid recall. "
+                "Closed gates inject zero tokens. Defaults to k=3; recommend k<=3. "
+                "Operator modes: gated, always_on, off. Token counts cover selected "
+                "redacted summaries only, using the composer tokenizer."
+            ),
+            "inputSchema": AssembleContextRequest.model_json_schema(),
+        },
         {
             "name": "recall",
             "description": (
@@ -795,11 +807,14 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
         "crystalium",
         version=__version__,
         instructions=(
-            "Before substantive work, when recall is available, call it with a non-empty "
-            "query "
-            f"and scope={scope_example}; k defaults to 10. Correct one input "
-            "error and retry once. If recall is unavailable or fails again, report memory pre-flight "
-            "unavailable."
+            "Use assemble_context for task context with a non-empty query "
+            f"and scope={scope_example}; k defaults to 3 (recommend k<=3). "
+            "In default gated mode, set needs_memory=true when prior context is needed "
+            "or prior_failure=true after a failed attempt; both default to false. "
+            "Closed gates inject zero tokens. Operator modes are gated, always_on, and off. "
+            "Keep recall for explicit memory search; its default k=10 is unchanged. "
+            "Correct one input error and retry once. If the tool is unavailable or fails "
+            "again, report memory pre-flight unavailable."
         ),
     )
 
@@ -909,6 +924,13 @@ def _build_server(config: Config) -> tuple[Server, DreamScheduler]:
                         default=str,
                     ).encode()
                     artifact_kind = "recall-result"
+
+                elif name == "assemble_context":
+                    request = AssembleContextRequest.model_validate(arguments)
+                    result = assemble_context(request, aetheryte, config, caller_tier)
+                    scheduler.record_activity()
+                    result_bytes = result.model_dump_json(exclude_none=True).encode()
+                    artifact_kind = "assemble-context-result"
 
                 elif name == "commit":
                     layer_hint = arguments.get("layer")

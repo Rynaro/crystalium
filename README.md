@@ -115,20 +115,28 @@ docker build --build-arg TORCH_VARIANT=gpu -t crystalium:gpu .
 
 ---
 
-## Tool surface (9 MCP tools)
+## Tool surface (10 MCP tools)
 
-### Recall pre-flight
+### Task context and explicit search
 
-Before substantive agent work, use the injected `recall` tool when available:
+Use `assemble_context` for task context. In default `gated` mode, injection requires
+`needs_memory=true` or `prior_failure=true`; both signals default to false.
+Recommend `k<=3` (default 3), with a hard cap on selected records:
 
 ```json
-{"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":5,"layers":["semantic","episodic","procedural"]}
+{"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":3,"needs_memory":true,"layers":["semantic","episodic","procedural"]}
 ```
 
-`scope.project` and `query` are required; `k` defaults to 10 and numeric values are clamped to 1–100. Use the canonical project key in the server initialization instructions for current records: it is the basename of `CRYSTALIUM_DATA_DIR`. Correct an input error once. If the tool is unavailable or the corrected call fails, report that memory pre-flight was unavailable. Host wiring must expose and invoke the tool; the server only validates calls it receives.
+Keep `recall` for explicit memory search: its default `k=10` and existing behavior
+are unchanged. Both tools require `scope.project` and `query`. Use the canonical
+project key in the server initialization instructions (the `CRYSTALIUM_DATA_DIR`
+basename). Correct an input error once; report unavailable or repeatedly failed
+tools. Host wiring must expose and invoke the appropriate tool.
+See [memory injection migration, configuration, and evaluation](docs/memory-injection.md).
 
 | Tool | Purpose | Gated by |
 |---|---|---|
+| `assemble_context(scope, query, k=3, layers, needs_memory, prior_failure)` | Conditional selection of protected, redacted recall summaries; final record cap | Operator mode + explicit need/failure signals |
 | `recall(scope, query, k=10, layers, explain)` | Hybrid BM25+vector+graph retrieval with reranking; explicit `scope.project` isolates results; `explain=true` attaches a diagnostic object | Rate limit only |
 | `commit(layer, payload, provenance)` | Write with tier enforcement + bi-temporal tracking | Tier matrix (G1–G4) |
 | `ingest(envelope, payload)` | Ingest a roster ECL handoff (v1.x/v2.x) → `crystal.v1`; native artifact preserved verbatim in `encoding_context`; commits through the chokepoint (MIN trust tier; T3 → episodic-quarantine) | Tier matrix (G1) |

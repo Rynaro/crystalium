@@ -1,0 +1,156 @@
+{
+  "$defs": {
+    "CrystalSummary": {
+      "additionalProperties": false,
+      "description": "Summary record returned inside a RecallResult.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "layer": {
+          "enum": [
+            "episodic",
+            "semantic",
+            "procedural",
+            "execution"
+          ],
+          "title": "Layer",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "trust_tier": {
+          "enum": [
+            "T0",
+            "T1",
+            "T2",
+            "T3"
+          ],
+          "title": "Trust Tier",
+          "type": "string"
+        },
+        "validation_state": {
+          "enum": [
+            "validated",
+            "unverified",
+            "quarantined",
+            "candidate"
+          ],
+          "title": "Validation State",
+          "type": "string"
+        },
+        "importance": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Importance",
+          "type": "number"
+        },
+        "last_access": {
+          "format": "date-time",
+          "title": "Last Access",
+          "type": "string"
+        },
+        "content_ref": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Ref"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        }
+      },
+      "required": [
+        "id",
+        "layer",
+        "summary",
+        "trust_tier",
+        "validation_state",
+        "importance",
+        "last_access"
+      ],
+      "title": "CrystalSummary",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Only selected, redacted summaries and their summary token accounting.",
+  "properties": {
+    "records": {
+      "items": {
+        "$ref": "#/$defs/CrystalSummary"
+      },
+      "title": "Records",
+      "type": "array"
+    },
+    "gate_open": {
+      "title": "Gate Open",
+      "type": "boolean"
+    },
+    "gate_reason": {
+      "enum": [
+        "off",
+        "always_on",
+        "needs_memory",
+        "prior_failure",
+        "no_signal"
+      ],
+      "title": "Gate Reason",
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "gated",
+        "always_on",
+        "off"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "k_requested": {
+      "maximum": 100,
+      "minimum": 1,
+      "title": "K Requested",
+      "type": "integer"
+    },
+    "injected_token_count": {
+      "minimum": 0,
+      "title": "Injected Token Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "records",
+    "gate_open",
+    "gate_reason",
+    "mode",
+    "k_requested",
+    "injected_token_count"
+  ],
+  "title": "AssembleContextResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rynaro/crystalium/schemas/assemble-context-result.v1.json"
+}

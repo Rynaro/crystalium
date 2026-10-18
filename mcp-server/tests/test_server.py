@@ -197,7 +197,15 @@ def test_http_smoke_initialize(tmp_path: Path) -> None:
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["result"]["serverInfo"]["name"] == "crystalium", body
-    assert 'scope={"project":"http_data"}' in body["result"]["instructions"]
+    instructions = body["result"]["instructions"]
+    assert 'scope={"project":"http_data"}' in instructions
+    assert "Use assemble_context for task context" in instructions
+    assert "k defaults to 3" in instructions
+    assert "needs_memory=true" in instructions
+    assert "prior_failure=true" in instructions
+    assert "both default to false" in instructions
+    assert "Closed gates inject zero tokens" in instructions
+    assert "Keep recall for explicit memory search; its default k=10 is unchanged" in instructions
 
 
 def test_recall_manifest_requires_explicit_scope_and_defaults_k(tmp_path: Path) -> None:
@@ -591,11 +599,11 @@ def test_default_caller_constant_matches_expected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_tool_manifest_returns_9_tools() -> None:
-    """build_tool_manifest() must return exactly 9 tool definitions (W-GE5: +graph_export)."""
+def test_build_tool_manifest_returns_10_tools() -> None:
+    """build_tool_manifest() must return exactly 10 tool definitions (W-GE5: +graph_export)."""
     from crystalium.server import build_tool_manifest
     tools = build_tool_manifest()
-    assert len(tools) == 9
+    assert len(tools) == 10
 
 
 def test_build_tool_manifest_has_required_tool_names() -> None:
@@ -610,6 +618,7 @@ def test_build_tool_manifest_has_required_tool_names() -> None:
     tools = build_tool_manifest()
     names = {t["name"] for t in tools}
     expected = {
+        "assemble_context",
         "recall",
         "commit",
         "ingest",

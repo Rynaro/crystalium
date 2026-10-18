@@ -29,7 +29,8 @@ CRYSTALIUM is infrastructure for a team of AI coding agents sharing a personal m
 
 ## Tool surface
 
-- `recall(scope, query, k=10, layers, explain)` — hybrid recall. `scope.project` is required; CRYSTALIUM never guesses a cross-project scope.
+- `assemble_context(scope, query, k=3, layers, needs_memory, prior_failure)` — task-conditional context; gated by default, at most `k` redacted summaries.
+- `recall(scope, query, k=10, layers, explain)` — explicit hybrid memory search. `scope.project` is required; CRYSTALIUM never guesses a cross-project scope.
 - `crystalium.commit(layer, payload, provenance)` — write with tier gating + bi-temporal tracking.
 - `crystalium.update(id, patch, reason)` — field-level edits with invalidate-old.
 - `crystalium.skill_invoke(name, args)` — sandbox verifier (procedural admission gate).
@@ -38,15 +39,17 @@ CRYSTALIUM is infrastructure for a team of AI coding agents sharing a personal m
 
 All results emit ECL v2.0 envelope sidecars; integrity via SHA-256.
 
-## Memory pre-flight
+## Memory context
 
-Before substantive work, when the MCP tool is available, call:
+For task context, use `assemble_context` when available:
 
 ```json
-{"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":5,"layers":["semantic","episodic","procedural"]}
+{"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":3,"needs_memory":true,"layers":["semantic","episodic","procedural"]}
 ```
 
-Use the canonical key advertised by server initialization for current records (the basename of `CRYSTALIUM_DATA_DIR`); use an existing explicit legacy key only to query that legacy project. `k` defaults to 10; numeric values are clamped to 1–100. Correct invalid input once. If recall is unavailable or fails again, report memory pre-flight unavailable; never claim it succeeded. CRYSTALIUM enforces calls it receives.
+Set `needs_memory` only when the task needs prior context; set `prior_failure` for a prior failed attempt. Both default to false. Default `gated` mode injects nothing without either signal. Keep `k<=3`; assembly strictly validates integer `k` in 1–100. Explicit search still uses `recall` (default `k=10`, numeric values clamped to 1–100).
+
+Use the canonical project key advertised at server initialization (the `CRYSTALIUM_DATA_DIR` basename); query legacy keys explicitly. Correct invalid input once. Report unavailable or repeatedly failed memory tools; never claim success. See [migration and operator modes](docs/memory-injection.md).
 
 ## Deep docs
 

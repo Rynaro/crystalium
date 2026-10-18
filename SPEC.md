@@ -16,9 +16,11 @@ The authoritative spec lives at `.spectra/crystalium-v0.1.0-spec.md` (narrative)
 
 - **Tier × Layer × Operation matrix** — see §4 (12 rows × 4 columns; four operations: commit, propose_promote, force_promote, recall)
 
-- **Tool surface contract** — see §5 (9 tools — the v0.1.0-era 7 plus `ingest`
-  (v0.7/W7) and `graph_export` (v1.5.0/W-GE5) added in later releases; failure
-  classes, enforcement order)
+- **Tool surface contract** — see §5 (10 tools — the v0.1.0-era 7 plus `ingest`
+  (v0.7/W7), `graph_export` (v1.5.0/W-GE5), and `assemble_context`
+  (issue #71) added in later releases; failure classes, enforcement order).
+  Conditional assembly is additive; explicit recall is unchanged. See
+  [memory injection policy](docs/memory-injection.md).
 
 - **Working-set composer** — see §6 (slot allocations, eviction rule)
 

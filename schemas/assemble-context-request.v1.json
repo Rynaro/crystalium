@@ -1,0 +1,112 @@
+{
+  "$defs": {
+    "AssemblyScope": {
+      "additionalProperties": false,
+      "description": "Explicit read scope; excludes write-only project_raw metadata.",
+      "properties": {
+        "project": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Project",
+          "type": "string"
+        },
+        "agent_class_visibility": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Class Visibility"
+        },
+        "sensitivity_tag": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sensitivity Tag"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "title": "AssemblyScope",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Additive context assembly contract; mode is an operator configuration.",
+  "properties": {
+    "scope": {
+      "$ref": "#/$defs/AssemblyScope"
+    },
+    "query": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Query",
+      "type": "string"
+    },
+    "k": {
+      "default": 3,
+      "maximum": 100,
+      "minimum": 1,
+      "title": "K",
+      "type": "integer"
+    },
+    "layers": {
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "episodic",
+              "semantic",
+              "procedural",
+              "execution"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Layers",
+      "uniqueItems": true
+    },
+    "needs_memory": {
+      "default": false,
+      "title": "Needs Memory",
+      "type": "boolean"
+    },
+    "prior_failure": {
+      "default": false,
+      "title": "Prior Failure",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "scope",
+    "query"
+  ],
+  "title": "AssembleContextRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rynaro/crystalium/schemas/assemble-context-request.v1.json"
+}
