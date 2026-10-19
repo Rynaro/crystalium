@@ -469,3 +469,118 @@ def test_topup_counter_matches_observed_calls(tmp_path: Path) -> None:
         ), entry
         expected_label = "head" if layer_filter is None else f"backstop:{layer_filter}"
         assert entry["fetch"] == expected_label, (entry, calls)
+
+
+@pytest.mark.parametrize(
+    "layers,initial_cap",
+    [
+        pytest.param(None, 4 * _CANDIDATE_K, id="default"),
+        pytest.param([_LAYER], _CANDIDATE_K, id="single-layer"),
+        pytest.param([_LAYER, "procedural"], 4 * _CANDIDATE_K, id="strict-subset-head"),
+    ],
+)
+@pytest.mark.parametrize("exhausted", [True, False], ids=["uncensored", "still-censored"])
+def test_post_widen_censoring_controls_returned_rank(
+    tmp_path: Path, layers: list[str] | None, initial_cap: int, exhausted: bool
+) -> None:
+    """#63: each active-only head widen must change the actual fusion decision.
+
+    Two deprecated matches dirty the initially full head. Widening by two
+    either exhausts all matches one row short of its new cap, or fills it.
+    Only the exhausted case evidences selectivity: its sparse-only target
+    must beat a dense-only competitor with weight 1.2. In the still-capped
+    control, sparse weight remains neutral and the competitor must win.
+    Dense membership is fixed; sparse order/counts come from real SQLite FTS5.
+    Freezing both censoring signals before any of the three widens must fail
+    that site's uncensored returned-rank criterion, even if calls, merges,
+    and top-up counters remain correct.
+    """
+    stores = new_stores(str(tmp_path / "post-widen"), "post-widen")
+    stamps = stamp_sequence()
+    target_id = "selective-sparse-target"
+    competitor_id = "dense-only-competitor"
+    rows: list[dict[str, Any]] = []
+
+    def add(cid: str, summary: str, status: str = "active") -> None:
+        rows.append(
+            crystal(
+                cid,
+                _LAYER,
+                summary,
+                project=_PROJECT,
+                agent_class=_AGENT_CLASS,
+                created_at=next(stamps),
+                status=status,
+            )
+        )
+
+    add(target_id, _summary("best", 9, 0))
+    for i in range(2):
+        add(f"dirty{i}", _summary("dirty", 6, 0), "deprecated")
+    match_count = initial_cap + (1 if exhausted else 2)
+    for i in range(match_count - 3):
+        add(f"match{i:03d}", _summary("weak", 1, 16))
+    # Active nonmatching records make an exhausted sparse arm selective.
+    add(competitor_id, "dense competitor without lexical overlap")
+    for i in range(200):
+        add(f"background{i:03d}", "unrelated background knowledge")
+    seed_relational(stores.relational, rows)
+
+    layer_filter = _LAYER if layers == [_LAYER] else None
+    initial = stores.relational.bm25_search(_QUERY, layer_filter=layer_filter, k=initial_cap)
+    assert len(initial) == initial_cap
+    assert initial[0]["id"] == target_id
+    assert sum(hit["status"] == "deprecated" for hit in initial) == 2
+    calls = _spy_bm25_calls(stores.relational)
+    vector_store = stub_vector_store([competitor_id])
+    # The strict-subset dense head post-filters by layer before hydrating IDs.
+    vector_store.dense_search.return_value = [{"id": competitor_id, "layer": _LAYER}]
+    aetheryte = build_aetheryte(
+        cfg=stores.cfg,
+        relational=stores.relational,
+        vector_store=vector_store,
+        graph_store=MagicMock(**{"neighbor_expand.return_value": set()}),
+        completion=False,
+        completion_max_hops=1,
+        completion_decay=0.5,
+        recall_active_only=True,
+        recall_relevance_primary=True,
+        recall_weighted_fusion=True,
+        fusion_weight_dense=1.2,
+        fusion_weight_derived=1.0,
+        fusion_sparse_boost_alpha=1.0,
+    )
+    assert aetheryte.recall_active_only is True
+    result = aetheryte.recall(
+        Scope(project=_PROJECT, agent_class_visibility=_AGENT_CLASS),
+        _QUERY,
+        _K,
+        layers,
+        Tier.T1,
+        explain=True,
+    )
+
+    # Primary acceptance criterion: user-visible order, independent of explain.
+    expected_winner = target_id if exhausted else competitor_id
+    retrieved = [record.id for record in result.records]
+    assert retrieved[0] == expected_winner, retrieved
+    assert target_id in retrieved
+    assert all(not cid.startswith("dirty") for cid in retrieved)
+
+    # Establish the exercised fetch and observable post-widen signal, too.
+    assert calls == [(layer_filter, initial_cap), (layer_filter, initial_cap + 2)]
+    fusion = (result.explain or {})["fusion"]
+    assert fusion["raw_n_sparse"] == match_count
+    assert fusion["n_sparse_cap"] == initial_cap + 2
+    assert fusion["sparse_topup"]["widened_fetches"] == [
+        {
+            "fetch": "head",
+            "k_initial": initial_cap,
+            "k_final": initial_cap + 2,
+            "n_inactive_observed": 2,
+        }
+    ]
+    if exhausted:
+        assert fusion["w_sparse"] > 1.2
+    else:
+        assert fusion["w_sparse"] == 1.0

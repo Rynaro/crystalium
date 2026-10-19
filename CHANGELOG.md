@@ -29,6 +29,9 @@ live-solver evidence.
   Upstream integration: [eidolons#635](https://github.com/Rynaro/eidolons/issues/635).
 
 ### Added
+- Regression coverage for post-widen sparse censoring signals (#63): real
+  active-only FTS5 fixtures verify returned rank on default, single-layer and
+  strict-subset heads, with still-censored controls. Runtime behavior is unchanged.
 - **Coding memory A/B calibration (#74).** Add executable fixture tasks, seven
   paired arms, fresh stores per task/seed/arm, first-party MCP sessions, exact
   token-matched irrelevant-memory controls, headroom/anchor strata, task bootstrap
