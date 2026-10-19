@@ -6,6 +6,14 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- **Coding memory A/B calibration (#74).** Add executable fixture tasks, seven
+  paired arms, fresh stores per task/seed/arm, first-party MCP sessions, exact
+  token-matched irrelevant-memory controls, headroom/anchor strata, task bootstrap
+  intervals, JSON/Markdown reports and a no-claim guard. Offline CI verifies
+  determinism; external solver adapters require explicit opt-in. Fixture results
+  calibrate the harness and do not change production defaults.
+
 ## [2.4.0] — 2026-10-18
 
 ### Added

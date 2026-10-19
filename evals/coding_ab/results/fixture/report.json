@@ -1,0 +1,4714 @@
+{
+  "arms": [
+    "off",
+    "always_on_k10",
+    "always_on_k3",
+    "gated_k3",
+    "fix_span",
+    "raw",
+    "irrelevant"
+  ],
+  "bootstrap_resamples": 2000,
+  "bootstrap_seed": 74,
+  "bootstrap_unit": "task (paired seed means)",
+  "default_decision": "no claim; fixture evidence cannot change production defaults",
+  "fixture_sha256": "4956aded7ced6f67331b99933a88fdea143861327bd31e3139937b64960399aa",
+  "headroom": {
+    "absolute_anchor": {
+      "anchor": true,
+      "headroom": "4/4",
+      "off_successes": 4,
+      "seeds": 4
+    },
+    "absolute_no_anchor": {
+      "anchor": false,
+      "headroom": "4/4",
+      "off_successes": 4,
+      "seeds": 4
+    },
+    "decrement_anchor": {
+      "anchor": true,
+      "headroom": "0/4",
+      "off_successes": 0,
+      "seeds": 4
+    },
+    "decrement_no_anchor": {
+      "anchor": false,
+      "headroom": "0/4",
+      "off_successes": 0,
+      "seeds": 4
+    },
+    "double_anchor": {
+      "anchor": true,
+      "headroom": "1-3/4",
+      "off_successes": 2,
+      "seeds": 4
+    },
+    "double_no_anchor": {
+      "anchor": false,
+      "headroom": "1-3/4",
+      "off_successes": 2,
+      "seeds": 4
+    }
+  },
+  "irrelevant_token_match": "exact per task/seed against always_on_k10",
+  "measurement": "synthetic instrument calibration; not product efficacy evidence",
+  "mode": "fixture",
+  "retrieval": "production MCP/assembly/Aetheryte/SQLite; sparse-only; null vector and graph",
+  "runs": [
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "bb01f63c25d13b93453810cf759bb531dceda41b4099341919087c6ba5e5693e",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "b9b169d3e6c06bb24b3fbb90de720e2bbf2cdf9e828957be2b76e0ce95fdb8d7",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "b013d115f79ebb2b4b4c811cbe4610ad7ae09799dc552dc7268382a98f435a46",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4eef58ad1c5f9d5711c6dbbc7e5947b75683e3114c7206d3681939c0dc7c558d",
+      "output_sha256": "07d19b01907bca290071bffbb957121afcdb6500c16f3be79c6aa71ba042b829",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "bb01f63c25d13b93453810cf759bb531dceda41b4099341919087c6ba5e5693e",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "b9b169d3e6c06bb24b3fbb90de720e2bbf2cdf9e828957be2b76e0ce95fdb8d7",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "b013d115f79ebb2b4b4c811cbe4610ad7ae09799dc552dc7268382a98f435a46",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4eef58ad1c5f9d5711c6dbbc7e5947b75683e3114c7206d3681939c0dc7c558d",
+      "output_sha256": "07d19b01907bca290071bffbb957121afcdb6500c16f3be79c6aa71ba042b829",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "bb01f63c25d13b93453810cf759bb531dceda41b4099341919087c6ba5e5693e",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "b9b169d3e6c06bb24b3fbb90de720e2bbf2cdf9e828957be2b76e0ce95fdb8d7",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "b013d115f79ebb2b4b4c811cbe4610ad7ae09799dc552dc7268382a98f435a46",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4eef58ad1c5f9d5711c6dbbc7e5947b75683e3114c7206d3681939c0dc7c558d",
+      "output_sha256": "07d19b01907bca290071bffbb957121afcdb6500c16f3be79c6aa71ba042b829",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "bb01f63c25d13b93453810cf759bb531dceda41b4099341919087c6ba5e5693e",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "b9b169d3e6c06bb24b3fbb90de720e2bbf2cdf9e828957be2b76e0ce95fdb8d7",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "b013d115f79ebb2b4b4c811cbe4610ad7ae09799dc552dc7268382a98f435a46",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "27a89522eeaeb3a33993e48af733976c798bb9412ff64051a036527d8b3664cd",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4eef58ad1c5f9d5711c6dbbc7e5947b75683e3114c7206d3681939c0dc7c558d",
+      "output_sha256": "07d19b01907bca290071bffbb957121afcdb6500c16f3be79c6aa71ba042b829",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "bb01f63c25d13b93453810cf759bb531dceda41b4099341919087c6ba5e5693e",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "db2a791a3d127591a47f70afbf021d50f3a650e47bf56af42f08b300c421e9d3",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "bca3f3d83b804cb9744c9d455571ce6e64be2dd8cf405dcd6bbbbc910759e11e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "58452f27aad45f766d713258c755566558ebcc85d356b1d96aeea691a0f5d624",
+      "output_sha256": "07d19b01907bca290071bffbb957121afcdb6500c16f3be79c6aa71ba042b829",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "bb01f63c25d13b93453810cf759bb531dceda41b4099341919087c6ba5e5693e",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "db2a791a3d127591a47f70afbf021d50f3a650e47bf56af42f08b300c421e9d3",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "bca3f3d83b804cb9744c9d455571ce6e64be2dd8cf405dcd6bbbbc910759e11e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "58452f27aad45f766d713258c755566558ebcc85d356b1d96aeea691a0f5d624",
+      "output_sha256": "07d19b01907bca290071bffbb957121afcdb6500c16f3be79c6aa71ba042b829",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "bb01f63c25d13b93453810cf759bb531dceda41b4099341919087c6ba5e5693e",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "db2a791a3d127591a47f70afbf021d50f3a650e47bf56af42f08b300c421e9d3",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "bca3f3d83b804cb9744c9d455571ce6e64be2dd8cf405dcd6bbbbc910759e11e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "58452f27aad45f766d713258c755566558ebcc85d356b1d96aeea691a0f5d624",
+      "output_sha256": "07d19b01907bca290071bffbb957121afcdb6500c16f3be79c6aa71ba042b829",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "bb01f63c25d13b93453810cf759bb531dceda41b4099341919087c6ba5e5693e",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "db2a791a3d127591a47f70afbf021d50f3a650e47bf56af42f08b300c421e9d3",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "bca3f3d83b804cb9744c9d455571ce6e64be2dd8cf405dcd6bbbbc910759e11e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "4d58eb83efc15fc08cbbcf4690be71d8c77b33a6b084f812f732fdfbf3287a9e",
+      "output_sha256": "1d044cf58c7a71f19736d5919a5852b871e52072c57f81efa4a32004f5ccb22b",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "58452f27aad45f766d713258c755566558ebcc85d356b1d96aeea691a0f5d624",
+      "output_sha256": "07d19b01907bca290071bffbb957121afcdb6500c16f3be79c6aa71ba042b829",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "decrement_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "f8800f6f2e67ed6b9d1f1e1886a2dd456db77b74abcd9f16c0396484bb6e3a1f",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "41b9f0b6723161a76d3fa714a5761d046fb3d784afaadbb2c09768db021b217b",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4eef58ad1c5f9d5711c6dbbc7e5947b75683e3114c7206d3681939c0dc7c558d",
+      "output_sha256": "ed67d9c11b9ba39e917a40a51c7624c6e27dd9a5ebd13583e523c09b7e28c6f1",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "f8800f6f2e67ed6b9d1f1e1886a2dd456db77b74abcd9f16c0396484bb6e3a1f",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "41b9f0b6723161a76d3fa714a5761d046fb3d784afaadbb2c09768db021b217b",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4eef58ad1c5f9d5711c6dbbc7e5947b75683e3114c7206d3681939c0dc7c558d",
+      "output_sha256": "ed67d9c11b9ba39e917a40a51c7624c6e27dd9a5ebd13583e523c09b7e28c6f1",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "68d976cc314d37fdbf9565c3fc9dc9d51166e2cec12ca557bb052c880918a0ee",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "f8800f6f2e67ed6b9d1f1e1886a2dd456db77b74abcd9f16c0396484bb6e3a1f",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "41b9f0b6723161a76d3fa714a5761d046fb3d784afaadbb2c09768db021b217b",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4eef58ad1c5f9d5711c6dbbc7e5947b75683e3114c7206d3681939c0dc7c558d",
+      "output_sha256": "ed67d9c11b9ba39e917a40a51c7624c6e27dd9a5ebd13583e523c09b7e28c6f1",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "68d976cc314d37fdbf9565c3fc9dc9d51166e2cec12ca557bb052c880918a0ee",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "f8800f6f2e67ed6b9d1f1e1886a2dd456db77b74abcd9f16c0396484bb6e3a1f",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "41b9f0b6723161a76d3fa714a5761d046fb3d784afaadbb2c09768db021b217b",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "80ba68cbe07b476bb66871f3b65a2b3cfb19c09519ffd8086860474166f4e1fc",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4eef58ad1c5f9d5711c6dbbc7e5947b75683e3114c7206d3681939c0dc7c558d",
+      "output_sha256": "ed67d9c11b9ba39e917a40a51c7624c6e27dd9a5ebd13583e523c09b7e28c6f1",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4de04622d98fe9ad5e675a3c47fdc9fd5ce7f8674c35a1066590d846fee3eab7",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1365ca69b52b9ef17ad9525ac0b7ef09f86a739aca851e9fed5b80a96a6837af",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "58452f27aad45f766d713258c755566558ebcc85d356b1d96aeea691a0f5d624",
+      "output_sha256": "ed67d9c11b9ba39e917a40a51c7624c6e27dd9a5ebd13583e523c09b7e28c6f1",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4de04622d98fe9ad5e675a3c47fdc9fd5ce7f8674c35a1066590d846fee3eab7",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1365ca69b52b9ef17ad9525ac0b7ef09f86a739aca851e9fed5b80a96a6837af",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "58452f27aad45f766d713258c755566558ebcc85d356b1d96aeea691a0f5d624",
+      "output_sha256": "ed67d9c11b9ba39e917a40a51c7624c6e27dd9a5ebd13583e523c09b7e28c6f1",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "68d976cc314d37fdbf9565c3fc9dc9d51166e2cec12ca557bb052c880918a0ee",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4de04622d98fe9ad5e675a3c47fdc9fd5ce7f8674c35a1066590d846fee3eab7",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1365ca69b52b9ef17ad9525ac0b7ef09f86a739aca851e9fed5b80a96a6837af",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "58452f27aad45f766d713258c755566558ebcc85d356b1d96aeea691a0f5d624",
+      "output_sha256": "ed67d9c11b9ba39e917a40a51c7624c6e27dd9a5ebd13583e523c09b7e28c6f1",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "68d976cc314d37fdbf9565c3fc9dc9d51166e2cec12ca557bb052c880918a0ee",
+      "records": 0,
+      "resolved": false,
+      "retrieved_tokens": 0,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 0,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "4de04622d98fe9ad5e675a3c47fdc9fd5ce7f8674c35a1066590d846fee3eab7",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "needs_memory",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1365ca69b52b9ef17ad9525ac0b7ef09f86a739aca851e9fed5b80a96a6837af",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 90,
+      "memory_sha256": "6459041aa0da29563389683dfe806635f870d685ee4463df50ab179a3511b53e",
+      "output_sha256": "6fc9ac5d7d6aa76c937378b3febdfa61f97f859c69f2ad637d4b86b16b19a810",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 90,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 300,
+      "memory_sha256": "58452f27aad45f766d713258c755566558ebcc85d356b1d96aeea691a0f5d624",
+      "output_sha256": "ed67d9c11b9ba39e917a40a51c7624c6e27dd9a5ebd13583e523c09b7e28c6f1",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "double_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "f73b347efbefb957bf5c66825e61baf021256cfacf4f911b1bd4e45ac5551956",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 280,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "0283b4405c54174d340f06da187b6e5a4570deaeecc6676f062cc0c1e3689ff9",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "no_signal",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 78,
+      "memory_sha256": "36a7209485d516f07e63d6d0df4ca92c0ff406db7b51d47acf1579f0e736a754",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 78,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "0283b4405c54174d340f06da187b6e5a4570deaeecc6676f062cc0c1e3689ff9",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "5a90ce6b4740b3947e7ae04b0801a6f3db39578df481f5db3988c1c328c74513",
+      "output_sha256": "b2b9472ffa4e730b2f80fc5c82e716b44210b07a11cd598caf44b4781e9efd5f",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "f73b347efbefb957bf5c66825e61baf021256cfacf4f911b1bd4e45ac5551956",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 280,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "0283b4405c54174d340f06da187b6e5a4570deaeecc6676f062cc0c1e3689ff9",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "no_signal",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 78,
+      "memory_sha256": "36a7209485d516f07e63d6d0df4ca92c0ff406db7b51d47acf1579f0e736a754",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 78,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "0283b4405c54174d340f06da187b6e5a4570deaeecc6676f062cc0c1e3689ff9",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "5a90ce6b4740b3947e7ae04b0801a6f3db39578df481f5db3988c1c328c74513",
+      "output_sha256": "b2b9472ffa4e730b2f80fc5c82e716b44210b07a11cd598caf44b4781e9efd5f",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "f73b347efbefb957bf5c66825e61baf021256cfacf4f911b1bd4e45ac5551956",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 280,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "0283b4405c54174d340f06da187b6e5a4570deaeecc6676f062cc0c1e3689ff9",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "no_signal",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 78,
+      "memory_sha256": "36a7209485d516f07e63d6d0df4ca92c0ff406db7b51d47acf1579f0e736a754",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 78,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "0283b4405c54174d340f06da187b6e5a4570deaeecc6676f062cc0c1e3689ff9",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "5a90ce6b4740b3947e7ae04b0801a6f3db39578df481f5db3988c1c328c74513",
+      "output_sha256": "b2b9472ffa4e730b2f80fc5c82e716b44210b07a11cd598caf44b4781e9efd5f",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "f73b347efbefb957bf5c66825e61baf021256cfacf4f911b1bd4e45ac5551956",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 280,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "0283b4405c54174d340f06da187b6e5a4570deaeecc6676f062cc0c1e3689ff9",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "no_signal",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 78,
+      "memory_sha256": "36a7209485d516f07e63d6d0df4ca92c0ff406db7b51d47acf1579f0e736a754",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 78,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "0283b4405c54174d340f06da187b6e5a4570deaeecc6676f062cc0c1e3689ff9",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "5a90ce6b4740b3947e7ae04b0801a6f3db39578df481f5db3988c1c328c74513",
+      "output_sha256": "b2b9472ffa4e730b2f80fc5c82e716b44210b07a11cd598caf44b4781e9efd5f",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "b6bdfaa6ff90630524568db5398e23d5da253d1ff2228c0d0888ccb65a3e791e",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 280,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1f412f2b66f36f6e9daecb102134c07142adc3d9bd0fa3a376f01c49992e0057",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "no_signal",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 78,
+      "memory_sha256": "36ae8dcd796f2cb3b57f5af31f57f95d20692b2d28ef5ae7131de6c430e60f5a",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 78,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1f412f2b66f36f6e9daecb102134c07142adc3d9bd0fa3a376f01c49992e0057",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "af31768e1c0eaccfff52840987e4a8566f2fb108c78efce91ca0e80c14ee08cc",
+      "output_sha256": "b2b9472ffa4e730b2f80fc5c82e716b44210b07a11cd598caf44b4781e9efd5f",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 0,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "b6bdfaa6ff90630524568db5398e23d5da253d1ff2228c0d0888ccb65a3e791e",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 280,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1f412f2b66f36f6e9daecb102134c07142adc3d9bd0fa3a376f01c49992e0057",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "no_signal",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 78,
+      "memory_sha256": "36ae8dcd796f2cb3b57f5af31f57f95d20692b2d28ef5ae7131de6c430e60f5a",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 78,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1f412f2b66f36f6e9daecb102134c07142adc3d9bd0fa3a376f01c49992e0057",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "af31768e1c0eaccfff52840987e4a8566f2fb108c78efce91ca0e80c14ee08cc",
+      "output_sha256": "b2b9472ffa4e730b2f80fc5c82e716b44210b07a11cd598caf44b4781e9efd5f",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 1,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "b6bdfaa6ff90630524568db5398e23d5da253d1ff2228c0d0888ccb65a3e791e",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 280,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1f412f2b66f36f6e9daecb102134c07142adc3d9bd0fa3a376f01c49992e0057",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "no_signal",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 78,
+      "memory_sha256": "36ae8dcd796f2cb3b57f5af31f57f95d20692b2d28ef5ae7131de6c430e60f5a",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 78,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1f412f2b66f36f6e9daecb102134c07142adc3d9bd0fa3a376f01c49992e0057",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "af31768e1c0eaccfff52840987e4a8566f2fb108c78efce91ca0e80c14ee08cc",
+      "output_sha256": "b2b9472ffa4e730b2f80fc5c82e716b44210b07a11cd598caf44b4781e9efd5f",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 2,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "off",
+      "clean_store": true,
+      "gate_reason": "off",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k10",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "b6bdfaa6ff90630524568db5398e23d5da253d1ff2228c0d0888ccb65a3e791e",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 10,
+      "resolved": true,
+      "retrieved_tokens": 280,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "always_on_k3",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1f412f2b66f36f6e9daecb102134c07142adc3d9bd0fa3a376f01c49992e0057",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "gated_k3",
+      "clean_store": true,
+      "gate_reason": "no_signal",
+      "injected_tokens": 0,
+      "memory_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 0,
+      "resolved": true,
+      "retrieved_tokens": 0,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "fix_span",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 78,
+      "memory_sha256": "36ae8dcd796f2cb3b57f5af31f57f95d20692b2d28ef5ae7131de6c430e60f5a",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 78,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "raw",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 84,
+      "memory_sha256": "1f412f2b66f36f6e9daecb102134c07142adc3d9bd0fa3a376f01c49992e0057",
+      "output_sha256": "acc257d39f74be49ced92592a6010bd3cd2f27fabe6cac2e4a02b93981417228",
+      "records": 3,
+      "resolved": true,
+      "retrieved_tokens": 84,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    },
+    {
+      "arm": "irrelevant",
+      "clean_store": true,
+      "gate_reason": "always_on",
+      "injected_tokens": 280,
+      "memory_sha256": "af31768e1c0eaccfff52840987e4a8566f2fb108c78efce91ca0e80c14ee08cc",
+      "output_sha256": "b2b9472ffa4e730b2f80fc5c82e716b44210b07a11cd598caf44b4781e9efd5f",
+      "records": 10,
+      "resolved": false,
+      "retrieved_tokens": 300,
+      "seed": 3,
+      "solver": "fixture-v1",
+      "steps": 1,
+      "task": "absolute_no_anchor",
+      "total_tokens": null
+    }
+  ],
+  "schema_version": 1,
+  "seeds": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "strata": {
+    "0/4": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0,
+          "steps": 0,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      }
+    },
+    "0/4:anchor": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0,
+          "steps": 0,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      }
+    },
+    "0/4:no_anchor": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0,
+          "steps": 0,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 1.0,
+        "delta_resolve_rate_ci95": [
+          1.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      }
+    },
+    "1-3/4": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -0.5,
+        "delta_resolve_rate_ci95": [
+          -0.5,
+          -0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0.5,
+          "injected_tokens": 300,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0.5,
+          "steps": 0.5,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      }
+    },
+    "1-3/4:anchor": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -0.5,
+        "delta_resolve_rate_ci95": [
+          -0.5,
+          -0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0.5,
+          "injected_tokens": 300,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0.5,
+          "steps": 0.5,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      }
+    },
+    "1-3/4:no_anchor": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 300,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -0.5,
+        "delta_resolve_rate_ci95": [
+          -0.5,
+          -0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0.5,
+          "injected_tokens": 300,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0.5,
+          "steps": 0.5,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.5,
+          0.5
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 90,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      }
+    },
+    "4/4": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 280,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 78,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -1.0,
+        "delta_resolve_rate_ci95": [
+          -1.0,
+          -1.0
+        ],
+        "metrics": {
+          "distraction_rate": 1,
+          "injected_tokens": 280,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 8,
+        "task_count": 2
+      }
+    },
+    "4/4:anchor": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 280,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 78,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -1.0,
+        "delta_resolve_rate_ci95": [
+          -1.0,
+          -1.0
+        ],
+        "metrics": {
+          "distraction_rate": 1,
+          "injected_tokens": 280,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      }
+    },
+    "4/4:no_anchor": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 280,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 78,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -1.0,
+        "delta_resolve_rate_ci95": [
+          -1.0,
+          -1.0
+        ],
+        "metrics": {
+          "distraction_rate": 1,
+          "injected_tokens": 280,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 84,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 4,
+        "task_count": 1
+      }
+    },
+    "all": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.16666666666666666,
+          0.8333333333333334
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 293.3333333333333,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 24,
+        "task_count": 6
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.16666666666666666,
+          0.8333333333333334
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 88,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 24,
+        "task_count": 6
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.16666666666666666,
+          0.8333333333333334
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 82,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 24,
+        "task_count": 6
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.16666666666666666,
+          0.8333333333333334
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 60,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 24,
+        "task_count": 6
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -0.5,
+        "delta_resolve_rate_ci95": [
+          -0.8333333333333334,
+          -0.16666666666666666
+        ],
+        "metrics": {
+          "distraction_rate": 0.5,
+          "injected_tokens": 293.3333333333333,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 24,
+        "task_count": 6
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0.5,
+          "steps": 0.5,
+          "total_tokens": null
+        },
+        "sample_count": 24,
+        "task_count": 6
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.16666666666666666,
+          0.8333333333333334
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 88,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 24,
+        "task_count": 6
+      }
+    },
+    "anchor": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 293.3333333333333,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 88,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 82,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 60,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -0.5,
+        "delta_resolve_rate_ci95": [
+          -1.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0.5,
+          "injected_tokens": 293.3333333333333,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0.5,
+          "steps": 0.5,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 88,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      }
+    },
+    "no_anchor": {
+      "always_on_k10": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 293.3333333333333,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "always_on_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 88,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "fix_span": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 82,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "gated_k3": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 60,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "irrelevant": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": -0.5,
+        "delta_resolve_rate_ci95": [
+          -1.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0.5,
+          "injected_tokens": 293.3333333333333,
+          "resolve_rate": 0,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "off": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.0,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          0.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 0,
+          "resolve_rate": 0.5,
+          "steps": 0.5,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      },
+      "raw": {
+        "claims": {
+          "distraction_rate": "no claim",
+          "injected_tokens": "no claim",
+          "resolve_rate": "synthetic-task calibration only; no product claim",
+          "steps": "no claim",
+          "total_tokens": "no claim"
+        },
+        "delta_resolve_rate": 0.5,
+        "delta_resolve_rate_ci95": [
+          0.0,
+          1.0
+        ],
+        "metrics": {
+          "distraction_rate": 0,
+          "injected_tokens": 88,
+          "resolve_rate": 1,
+          "steps": 1,
+          "total_tokens": null
+        },
+        "sample_count": 12,
+        "task_count": 3
+      }
+    }
+  },
+  "tokenizer": "whitespace words (protocol units, not model tokens)"
+}
