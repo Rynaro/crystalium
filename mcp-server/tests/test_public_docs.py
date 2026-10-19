@@ -13,7 +13,16 @@ from starlette.testclient import TestClient
 from crystalium.config import Config
 from crystalium.server import _build_server, build_http_app
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _documentation_root() -> Path:
+    """Locate checked-out or image-baked docs without assuming the test layout."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "README.md").is_file() and (parent / "schemas").is_dir():
+            return parent
+    raise FileNotFoundError("Documentation tests require README.md and schemas beside the docs")
+
+
+ROOT = _documentation_root()
 
 
 def _check_http_docs(readme: str, config: Config) -> None:

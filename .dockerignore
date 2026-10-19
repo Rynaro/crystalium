@@ -20,6 +20,9 @@ __pycache__/
 !PERSONA.md
 !README.md
 !AGENTS.md
+# Additional guidance consumed by public-doc tests in the dev image only.
+!CLAUDE.md
+!docs/memory-injection.md
 
 # Install target (consumer-side; not part of the image)
 .eidolons/
