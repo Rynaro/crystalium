@@ -10,6 +10,8 @@ live-solver evidence.
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-10-19
+
 ### Fixed
 - Release wire verification now belongs to CRYSTALIUM (`evals/wire/`), with a
   provenance-recorded released v2.4.0 baseline, pre-mask shape/null guards,
