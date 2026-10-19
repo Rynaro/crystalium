@@ -1,404 +1,236 @@
-# CRYSTALIUM
+<div align="center">
+  <img src="docs/assets/crystalium-mark.svg" width="112" alt="Faceted crystal mark" /><br />
+  <h1>CRYSTALIUM</h1>
+  <strong>Persistent memory for MCP agents, with provenance and trust at the center.</strong><br />
+  Keep useful project context between sessions. Let the agent decide what it means.
+</div>
 
-The shared four-layer memory substrate for the Eidolons roster. Stores, gates, retrieves, consolidates, and forgets memory. Does not reason, plan, or write code — reasoning lives in the consuming Eidolon.
+<p align="center">
+  <a href="https://github.com/Rynaro/crystalium/actions/workflows/ci.yml"><img src="https://github.com/Rynaro/crystalium/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache 2.0 license" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-server-7057ff" alt="MCP server" /></a>
+  <a href="https://github.com/Rynaro/crystalium/releases/latest"><img src="https://img.shields.io/github/v/release/Rynaro/crystalium?label=release&color=0ea5a4" alt="Latest release" /></a>
+</p>
 
-## Status
+> **CRYSTALIUM is a local memory service, not an agent.** It stores, protects, finds, and consolidates information. Your MCP client or agent remains responsible for reasoning and action.
 
-**v1.0.0 — roster member** of the Eidolons roster (`Rynaro/eidolons`, `capability_class: memory`). Every roster Eidolon writes its handoffs into CRYSTALIUM and recalls them back out. EIIS 3.0 + ECL v2.0 conformant; `pytest -m conformance` green (G1–G8 + mechanical invariants, blocking CI job). Container-first — all Python toolchain runs inside Docker; the host runs only `docker compose`, `git`, and `make`.
+## Start here
 
-CRYSTALIUM is **infrastructure, not an agent.** It is the bidirectional substrate the roster shares: it stores/gates/retrieves/consolidates/forgets; the reasoning, planning, and code-writing live in the Eidolon that calls `crystalium.recall`, `crystalium.commit`, `crystalium.ingest`, etc.
+- [Connect an MCP client](#connect-an-mcp-client)
+- [Understand the four memory layers](#four-layers-one-memory-system)
+- [Try a read-only request](#try-a-read-only-request)
+- [Explore the MCP tools](#mcp-surface)
+- [Configure memory behavior](#memory-injection-is-deliberate)
+- [Contribute](#contributing)
 
----
+## Why CRYSTALIUM?
 
-## Architecture (10-second version)
+Agents often start a new session without the decisions, fixes, and working patterns that made the last one useful. CRYSTALIUM gives MCP clients a shared, persistent place to keep that context, with records scoped by project and guarded as they move between trust levels.
 
-```
-HOST (operator only: docker, git, make)
-    │
-    ├─→ docker compose run --rm crystalium
-    │
-    ├─→ MCP stdio server (JSON-RPC 2.0)
-    │
-    ├─→ enforcement.py (CHOKEPOINT)
-    │   • assert_tier_allowed (tier × layer × op matrix)
-    │   • assert_no_path_escape (symlink + traversal guard)
-    │   • assert_rate_limit (200 calls/min sliding window)
-    │   • record telemetry (structlog JSONL + OpenTelemetry)
-    │
-    ├─→ Four memory layers
-    │   • Episodic (pointers, quarantine-by-default)
-    │   • Semantic (gated promotion, indefinite)
-    │   • Procedural (verifier-gated, skills)
-    │   • Execution (ephemeral, TTL)
-    │
-    ├─→ Aetheryte II (hybrid recall)
-    │   • BM25 (SQLite + FTS5, sparse)
-    │   • Vector (LanceDB, dense)
-    │   • Graph (KuzuDB, structured facts)
-    │   • active-only recall (excludes deprecated/superseded — default ON)
-    │
-    └─→ Dream worker (async, idle-triggered)
-        • Orient → Gather → Consolidate → Prune
-        • Runs outside MCP request context
-        • Proposes (never force-writes)
+It connects through the **Model Context Protocol (MCP)**, an open protocol for applications to expose tools and context to AI clients. CRYSTALIUM is an MCP server: your client discovers its tools and calls them over stdio or Streamable HTTP.
 
-Storage:
-  • Indices + metadata in SQLite/LanceDB/KuzuDB (queryable, cacheable)
-  • Episodic payloads on filesystem (content-addressed, immutable)
-  • All under ~/.crystalium/<project>/ (portable, local-first)
+The service does not train a model or inject every stored memory into every prompt. An agent asks for relevant context; CRYSTALIUM applies scope, access, redaction, and retrieval rules, then returns bounded results. The agent decides what to do with them.
 
-Every tool result emits an ECL v2.0 envelope sidecar (integrity via SHA-256).
-```
+**Use it when** an agent should carry useful context between sessions, preserve the source of a handoff, or retrieve a previously verified fix. It can run as a standalone MCP server; Eidolons roster membership is not required.
 
----
+## Connect an MCP client
 
-## Quick start (container-first)
+### Requirements
+
+- Git
+- Docker with Docker Compose v2
+- An MCP client that supports stdio servers
+
+1. Clone the repository and build the image:
 
 ```bash
-git clone https://github.com/Rynaro/crystalium
+git clone https://github.com/Rynaro/crystalium.git
 cd crystalium
-
-# Build and smoke-test
 docker compose build
-docker compose run --rm crystalium make test
-
-# Start the MCP server (host connects via stdio)
-docker compose up crystalium
 ```
 
-The server listens on stdin/stdout. Wire it to Claude Code, Cursor, Copilot, or opencode via `.mcp.json`:
+The first use of embeddings downloads the `bge-m3` model. Allow network access for that initial model download.
+
+2. Add this server entry to your MCP client's configuration. It uses the common `mcpServers` wrapper; clients may use a different wrapper or configuration file location, so adapt the surrounding format to your client. Replace both occurrences of `/absolute/path/crystalium` with the full path to your checkout.
 
 ```json
 {
   "mcpServers": {
     "crystalium": {
       "command": "docker",
-      "args": ["compose", "run", "--rm", "-i", "crystalium", "python", "-m", "crystalium", "serve"]
+      "args": [
+        "compose", "-f", "/absolute/path/crystalium/docker-compose.yml",
+        "--project-directory", "/absolute/path/crystalium",
+        "run", "--rm", "-T", "crystalium",
+        "python", "-m", "crystalium", "serve"
+      ]
     }
   }
 }
 ```
 
-**No host `pip`, `uv`, `python`, or `pytest` invocations.** All dev commands run inside the container via `docker compose run --rm crystalium <cmd>` or `make` targets. Per-host setup guides live in `hosts/{claude-code,cursor,copilot,opencode}.md`.
+3. Restart or reload the MCP client, then discover the `crystalium` tools. A successful connection exposes 10 tools. The server uses stdio: Docker keeps its standard input connected, and `-T` disables a pseudo-terminal so JSON-RPC traffic stays clean. The Compose named volume `crystalium_data_v2` stores runtime data under `/data`; the default project store is `/data/default` inside the container.
 
-### Streamable HTTP
+### Try a read-only request
 
-Stdio is the default. To serve Streamable HTTP through Docker:
+Call `assemble_context` with a project scope and a question:
+
+```json
+{
+  "scope": {"project": "default"},
+  "query": "What fixed the failing test?",
+  "k": 3,
+  "needs_memory": true,
+  "layers": ["semantic", "episodic", "procedural"]
+}
+```
+
+A new store has no memories, so an empty result is expected. To receive context, the client must first commit or ingest records through the available write tools and tier checks. The server's `CRYSTALIUM_DATA_DIR` selects the store directory; `scope.project` must match its canonical basename. A scope value alone does not create or provision a directory.
+
+### Use a separate project store
+
+To use another store, add the environment option to the MCP server command **before** the Compose service name, then use its basename as `scope.project`:
+
+```json
+"args": [
+  "compose", "-f", "/absolute/path/crystalium/docker-compose.yml",
+  "--project-directory", "/absolute/path/crystalium",
+  "run", "--rm", "-T", "-e", "CRYSTALIUM_DATA_DIR=/data/my-project",
+  "crystalium", "python", "-m", "crystalium", "serve"
+]
+```
+
+Send `"scope":{"project":"my-project"}` in tool requests. The process configuration selects the directory; the matching scope key labels the project for access and retrieval. Separate projects use separate stores within the named volume.
+
+## Four layers, one memory system
+
+| Layer | In plain language | Typical contents |
+|---|---|---|
+| **Episodic** | What happened | Session outcomes, source-backed events, and newly received records; untrusted input can remain quarantined. |
+| **Semantic** | What appears to be true | Curated facts and stable project conventions, promoted through review gates. |
+| **Procedural** | How to do a task | Reusable skills or recipes admitted through verification. |
+| **Execution** | What is in progress | Short-lived checkpoints and replanning state with a time-to-live. |
+
+Records retain provenance and trust information. When multiple records contribute to a derived memory, the lowest trust level propagates; consolidation cannot silently upgrade untrusted input. The Dream worker performs background consolidation and pruning between MCP requests; it proposes changes through the same gates rather than bypassing them.
+
+```mermaid
+flowchart LR
+    C[MCP client or agent] <-->|stdio or Streamable HTTP| S[CRYSTALIUM MCP server]
+    S --> G[Enforcement and provenance]
+    G --> R[SQLite and FTS5<br/>metadata and lexical search]
+    G --> V[LanceDB<br/>semantic vector search]
+    G --> X[KuzuDB graph<br/>content-addressed blobs]
+    R --> Q[Scoped, redacted recall]
+    V --> Q
+    X --> Q
+    Q --> C
+```
+
+The server owns persistence and policy; the client owns the reasoning loop. Local embedded stores are the default. Optional integrations and transport choices are configuration-dependent; see [the design rationale](DESIGN-RATIONALE.md) before making deployment or privacy assumptions.
+
+The working-set composer limits selected context to **3,500 tokens total** across its slots. This is a separate budget from `assemble_context`'s requested record cap (`k`, recommended at 3 or fewer); retrieved records can be omitted when the composer budget is full.
+
+## MCP surface
+
+The server exposes **10 tools** and is currently **tools-only**. MCP resources, prompts, structured output, and elicitation are not shipped. Serialized JSON in text content is not MCP structured output.
+
+| Tool | What it does |
+|---|---|
+| `assemble_context(scope, query, k, needs_memory, prior_failure, layers)` | Returns bounded task context when the configured memory gate opens. |
+| `recall(scope, query, k, layers, explain)` | Searches explicitly across lexical, vector, and graph signals. |
+| `commit(layer, payload, provenance)` | Writes a record through tier and path enforcement. |
+| `ingest(envelope, payload)` | Imports an ECL handoff while preserving its source and trust. |
+| `update(id, patch, reason)` | Revises a record with an auditable reason. |
+| `skill_invoke(name, args)` | Runs the verifier for procedural skill admission. |
+| `plan_checkpoint(state)` | Saves short-lived execution state. |
+| `plan_replan(diff)` | Records a change to execution state. |
+| `session_end(reason)` | Signals the end of a session and queues consolidation work. |
+| `graph_export(scope, format, layers, limit, include)` | Exports a scoped, redacted graph view. |
+
+---
+
+Successful tool calls write ECL v2.0 envelope sidecars with SHA-256 integrity metadata to the local run directory. See the [EIIS installation contract](SPEC.md) and [ECL envelope notes](CRYSTALIUM.md) for protocol details.
+
+## Memory injection is deliberate
+
+For task context, recall only when there is an explicit need, a prior failure, or ambiguity that relevant prior records could resolve. In `assemble_context`, express ambiguity with `needs_memory=true`; there is no separate ambiguity flag or hidden classifier. The defaults for `needs_memory` and `prior_failure` are both `false`.
+
+Request `k<=3` and prefer relevant verified fix-span records over broad session narratives. This guidance is **provisional pending representative coding evaluation**. The planted fixture report is synthetic calibration, not evidence of a live-solver benefit or a reason to change defaults.
+
+Use `recall` when explicitly searching memory; its API default remains `k=10`. That default does not recommend unconditional prompt injection. Typed fix-span records and optional ingest proposals are documented in [structured repair records](docs/fix-spans.md); both feature flags default off.
+
+See [memory injection: configuration and evaluation](docs/memory-injection.md), the [coding A/B harness](evals/coding_ab/README.md), and its [fixture report](evals/coding_ab/results/fixture/report.md) for the behavior and limits of current evidence.
+
+## Trust and deployment
+
+Each write passes through a shared enforcement chokepoint for tier, path, and rate checks. The trust tiers distinguish who or what supplied a record:
+
+| Tier | Source | Treatment |
+|---|---|---|
+| **T0** | Operator | May perform operator-only actions such as audited forgetting. |
+| **T1** | Trusted agent | Writes under the configured layer and operation rules. |
+| **T2** | Lower-trust agent | May write Episodic records and Procedural candidates; cannot write Semantic or Execution records or promote candidates. |
+| **T3** | Tool-origin or otherwise untrusted input | Constrained and quarantined by default; cannot gain trust through consolidation. |
+
+Ordinary `update` operations preserve history through bitemporal tracking and never hard-delete records. Forgetting is a distinct, audited operator action. See [the specification](SPEC.md) for the full tier matrix and [the design rationale](DESIGN-RATIONALE.md) for the policy decisions.
+
+The default stdio server uses local embedded storage. Streamable HTTP is available for clients that need it, but the application does **not** provide authentication or TLS. Caller identity comes from server process configuration, not authenticated HTTP client credentials. Keep the service on loopback unless it is behind an authenticated TLS proxy.
+
+To run Streamable HTTP in Docker, publish only the local loopback port:
 
 ```bash
 docker compose run --rm -p 127.0.0.1:8848:8848 \
-  -e CRYSTALIUM_TRANSPORT=http -e CRYSTALIUM_HTTP_HOST=0.0.0.0 \
+  -e CRYSTALIUM_TRANSPORT=http \
+  -e CRYSTALIUM_HTTP_HOST=0.0.0.0 \
   crystalium python -m crystalium serve
 ```
 
-Connect an MCP HTTP client to `http://127.0.0.1:8848/mcp/`. The ASGI mount is
-`/mcp`; the trailing slash avoids its redirect. Native binding defaults to
-`127.0.0.1:8848`; Docker needs `0.0.0.0` inside the container and the explicit
-host port mapping above. Configure `CRYSTALIUM_HTTP_PORT` and
-`CRYSTALIUM_HTTP_PATH` to change the port or mount. JSON responses and stateless
-sessions default on (`CRYSTALIUM_HTTP_JSON_RESPONSE`, `CRYSTALIUM_HTTP_STATELESS`).
+Connect to `http://127.0.0.1:8848/mcp/`. The trailing slash avoids a redirect. The container binds to `0.0.0.0` internally while Docker exposes the service only on host loopback. See [CRYSTALIUM.md](CRYSTALIUM.md) for HTTP configuration details.
 
-The application provides no authentication or TLS termination. The recipe
-publishes only to host loopback; remote access needs an authenticated TLS proxy.
-Caller identity comes from server process configuration, not authenticated HTTP
-client credentials; HTTP does not confer a higher trust tier. Both transports
-use the same tool dispatch and enforcement chokepoint.
+<!-- eiis-v3-package:start -->
+## Install as an EIIS package
 
-### Build variant: CPU (default) vs GPU
+The repository includes an EIIS package installer for compatible agents. See [INSTALL.md](INSTALL.md) for the package contents and install steps. The standalone MCP server above does not depend on this installer.
+<!-- eiis-v3-package:end -->
 
-The default image is **CPU-only (~2 GB)**. `torch` is pinned to PyTorch's CPU wheel index, so the image carries no NVIDIA CUDA runtime — crystalium's embedding workload (single-text `sentence-transformers` encode) sees no GPU benefit, and the published `ghcr.io/rynaro/crystalium:latest` is CPU-only.
+## Choose your path
 
-A GPU build is available for bulk re-embedding on amd64 + NVIDIA hosts (~6 GB, pulls the CUDA cu121 stack). It is **buildable-only**, not published:
+| If you are… | Start with… |
+|---|---|
+| **New to agent memory** | [The four layers](#four-layers-one-memory-system), then [your first request](#try-a-read-only-request). |
+| **Integrating a client** | [MCP tools](#mcp-surface), [memory injection behavior](docs/memory-injection.md), then [operator configuration](CRYSTALIUM.md). |
+| **Evaluating memory behavior** | [Coding A/B harness](evals/coding_ab/README.md), [wire evaluation](evals/wire/README.md), and [benchmark notes](evals/BENCH-NOTES.md) for evidence scope and limitations. |
+| **Contributing** | [Development standards](AGENTS.md), then [the roadmap](ROADMAP-POST-1.0.md). |
+
+For system-level details, read the [authoritative specification](SPEC.md), [architecture and research notes](CRYSTALIUM.md), [design decisions](DESIGN-RATIONALE.md), and [release history](CHANGELOG.md). Typed repair records are described in [docs/fix-spans.md](docs/fix-spans.md).
+
+## Troubleshooting
+
+**The client does not show CRYSTALIUM tools.** Confirm Docker is available, the image built successfully, the client configuration points to the absolute repository path, and the client was restarted after editing its configuration. Inspect the MCP client's server logs for startup errors.
+
+**The first request takes a while.** The embedding model is downloaded on first embedding use. Allow that download to finish before retrying.
+
+**A query returns no records.** An empty store returns an empty result. Check that the writer used the same `scope.project` as the reader and that the relevant memory passed its write and trust gates.
+
+**`ModuleNotFoundError: No module named 'crystalium'`.** Run the server with the Compose project directory set to the repository root as shown above.
+
+## Contributing
+
+Issues and pull requests are welcome. For a local development setup, build the container and use the repository's host wrappers:
 
 ```bash
-make build              # cpu (default)
-make build VARIANT=gpu  # gpu (CUDA cu121, amd64-only)
-# or, plain docker:
-docker build --build-arg TORCH_VARIANT=gpu -t crystalium:gpu .
+docker compose build
+make test
+make lint
+make test-schemas
 ```
 
----
-
-## What it gives the Eidolons
-
-- **Memory across sessions.** Episodic recall of past missions, PRs, and outcomes.
-- **Consolidated facts.** Semantic layer curates API signatures, project conventions, design decisions — promoted only on ≥k independent witnesses.
-- **Verified skills.** Procedural layer stores tested refactoring recipes and proven patterns; a sandboxed verifier gates admission.
-- **A shared handoff bus.** `crystalium.ingest` absorbs every roster ECL handoff (ATLAS scout-reports, SPECTRA specs, VIGIL root-cause reports, …) preserving provenance and the MIN trust tier; T3/tool-origin artifacts land Episodic-quarantined, never laundered up.
-- **Bounded working set.** The composer enforces a ≤3,500-token budget with deterministic eviction, freeing the agent to focus on reasoning.
-- **Trust propagation.** Multi-agent consolidation takes the minimum trust tier of inputs, blocking poison laundering.
-
----
-
-## What it doesn't do
-
-- **Reason.** No inference loop, no planning, no goal-seeking.
-- **Provide raw autonomy.** Constrained interfaces: agents call `recall`; Dream proposes (never force-writes).
-- **Require external services.** Fully self-hosted (SQLite, LanceDB, KuzuDB embedded); optional Ollama for redaction.
-
----
-
-## MCP surface (tools-only; 10 tools)
-
-The server currently exposes **tools-only** application capabilities. The nine
-original tools below are joined by `assemble_context`, shipped in
-[#71](https://github.com/Rynaro/crystalium/issues/71). MCP resources, prompts,
-structured output (`outputSchema` / `structuredContent`), and elicitation are
-roadmap items, not shipped capabilities. Tool results carry serialized payloads
-in text content; JSON text is not MCP structured output. Initialization
-instructions and Streamable HTTP transport are available independently.
-
-### Task context and explicit search
-
-Use memory only when a gate is true: explicit need, prior failure, or ambiguity
-that prior records could resolve. Request `k<=3` and prefer
-relevant verified fix-span records over broad session narratives. This guidance
-is **provisional pending representative coding evaluation** from
-[#74](https://github.com/Rynaro/crystalium/issues/74).
-
-Use `assemble_context` for task context. In default `gated` mode, injection requires
-`needs_memory=true` or `prior_failure=true`; both signals default to false.
-Represent memory-relevant ambiguity with `needs_memory=true`; there is no separate
-ambiguity flag or automatic classifier. Recommend `k<=3` (default 3), with a hard
-cap on selected records:
-
-```json
-{"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":3,"needs_memory":true,"layers":["semantic","episodic","procedural"]}
-```
-
-Keep `recall` for explicit memory search: its default `k=10` and existing behavior
-are unchanged; callers can explicitly request 10. This API default is not a
-recommendation for unconditional context injection. Both tools require
-`scope.project` and `query`. Use the canonical
-project key in the server initialization instructions (the `CRYSTALIUM_DATA_DIR`
-basename). Correct an input error once; report unavailable or repeatedly failed
-tools. Host wiring must expose and invoke the appropriate tool.
-See [memory injection migration, configuration, and evaluation](docs/memory-injection.md).
-The [coding memory A/B harness](evals/coding_ab/README.md) executes paired, isolated
-fixture repairs through Crystalium MCP with bootstrap intervals and a harmful-memory
-control. Its [first report](evals/coding_ab/results/fixture/report.md) calibrates the
-instrument; it makes no coding-model efficacy claim.
-For typed repair facts and optional ingest proposals, see
-[structured repair records](docs/fix-spans.md) (both feature flags default off).
-
-| Tool | Purpose | Gated by |
-|---|---|---|
-| `assemble_context(scope, query, k=3, layers, needs_memory, prior_failure)` | Conditional selection of protected, redacted recall summaries; final record cap | Operator mode + explicit need/failure signals |
-| `recall(scope, query, k=10, layers, explain)` | Hybrid BM25+vector+graph retrieval with reranking; explicit `scope.project` isolates results; `explain=true` attaches a diagnostic object | Rate limit only |
-| `commit(layer, payload, provenance)` | Write with tier enforcement + bi-temporal tracking | Tier matrix (G1–G4) |
-| `ingest(envelope, payload)` | Ingest a roster ECL handoff (v1.x/v2.x) → `crystal.v1`; native artifact preserved verbatim in `encoding_context`; commits through the chokepoint (MIN trust tier; T3 → episodic-quarantine) | Tier matrix (G1) |
-| `update(id, patch, reason)` | Field edits with invalidate-old; never hard-delete | Tier matrix (G1, G4) |
-| `skill_invoke(name, args)` | Sandbox verifier for procedural admission | Sandbox contract (G3) |
-| `plan_checkpoint(state)` | Execution layer checkpoint (TTL-bound) | Tier matrix (G1) |
-| `plan_replan(diff)` | Execution layer replan diff | Tier matrix (G1) |
-| `session_end(reason)` | Enqueue Dream immediately (else idle-polled every 60s) | Rate limit only |
-| `graph_export(scope, format, layers, limit, include)` | Export the scoped memory graph as `nodes[]+edges[]` (JSON/GraphML/Cytoscape); redacted summaries, never raw blob | Rate limit only |
-
-All results emit ECL v2.0 envelope sidecars with 11 required fields and SHA-256 integrity.
-
----
-
-## The capability arc (W1 → W8)
-
-CRYSTALIUM reached 1.0 over eight waves. The discipline throughout: **neuroscience-as-hypothesis, ablation-as-arbiter** — every augment is motivated by a neuroscience/philosophy anchor but ships **behind a default-OFF flag**, and flips ON only on a confound-free A/B win on its named metric. The citation generates the design; the bench is the arbiter.
-
-| Wave | Theme | What landed |
-|---|---|---|
-| **W1** | Foundations & eval spine | Four-layer harness, one enforcement chokepoint, MCP stdio server, hybrid Aetheryte recall, ECL emission, EIIS install, the canary + ablation bench |
-| **W2** | Importance as EVB | EVB importance scorer (Gain×Need, Mattar & Daw 2018) + `memory_dynamics` persistence |
-| **W3** | The Dream becomes intelligent | Prioritized replay, CLS interleaving, synaptic-tagging consolidation (STC) |
-| **W4** | Forgetting as a faculty | FSRS/DSR decay, value-aware eviction, spaced re-surfacing, Ricoeur-protected class, right-to-be-forgotten |
-| **W5** | Retrieval intelligence (Aetheryte II) | Pattern completion, encoding-specificity re-rank, pattern-separation dedup-merge, predictive prefetch |
-| **W6** | Security & integrity hardening | Belief-drift detection, quarantine triage, write-conflict detection, active-only recall, poisoning resistance |
-| **W7** | Eidolons integration | `crystalium.ingest` (8th tool) + EIIS 3.0 finalization (host wiring, AGENTS.md frontmatter, standalone + multi-member verified) |
-| **W8** | Conformance freeze & roster publication | `conformance` suite + blocking CI, honest canary repair, availability SLO, roster entry published |
-
----
-
-## Ablation record (the methodology, honestly)
-
-The numbers and verdicts below are historical, synthetic, self-reported fixture
-measurements [S], not external benchmark results or coding-agent efficacy evidence.
-
-Across the six algorithmic waves (W2–W6), **8 augments were A/B-tested**. Net: **2 earned their flip ON; 6 stayed OFF as documented honest nulls.** None was shipped green by lowering a bar. The two ON-by-default behaviors are the only runtime change from v0.1:
-
-| Flag | Wave | Verdict | Default |
-|---|---|---|---|
-| `write_dedup_merge` | W5 | **PASS** — write amp 1.0→0.667, precision held; confound-free (real bge-m3 on genuine paraphrases) | **ON** |
-| `recall_active_only` | W6 | **PASS** — poisoning ASR 1.00→0.00, tier wall 8/8; also a correctness fix | **ON** |
-| `evb_enabled` | W2 | INCONCLUSIVE (ties on DoD; the real precision effect the DoD's recall metrics can't see) | OFF |
-| `dream_replay_evb` / `dream_interleave` / `dream_stc` | W3 | INCONCLUSIVE (coarse single-cluster `_gather` can't exercise per-fact dynamics) | OFF |
-| `forgetting_fsrs` | W4 | INCONCLUSIVE (neither arm plateaus at default params over 24 ticks) | OFF |
-| `recall_completion` / `recall_context_match` | W5 | INCONCLUSIVE (7-crystal fixture too small to create a graph-reachable gap) | OFF |
-| `recall_prefetch` | W5 | PASS-BUT-CONFOUNDED (harness fed the exact verbatim future query) | OFF |
-| `drift_detect` | W6 | OFF (cosine is a [PROXY] for contradiction — a genuine contradiction scored 0.696 < 0.80 band) | OFF |
-| `write_conflict_detect` | W6 | OFF (gate doesn't isolate a conflict-specific win; LWW trust-inversion risk) | OFF |
-
-The six nulls are not a weakness — they are the arbiter working. Each faculty ships fully tested behind its flag; what the synthetic v0.1 fixtures could not yet *discriminate* is documented as a backlog item with an exit criterion. Full table, marker legend, and per-wave reasoning: `DESIGN-RATIONALE.md` §D6.7. Per-gate A/B verdicts: `evals/BENCH-NOTES.md`. The "earn the flags" re-run plan: `ROADMAP-POST-1.0.md` §T2.
-
----
-
-## Conformance & quality
-
-- **`pytest -m conformance` is the contract:** green is conformant. It covers G1–G8 plus the mechanical invariants — path-escape guard, rate limit, ECL 11-field + SHA-256 integrity, trust-tier MIN propagation, never-hard-delete (except audited RTBF), and the working-set ≤3500 cap. Run as a blocking CI job.
-- **`PERSONA.md` ≤1,000 tokens** (CI-verified via tiktoken).
-- **Composer working set ≤3,500 tokens** (G6 invariant, pinned to the literal 3500).
-- **`install.sh` idempotent** (CI "second-run-no-diff" job).
-- **Never hard-delete** except the one sanctioned, audited right-to-be-forgotten op.
-
----
-
-## Honest 1.0 caveats
-
-Historical v1.0 synthetic, self-reported measurements [S] (see
-`ROADMAP-POST-1.0.md`); these describe that release, not the current tree:
-
-- **Canary below the 0.80 bar by one mission.** After an honest harness repair (de-vacuumed off-arm, fixed bit-rot + the double-run, episodic + isolated missions), memory-on beats memory-off **+0.75** (0.75 vs 0.00) — a full reversal of the prior −0.75 — but lands below 0.80 by exactly one mission: CAN-4, a recall-after-bi-temporal-update re-index `[GAP]` (the updated revision isn't re-embedded into the dense index).
-- **Recall p95 ~205 ms** (embedder-bound — essentially one bge-m3 forward pass on CPU) vs the 200 ms target; availability 100% (≥99% ✓).
-
-Both numbers are **[PROXY] [S]** — from a synthetic harness, not production traffic.
-The CAN-4 re-index gap was subsequently fixed (see `CHANGELOG.md`); the old
-headline is retained here as release history.
-
-### Claims & evidence
-
-No external coding benchmark result is claimed. Canary and ablation measurements
-are synthetic/self-reported [S]. The [#74 harness](evals/coding_ab/README.md) and
-its [fixture report](evals/coding_ab/results/fixture/report.md) use planted fixture
-repairs to calibrate measurement. They do not establish representative live-solver
-efficacy or justify changing defaults. Gated `k<=3` guidance remains provisional
-until representative paired coding evaluations measure resolution and distraction;
-revisit it if always-on `k=10` resolves at least as many tasks with no more
-distraction. Upstream integration is tracked in
-[eidolons#635](https://github.com/Rynaro/eidolons/issues/635).
-
----
-
-## Operator surface
-
-- **CLI:**
-  - `crystalium forget <id> --reason …` (W4) — the one sanctioned, audited hard-delete (RTBF, T0).
-  - `crystalium quarantine list` / `review <id> --accept|--reject --reason …` (W6) — triage the quarantine queue (T0, audited; reject soft-deprecates).
-  - `crystalium promote list` / `review <id> [--accept|--reject]` — Semantic promotion inbox.
-- **Install flags (EIIS 3.0):** `install.sh --version` / `--manifest-only` / `--hosts auto` / `--members`.
-- **Config flags:** two default ON (`write_dedup_merge`, `recall_active_only`); the rest OFF. Each augment is toggleable via its `CRYSTALIUM_*` env var — see `MIGRATION.md` for the full per-wave key table.
-- **Host wiring:** `hosts/claude-code.md`, `hosts/cursor.md`, `hosts/copilot.md`, `hosts/opencode.md`.
-
-Key `crystalium.yaml` runtime knobs (full list in the spec §8):
-
-- `transport: stdio` (default), or `http` for [Streamable HTTP](#streamable-http)
-- `idle_threshold_s: 300` / `min_dream_gap_s: 1800` (Dream scheduling)
-- `k_corroboration: 3` (independent T1+ witnesses for Semantic promotion)
-- `human_confirm_default_window_days: 30` (post-install default-ON grace period)
-- `skill_invoke.timeout_s: 30` / `skill_invoke.output_cap_bytes: 8192` (verifier bounds)
-- Working-set slot caps: executive 300, procedural 600, semantic 800, episodic 800, execution 1000, buffer 300
-
----
-
-## Roles
-
-- **Operator:** installs CRYSTALIUM, configures `crystalium.yaml`, runs `docker compose`, reviews promotions and quarantine triage, holds the RTBF key.
-- **Agent (T1+):** calls `recall`, `commit`, `ingest`, `skill_invoke` via MCP. Eidolons hand memory to each other through ECL envelopes.
-- **Environment/tool (T3):** ingests environment facts into Episodic-quarantine; promotion requires operator or T1 review.
-
----
-
-## Design principles
-
-1. **One chokepoint.** Every write funnels through `enforcement.py` before any store mutation. No distributed guards.
-2. **Constrained interfaces.** Pull-based (`recall`), not push-based; Dream proposes, never force-writes.
-3. **Pointer-indexed.** Indices hold metadata; payloads live on a cheap content-addressed, immutable blob tier.
-4. **Bounded working set.** Composer enforces ≤3,500 tokens with deterministic, importance-first eviction.
-5. **Trust tiers propagate.** A consolidated fact takes the MIN trust tier of its inputs; blocks multi-agent poisoning.
-6. **Local-first, container-first.** Fully self-hosted; all toolchain inside Docker; host runs only docker/git/make.
-7. **Ablation-as-arbiter.** Neuroscience motivates; the A/B decides. Flags flip ON only on a confound-free win.
-
----
-
-## Research foundation
-
-- **Dual-process memory:** Teyler & DiScenna 1986; Teyler & Rudy 2007. Index → pointer → content is the hippocampal pattern.
-- **Consolidation:** McClelland/McNaughton/O'Reilly 1995 (CLS); Tononi & Cirelli 2014. Sleep-like offline consolidation is cheaper than online learning.
-- **Importance as EVB:** Mattar & Daw 2018 (Gain×Need prioritized replay).
-- **Forgetting:** FSRS/DSR spaced-repetition decay; value-aware eviction.
-- **Pattern separation / completion:** Yassa & Stark 2011; CA3 attractor dynamics; Tulving & Thomson 1973 (encoding specificity).
-- **Bounded working set:** Baddeley & Hitch 1974. Slot allocation with deterministic eviction.
-- **Write-gating:** O'Reilly & Frank 2006. Mechanical enforcement of access control.
-- **Bi-temporal edits:** Zep/Graphiti (arXiv:2501.13956). Invalidate-old, write-new, never hard-delete.
-- **Verifier-gated skills:** Voyager (arXiv:2305.16291) and the procedural-memory line.
-- **Poisoning defense:** LTM Security Survey; PoisonedRAG/MINJA; OWASP ASI06.
-- **Extended Mind:** Clark & Chalmers 1998 — CRYSTALIUM as the roster's external memory.
-
-See `DESIGN-RATIONALE.md` for full citations and the marker legend (`[verified]` / `[MEDIUM]` / `[CONTESTED]` / `[UNVERIFIED]` / `[PROXY]` / `[GAP]`).
-
----
-
-## Repository hierarchy
-
-This repo is a published Eidolons roster member (like ATLAS, SPECTRA, APIVR-Δ); it also runs standalone. It depends on:
-
-- **Rynaro/eidolons-eiis** — install contract (EIIS 3.0 conformance).
-- **Rynaro/eidolons-ecl** — runtime communication contract (ECL v2.0 envelopes).
-- **Rynaro/atlas-aci** — reference for the `enforcement.py` chokepoint pattern.
-- **Rynaro/Junction** — harness used to orchestrate the build.
-- **Rynaro/eidolons** — the nexus (CRYSTALIUM is a member, `capability_class: memory`).
-
----
-
-## Hosts
-
-Tested against:
-- **Claude Code** — via `docker compose` command in `.mcp.json`
-- **Cursor** — via `.cursor/mcp.json` wiring
-- **Copilot** — via GitHub Copilot custom agents
-- **opencode** — via `hosts/opencode.md` integration
-
-See `hosts/*.md` for per-host setup guides.
-
----
+`make test-fast` is available for a quicker suite that skips model-download tests. Alternatively, use `docker compose run --rm crystalium pytest mcp-server/tests/ -v` for the full test suite. Do not invoke Python, pip, uv, pytest, or Node directly on the host. See [AGENTS.md](AGENTS.md) for development standards and [the roadmap](ROADMAP-POST-1.0.md) for tracked follow-up work.
 
 ## License
 
-Apache-2.0. See LICENSE file.
+CRYSTALIUM is licensed under the [Apache License 2.0](LICENSE).
 
----
-
-## Development
-
-All commands run inside the container. The `Makefile` is the host-visible wrapper:
-
-```bash
-make test          # docker compose run --rm crystalium pytest
-make lint          # docker compose run --rm crystalium ruff check
-make schema        # docker compose run --rm crystalium validate schemas
-```
-
-See `AGENTS.md` for the full developer onboarding.
-
----
-
-## References
-
-- **Methodology:** `CRYSTALIUM.md` (four-layer model, Dream consolidation, trust propagation, research anchors)
-- **Design rationale:** `DESIGN-RATIONALE.md` (D1–D10 decisions; §D6.7 the consolidated ablation table + marker legend)
-- **Migration:** `MIGRATION.md` (v0.1.0 → v1.0.0 per-wave config deltas; schema-v1-stable; the one behavior change)
-- **Changelog:** `CHANGELOG.md` (the [1.0.0] + per-wave entries)
-- **Post-1.0 roadmap:** `ROADMAP-POST-1.0.md` (the honest gap ledger the ablation discipline produced)
-- **Bench notes:** `evals/BENCH-NOTES.md` (per-gate A/B verdicts, canary headline, availability SLO)
-- **Developer standard:** `AGENTS.md` (build/test/lint, container-first, commit conventions)
-- **Agent profile:** `PERSONA.md` (always-loaded entry point, ≤1000 tokens)
-- **Spec:** `.spectra/crystalium-v0.1.0-spec.md` (the decision-ready spec the build implemented wave-by-wave; frozen, historical pointer)
-
-<!-- eiis-v3-package:start -->
-## EIIS v3 package
-
-This repository has the same self-contained package shape as every roster Eidolon:
-
-- `PERSONA.md` — bounded identity, triggers, authority, refusals, and handoffs.
-- `SPEC.md` — the authoritative methodology.
-- `skills/<methodology>/SKILL.md` — unique skill discovery entrypoints.
-- `manifest.json` — immutable package metadata and resource inventory.
-- `install.sh` — package-only installer; the nexus owns vendor adapters.
-
-See [INSTALL.md](INSTALL.md) for nexus and standalone installation.
-<!-- eiis-v3-package:end -->
+<!-- Provenance: IDG Scribe 1.10.0; document type: README; generated 2026-10-19.
+Sources: provided ATLAS fact ledger; prior README; docs/memory-injection.md;
+.eidolons/idg/PERSONA.md; .eidolons/idg/SPEC.md. Gate: complete, useful, source-grounded. -->
