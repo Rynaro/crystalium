@@ -301,6 +301,19 @@ v1.0.0 is the first published release. The operator cuts it: `git tag v1.0.0 && 
 
 ## Questions / debugging
 
+### Memory guidance
+
+Recall only for explicit need, prior failure, or ambiguity that prior records can
+resolve; request `k<=3` and prefer relevant verified fix-span records. For task
+context, use `assemble_context`: set `needs_memory=true` for explicit need or
+memory-relevant ambiguity, or `prior_failure=true` after failure. Both default
+false. Explicit `recall` retains API default `k=10`; this is not an always-on
+injection recommendation. Guidance is provisional pending representative
+[#74](https://github.com/Rynaro/crystalium/issues/74) coding evaluation; the planted
+fixture report is synthetic calibration only. See [migration](docs/memory-injection.md).
+Installed upstream cortex contracts are maintained separately in
+[eidolons#635](https://github.com/Rynaro/eidolons/issues/635).
+
 - **"ModuleNotFoundError: No module named 'crystalium'"** — The container mount is wrong. Check `docker compose config | grep -A5 crystalium` for volume paths.
 - **"pytest: command not found"** — You ran pytest on the host. Use `docker compose run --rm crystalium pytest` or `make test`.
 - **"ruff: command not found"** — Same. Use `docker compose run --rm crystalium ruff` or `make lint`.

@@ -4,6 +4,12 @@
 adds `assemble_context` for task context. Explicit `recall` remains a memory search
 API with default `k=10`; existing clients retain that behavior.
 
+Recall only for explicit need, prior failure, or ambiguity that memory can resolve.
+Request `k<=3` and prefer relevant verified fix-span records. This guidance is
+provisional pending representative [#74](https://github.com/Rynaro/crystalium/issues/74)
+coding evaluation. The planted fixture report calibrates the harness; it does not
+establish a live-solver win or justify changing defaults.
+
 ## Migrate callers
 
 [ACTION] Hosts that inject task context should expose and call `assemble_context`
@@ -29,7 +35,8 @@ legacy key for legacy records. `layers` is optional. `k` defaults to 3 and must 
 an integer from 1–100; assembly rejects invalid values rather than clamping them.
 Recommend `k<=3` for task context. Both signals are strict booleans, default false:
 set `needs_memory` when the task needs prior context, or `prior_failure` after a
-failed attempt. There is no hidden classifier.
+failed attempt. Memory-relevant ambiguity maps to `needs_memory=true`; there is no
+separate ambiguity flag or hidden classifier.
 
 ## Operator configuration
 
@@ -67,8 +74,10 @@ stronger scores retain precedence across bands.
 
 Cues include fix/fixed/fixes, resolve/resolved, outcome, and test/tests pass/passed.
 This bounded text heuristic does not verify a fix or inspect raw payloads. Typed
-`fix_span.v1` records remain separate work in
-[crystalium#73](https://github.com/Rynaro/crystalium/issues/73).
+`fix_span.v1` records shipped in
+[crystalium#73](https://github.com/Rynaro/crystalium/issues/73); see
+[structured repair records](fix-spans.md) for their flags and validation. Preferring
+verified fix-span records is caller guidance, not a new retrieval ranking change.
 
 The result contains `records`, `gate_open`, `gate_reason`, `mode`, `k_requested`,
 and `injected_token_count`. Reasons are `off`, `always_on`, `needs_memory`,

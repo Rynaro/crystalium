@@ -1,10 +1,10 @@
 # CRYSTALIUM
 
-Portable memory harness for the Eidolons. Stores, gates, retrieves, consolidates, and forgets memory. Does not reason, plan, or write code.
+Memory harness for the Eidolons: stores, gates, retrieves, consolidates, and forgets.
 
 ## Identity
 
-CRYSTALIUM is infrastructure for a team of AI coding agents sharing a personal memory substrate. It implements one mechanical write/promote chokepoint (enforcement.py) through which every memory mutation funnels. The thesis: constrained interfaces beat raw autonomy (SWE-agent ACI pattern).
+CRYSTALIUM is shared memory infrastructure. Every mutation funnels through one write/promote chokepoint (`enforcement.py`); reasoning lives in the caller.
 
 **Vocabulary (frozen):** Crystal = an admitted memory record. Aetheryte = the recall/index network. Dream = the async consolidation worker.
 
@@ -47,20 +47,10 @@ For task context, use `assemble_context` when available:
 {"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":3,"needs_memory":true,"layers":["semantic","episodic","procedural"]}
 ```
 
-Set `needs_memory` only when the task needs prior context; set `prior_failure` for a prior failed attempt. Both default to false. Default `gated` mode injects nothing without either signal. Keep `k<=3`; assembly strictly validates integer `k` in 1–100. Explicit search still uses `recall` (default `k=10`, numeric values clamped to 1–100).
+Recall only for explicit need, prior failure, or memory-relevant ambiguity. Set `needs_memory=true` for need/ambiguity or `prior_failure=true` after failure; both default false. Default `gated` mode injects nothing without either signal. Request `k<=3`; prefer relevant verified fix-span records. Guidance is provisional pending representative #74 coding evaluation; synthetic fixture calibration is not efficacy evidence. Assembly validates integer `k` in 1–100; explicit `recall` defaults to 10 and clamps numeric values to 1–100.
 
-Use the canonical project key advertised at server initialization (the `CRYSTALIUM_DATA_DIR` basename); query legacy keys explicitly. Correct invalid input once. Report unavailable or repeatedly failed memory tools; never claim success. See [migration and operator modes](docs/memory-injection.md).
+Use the initialization project key (`CRYSTALIUM_DATA_DIR` basename); query legacy keys explicitly. Correct invalid input once. Report unavailable or repeatedly failed tools. See [migration](docs/memory-injection.md).
 
 ## Deep docs
 
-Use `SPEC.md` for enforcement, recall budgeting, skill admission, Dream, trust propagation, and ECL.
-
-## SPEC + Methodology
-
-Full decision-ready spec: `.spectra/crystalium-v0.1.0-spec.md` (70 sections; test_anchors + gates + waves). The spec is frozen for v0.1 and shipped to install target as `SPEC.md`.
-
-Full methodology: `CRYSTALIUM.md` (research anchors + constrained-interfaces thesis).
-
-Design rationale: `DESIGN-RATIONALE.md` (every D1–D10 decision traced to source + [UNVERIFIED] markers for external citations).
-
-EIIS 3.0 conformance: `install.sh` idempotent, install-target whitelist enforced, `PERSONA.md ≤ 1000 tokens` verified at CI.
+`SPEC.md` covers enforcement, budgeting, admission, Dream, trust, and ECL (frozen v0.1 source: `.spectra/crystalium-v0.1.0-spec.md`). `CRYSTALIUM.md` holds methodology; `DESIGN-RATIONALE.md` traces D1–D10 and citation confidence. EIIS 3.0 requires idempotent installation, an install-target whitelist, and `PERSONA.md ≤1000 tokens`.
