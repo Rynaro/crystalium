@@ -85,6 +85,12 @@ RUN uv sync --extra dev --no-cache \
 # Copy tests into the image
 COPY mcp-server/tests ./tests
 
+# Public-doc consistency tests run against the baked image in CI, without a
+# checkout mount. README is already in base; keep the remaining tested guidance
+# alongside it in dev only, where the tests themselves live.
+COPY AGENTS.md CLAUDE.md ./
+COPY docs/memory-injection.md ./docs/memory-injection.md
+
 # Bake the canonical EIIS v3 package into the dev image for package smoke tests.
 COPY install.sh PERSONA.md SPEC.md ECL_VERSION manifest.json ./
 COPY skills ./skills

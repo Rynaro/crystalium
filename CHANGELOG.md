@@ -4,7 +4,23 @@ All notable changes to CRYSTALIUM are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows
 [SemVer](https://semver.org/spec/v2.0.0.html).
 
+Historical canary, ablation, latency and availability measurements here are
+synthetic/self-reported [S], not external coding benchmarks or representative
+live-solver evidence.
+
 ## [Unreleased]
+
+### Changed
+- **Public claims and guidance (#72).** Document the shipped Streamable HTTP
+  startup, endpoint and authentication caveats, and the tools-only MCP surface
+  (nine original tools plus `assemble_context` from
+  [#71](https://github.com/Rynaro/crystalium/issues/71)). Recommend conditional
+  recall for explicit need, prior failure or ambiguity, `k<=3`, and relevant
+  verified fix-span records. Guidance remains provisional pending representative
+  [#74](https://github.com/Rynaro/crystalium/issues/74) coding evaluation; planted
+  fixture calibration and historical synthetic/self-reported canary numbers are
+  not efficacy evidence. Retrieval/write behavior and API defaults are unchanged.
+  Upstream integration: [eidolons#635](https://github.com/Rynaro/eidolons/issues/635).
 
 ### Added
 - **Coding memory A/B calibration (#74).** Add executable fixture tasks, seven
@@ -49,7 +65,8 @@ All notable changes to CRYSTALIUM are documented here. Format follows
   expose the canonical key used by current writes (the `CRYSTALIUM_DATA_DIR` basename),
   while an explicit legacy key remains queryable. `k` now consistently defaults to 10,
   and shipped startup guidance requires agents to recall relevant context before
-  reasoning and report when the Crystalium tools are unavailable.
+  reasoning and report when the Crystalium tools are unavailable. This historical
+  always-on guidance is superseded by the provisional gated guidance above (#72).
 
 - **Containers no longer write into the bind-mounted source tree as root (#66).**
   `docker-compose.yml` mounts `.:/app` read-write and carried no `user:` key, while the

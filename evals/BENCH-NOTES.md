@@ -1,5 +1,10 @@
 # Ablation bench — notes & tracked discrepancies (W1, v0.2.0)
 
+All local measurements below are historical, synthetic/self-reported [S] fixture
+results, not external coding benchmarks or representative live-solver evidence.
+The [#74 coding harness](coding_ab/README.md) and its planted fixture report are
+calibration only; they do not establish efficacy or justify changing defaults.
+
 ## What the bench is
 
 The bench is the **arbiter** for the ablation-or-revert rule. Every later wave's

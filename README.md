@@ -81,6 +81,29 @@ The server listens on stdin/stdout. Wire it to Claude Code, Cursor, Copilot, or 
 
 **No host `pip`, `uv`, `python`, or `pytest` invocations.** All dev commands run inside the container via `docker compose run --rm crystalium <cmd>` or `make` targets. Per-host setup guides live in `hosts/{claude-code,cursor,copilot,opencode}.md`.
 
+### Streamable HTTP
+
+Stdio is the default. To serve Streamable HTTP through Docker:
+
+```bash
+docker compose run --rm -p 127.0.0.1:8848:8848 \
+  -e CRYSTALIUM_TRANSPORT=http -e CRYSTALIUM_HTTP_HOST=0.0.0.0 \
+  crystalium python -m crystalium serve
+```
+
+Connect an MCP HTTP client to `http://127.0.0.1:8848/mcp/`. The ASGI mount is
+`/mcp`; the trailing slash avoids its redirect. Native binding defaults to
+`127.0.0.1:8848`; Docker needs `0.0.0.0` inside the container and the explicit
+host port mapping above. Configure `CRYSTALIUM_HTTP_PORT` and
+`CRYSTALIUM_HTTP_PATH` to change the port or mount. JSON responses and stateless
+sessions default on (`CRYSTALIUM_HTTP_JSON_RESPONSE`, `CRYSTALIUM_HTTP_STATELESS`).
+
+The application provides no authentication or TLS termination. The recipe
+publishes only to host loopback; remote access needs an authenticated TLS proxy.
+Caller identity comes from server process configuration, not authenticated HTTP
+client credentials; HTTP does not confer a higher trust tier. Both transports
+use the same tool dispatch and enforcement chokepoint.
+
 ### Build variant: CPU (default) vs GPU
 
 The default image is **CPU-only (~2 GB)**. `torch` is pinned to PyTorch's CPU wheel index, so the image carries no NVIDIA CUDA runtime — crystalium's embedding workload (single-text `sentence-transformers` encode) sees no GPU benefit, and the published `ghcr.io/rynaro/crystalium:latest` is CPU-only.
@@ -115,20 +138,38 @@ docker build --build-arg TORCH_VARIANT=gpu -t crystalium:gpu .
 
 ---
 
-## Tool surface (10 MCP tools)
+## MCP surface (tools-only; 10 tools)
+
+The server currently exposes **tools-only** application capabilities. The nine
+original tools below are joined by `assemble_context`, shipped in
+[#71](https://github.com/Rynaro/crystalium/issues/71). MCP resources, prompts,
+structured output (`outputSchema` / `structuredContent`), and elicitation are
+roadmap items, not shipped capabilities. Tool results carry serialized payloads
+in text content; JSON text is not MCP structured output. Initialization
+instructions and Streamable HTTP transport are available independently.
 
 ### Task context and explicit search
 
+Use memory only when a gate is true: explicit need, prior failure, or ambiguity
+that prior records could resolve. Request `k<=3` and prefer
+relevant verified fix-span records over broad session narratives. This guidance
+is **provisional pending representative coding evaluation** from
+[#74](https://github.com/Rynaro/crystalium/issues/74).
+
 Use `assemble_context` for task context. In default `gated` mode, injection requires
 `needs_memory=true` or `prior_failure=true`; both signals default to false.
-Recommend `k<=3` (default 3), with a hard cap on selected records:
+Represent memory-relevant ambiguity with `needs_memory=true`; there is no separate
+ambiguity flag or automatic classifier. Recommend `k<=3` (default 3), with a hard
+cap on selected records:
 
 ```json
 {"scope":{"project":"<canonical-project-key>","agent_class_visibility":"<agent-name>"},"query":"<task terms>","k":3,"needs_memory":true,"layers":["semantic","episodic","procedural"]}
 ```
 
 Keep `recall` for explicit memory search: its default `k=10` and existing behavior
-are unchanged. Both tools require `scope.project` and `query`. Use the canonical
+are unchanged; callers can explicitly request 10. This API default is not a
+recommendation for unconditional context injection. Both tools require
+`scope.project` and `query`. Use the canonical
 project key in the server initialization instructions (the `CRYSTALIUM_DATA_DIR`
 basename). Correct an input error once; report unavailable or repeatedly failed
 tools. Host wiring must expose and invoke the appropriate tool.
@@ -176,6 +217,9 @@ CRYSTALIUM reached 1.0 over eight waves. The discipline throughout: **neuroscien
 
 ## Ablation record (the methodology, honestly)
 
+The numbers and verdicts below are historical, synthetic, self-reported fixture
+measurements [S], not external benchmark results or coding-agent efficacy evidence.
+
 Across the six algorithmic waves (W2–W6), **8 augments were A/B-tested**. Net: **2 earned their flip ON; 6 stayed OFF as documented honest nulls.** None was shipped green by lowering a bar. The two ON-by-default behaviors are the only runtime change from v0.1:
 
 | Flag | Wave | Verdict | Default |
@@ -206,12 +250,27 @@ The six nulls are not a weakness — they are the arbiter working. Each faculty 
 
 ## Honest 1.0 caveats
 
-Reported as-is, not massaged to clear a gate (both deferred post-1.0, see `ROADMAP-POST-1.0.md`):
+Historical v1.0 synthetic, self-reported measurements [S] (see
+`ROADMAP-POST-1.0.md`); these describe that release, not the current tree:
 
 - **Canary below the 0.80 bar by one mission.** After an honest harness repair (de-vacuumed off-arm, fixed bit-rot + the double-run, episodic + isolated missions), memory-on beats memory-off **+0.75** (0.75 vs 0.00) — a full reversal of the prior −0.75 — but lands below 0.80 by exactly one mission: CAN-4, a recall-after-bi-temporal-update re-index `[GAP]` (the updated revision isn't re-embedded into the dense index).
 - **Recall p95 ~205 ms** (embedder-bound — essentially one bge-m3 forward pass on CPU) vs the 200 ms target; availability 100% (≥99% ✓).
 
-Both numbers are **[PROXY]** — from a synthetic harness, not production traffic.
+Both numbers are **[PROXY] [S]** — from a synthetic harness, not production traffic.
+The CAN-4 re-index gap was subsequently fixed (see `CHANGELOG.md`); the old
+headline is retained here as release history.
+
+### Claims & evidence
+
+No external coding benchmark result is claimed. Canary and ablation measurements
+are synthetic/self-reported [S]. The [#74 harness](evals/coding_ab/README.md) and
+its [fixture report](evals/coding_ab/results/fixture/report.md) use planted fixture
+repairs to calibrate measurement. They do not establish representative live-solver
+efficacy or justify changing defaults. Gated `k<=3` guidance remains provisional
+until representative paired coding evaluations measure resolution and distraction;
+revisit it if always-on `k=10` resolves at least as many tasks with no more
+distraction. Upstream integration is tracked in
+[eidolons#635](https://github.com/Rynaro/eidolons/issues/635).
 
 ---
 
@@ -227,7 +286,7 @@ Both numbers are **[PROXY]** — from a synthetic harness, not production traffi
 
 Key `crystalium.yaml` runtime knobs (full list in the spec §8):
 
-- `transport: stdio` (HTTP stub raises `NotImplementedError`)
+- `transport: stdio` (default), or `http` for [Streamable HTTP](#streamable-http)
 - `idle_threshold_s: 300` / `min_dream_gap_s: 1800` (Dream scheduling)
 - `k_corroboration: 3` (independent T1+ witnesses for Semantic promotion)
 - `human_confirm_default_window_days: 30` (post-install default-ON grace period)
