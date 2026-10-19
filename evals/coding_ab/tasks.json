@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "tasks": [
+    {"id": "decrement_anchor", "repo": "decrement", "anchor": true, "exploration": 0, "needs_memory": true, "replacement": "return x - 1"},
+    {"id": "decrement_no_anchor", "repo": "decrement", "anchor": false, "exploration": 0, "needs_memory": true, "replacement": "return x - 1"},
+    {"id": "double_anchor", "repo": "double", "anchor": true, "exploration": 2, "needs_memory": true, "replacement": "return x * 2"},
+    {"id": "double_no_anchor", "repo": "double", "anchor": false, "exploration": 2, "needs_memory": true, "replacement": "return x * 2"},
+    {"id": "absolute_anchor", "repo": "absolute", "anchor": true, "exploration": 4, "needs_memory": false, "replacement": "return abs(x)"},
+    {"id": "absolute_no_anchor", "repo": "absolute", "anchor": false, "exploration": 4, "needs_memory": false, "replacement": "return abs(x)"}
+  ]
+}

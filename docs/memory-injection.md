@@ -96,5 +96,8 @@ counts for fixture tokens, rather than the production composer tokenizer.
 
 These are label-based policy proxies. No coding agent executes a task; the fixture
 does not measure task resolution, retrieval quality, or coding performance gains.
-Live coding evaluation is separate work in
-[crystalium#74](https://github.com/Rynaro/crystalium/issues/74).
+The [#74 executable coding A/B harness](../evals/coding_ab/README.md) now adds real
+fixture test execution, isolated first-party MCP sessions, headroom strata,
+token-matched harmful-memory controls and paired task bootstrap intervals. Its
+[first report](../evals/coding_ab/results/fixture/report.md) is synthetic calibration;
+it provides no live coding efficacy evidence or production default recommendation.

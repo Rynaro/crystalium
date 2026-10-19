@@ -133,6 +133,10 @@ project key in the server initialization instructions (the `CRYSTALIUM_DATA_DIR`
 basename). Correct an input error once; report unavailable or repeatedly failed
 tools. Host wiring must expose and invoke the appropriate tool.
 See [memory injection migration, configuration, and evaluation](docs/memory-injection.md).
+The [coding memory A/B harness](evals/coding_ab/README.md) executes paired, isolated
+fixture repairs through Crystalium MCP with bootstrap intervals and a harmful-memory
+control. Its [first report](evals/coding_ab/results/fixture/report.md) calibrates the
+instrument; it makes no coding-model efficacy claim.
 For typed repair facts and optional ingest proposals, see
 [structured repair records](docs/fix-spans.md) (both feature flags default off).
 
