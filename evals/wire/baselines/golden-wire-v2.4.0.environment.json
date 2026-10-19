@@ -1,0 +1,10 @@
+{
+  "crystalium_metadata": "2.4.0",
+  "fresh_store": true,
+  "mcp": "2.3.0",
+  "offline_models": true,
+  "protocol_requested": "2025-06-18",
+  "python": "3.12.15 (main, Oct  6 2026, 02:08:11) [GCC 14.2.0]",
+  "skip_slow": true,
+  "transport": "stdio"
+}

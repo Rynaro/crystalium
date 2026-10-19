@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/Rynaro/crystalium",
+  "source_tag": "v2.4.0",
+  "source_tag_object": "4f48fbdf926175a1513fdb35a31585e3ae213b30",
+  "source_commit": "67a739c0f47b6decd5ba7895823f062695a2301f",
+  "source_tree": "cb704203db070c9ec25b809cea7369c2819eff80",
+  "source_method": "git archive v2.4.0 --format=tar, extracted to .wire-build/v2.4.0; no local source edits",
+  "source_clean": true,
+  "capture_date_utc": "2026-10-19",
+  "build_command": "docker build --target dev -t crystalium:wire-v2.4.0 .wire-build/v2.4.0",
+  "build_dockerfile_sha256": "fc9cc748f5010015fece81b61567c41a7240795df94fc487b2e33877c20f7d51",
+  "built_image_id": "sha256:f990599c53028f7b9bdc643d582405d41ef3b29fafbc8f7bfc93c118d6929a28",
+  "published_ghcr_artifact": false,
+  "base_image_digest": "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+  "capture": "golden-wire-v2.4.0.json",
+  "capture_sha256": "7f39b24ba56b9c502c63959ac743bec27389d868e3ce58b13b6904e787d1c877",
+  "environment": "golden-wire-v2.4.0.environment.json",
+  "capture_harness": "evals/wire/capture.py introduced by #65",
+  "candidate_source_commit": "d499d4bedc2caf3c83cad1cf4dcb2511c2ecd19f",
+  "candidate_reviewed_delta": "../reviewed-deltas/main-after-v2.4.0.json",
+  "limitations": "Source rebuild, not historical published image reproduction; runtime dependencies resolve at build time. Empty-store six-exchange stdio probe, not exhaustive runtime behavior evaluation."
+}

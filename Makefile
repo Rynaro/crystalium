@@ -73,6 +73,34 @@ bench:
 bench-axes:
 	$(RUN) python -m evals axes --demo
 
+# Released sources are isolated from the working tree; an existing path fails
+# rather than silently reusing a stale or modified checkout.
+WIRE_RELEASE ?= v2.4.0
+WIRE_IMAGE ?= crystalium:wire-$(WIRE_RELEASE)
+WIRE_OUTPUT ?= candidate.json
+.PHONY: wire-build-release wire-capture-release wire-capture wire-check
+
+## wire-build-release: Build the exact WIRE_RELEASE tag in an isolated git worktree
+wire-build-release:
+	git worktree add --detach .wire-build/$(WIRE_RELEASE) $(WIRE_RELEASE)
+	docker build --target dev -t $(WIRE_IMAGE) .wire-build/$(WIRE_RELEASE)
+
+## wire-capture-release: Probe WIRE_IMAGE, preserving its source and dependency environment
+wire-capture-release:
+	docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) \
+		--entrypoint /app/.venv/bin/python -w /probe \
+		-v "$(CURDIR)/evals:/probe/evals" \
+		-e PYTHONPATH=/probe:/app/src:/app -e HOME=/tmp \
+		$(WIRE_IMAGE) -m evals.wire.capture /probe/evals/wire/results/$(WIRE_RELEASE).json
+
+## wire-capture: Capture the mounted candidate in a fresh store
+wire-capture:
+	$(RUN) python -m evals.wire.capture evals/wire/results/$(WIRE_OUTPUT)
+
+## wire-check: Run release comparison, null redchecks, and fresh-store repeatability
+wire-check:
+	$(RUN) pytest mcp-server/tests/test_wire_release.py -v
+
 ## lint: Run ruff linter inside the container
 lint:
 	$(RUN) ruff check mcp-server/src mcp-server/tests

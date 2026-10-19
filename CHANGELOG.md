@@ -10,6 +10,12 @@ live-solver evidence.
 
 ## [Unreleased]
 
+### Fixed
+- Release wire verification now belongs to CRYSTALIUM (`evals/wire/`), with a
+  provenance-recorded released v2.4.0 baseline, pre-mask shape/null guards,
+  fresh-store captures, and exact reviewed deltas. Preserves the historical
+  capture and replaces use of the vulnerable nexus archived comparator (#64, #65).
+
 ### Changed
 - **Public claims and guidance (#72).** Document the shipped Streamable HTTP
   startup, endpoint and authentication caveats, and the tools-only MCP surface

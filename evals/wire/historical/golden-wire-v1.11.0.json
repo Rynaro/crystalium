@@ -1,0 +1,334 @@
+{
+ "call_commit": {
+  "id": 5,
+  "jsonrpc": "2.0",
+  "result": {
+   "content": [
+    {
+     "text": "{\"status\": \"committed\", \"id\": \"3b20a463-1b92-4226-8ac1-8f31e7319706\", \"layer\": \"episodic\", \"validation_state\": \"unverified\", \"importance\": 0.24, \"content_ref\": \"fc9147481f76cf1d9bcb94d3f18b5baa25565106f3a92aec37d55d750d216002\", \"scope_normalized\": true}",
+     "type": "text"
+    }
+   ],
+   "isError": false
+  }
+ },
+ "call_recall": {
+  "id": 3,
+  "jsonrpc": "2.0",
+  "result": {
+   "content": [
+    {
+     "text": "{\"records\": [], \"slot_breakdown\": {\"executive\": 0, \"procedural\": 0, \"semantic\": 0, \"episodic\": 0, \"execution\": 0, \"buffer\": 0}, \"total_tokens\": 0, \"evicted_count\": 0, \"budget\": {\"total_cap\": 3500, \"slots\": {\"executive\": 300, \"procedural\": 600, \"semantic\": 800, \"episodic\": 800, \"execution\": 1000, \"buffer\": 300}, \"k_requested\": 1, \"k_applied\": 0, \"truncated_count\": 0}}",
+     "type": "text"
+    }
+   ],
+   "isError": false
+  }
+ },
+ "call_schema_violation": {
+  "id": 6,
+  "jsonrpc": "2.0",
+  "result": {
+   "content": [
+    {
+     "text": "Input validation error: 'scope' is a required property",
+     "type": "text"
+    }
+   ],
+   "isError": true
+  }
+ },
+ "call_unknown_tool": {
+  "id": 4,
+  "jsonrpc": "2.0",
+  "result": {
+   "content": [
+    {
+     "text": "{\n  \"error\": \"UNKNOWN_TOOL\",\n  \"message\": \"Unknown tool 'crystalium.definitely_not_a_tool'.\"\n}",
+     "type": "text"
+    }
+   ],
+   "isError": false
+  }
+ },
+ "initialize": {
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+   "capabilities": {
+    "experimental": {},
+    "tools": {
+     "listChanged": false
+    }
+   },
+   "protocolVersion": "2025-06-18",
+   "serverInfo": {
+    "name": "crystalium",
+    "version": "1.4.0"
+   }
+  }
+ },
+ "tools_list": {
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+   "tools": [
+    {
+     "description": "Hybrid BM25 + dense + graph recall from CRYSTALIUM memory. Returns slot-budgeted, redacted CrystalSummary records. Universally allowed (all tiers). Rate-limited (200 calls/min). explain=true (v1.6) adds a diagnostic `explain` object to the result so a zero-record recall against a non-empty store is diagnosable without a separate `doctor` call. v1.9.0 (crystalium#36): query relevance is the primary composition signal \u2014 `k` is a hard cap on the number of returned records, and records are emitted in non-increasing `score` order (id ascending tiebreak). Every record carries a non-null `score` and the response always carries a `budget` object (total_cap, slots, k_requested, k_applied, truncated_count). Revertible to the pre-1.9.0 behaviour via Config.recall_relevance_primary=false. v1.10.0 (crystalium#38): `score` is now a WEIGHTED hybrid-retrieval RRF fusion value (previously unweighted) \u2014 ordering semantics are unchanged (still non-increasing, id-ascending tiebreak) but the magnitude and the relative order among candidates can differ from 1.9.0. The graph and completion arms are collapsed into one correlated derived voter and the sparse arm receives a query-conditional selectivity boost; explain=true additionally surfaces a `fusion` object (per-arm weights + the selectivity inputs that produced them). Revertible via Config.recall_weighted_fusion=false (subsumed under recall_relevance_primary \u2014 either flag off restores the unweighted fusion).",
+     "inputSchema": {
+      "properties": {
+       "explain": {
+        "default": false,
+        "description": "v1.6: attach a diagnostic `explain` object (candidate/filter counts, arm status, store totals, distinct project keys present) to the result. Bypasses the recall cache.",
+        "type": "boolean"
+       },
+       "k": {
+        "default": 10,
+        "description": "Max records to return (hard cap when relevance-primary composition is active, the default). Clamped to [1, 100]; a non-numeric/non-coercible value falls back to 10.",
+        "type": "integer"
+       },
+       "layers": {
+        "description": "Subset of layers to search (default: all four)",
+        "items": {
+         "enum": [
+          "episodic",
+          "semantic",
+          "procedural",
+          "execution"
+         ],
+         "type": "string"
+        },
+        "type": "array"
+       },
+       "query": {
+        "description": "Free-text recall query",
+        "type": "string"
+       },
+       "scope": {
+        "description": "Scope filter: {project, agent_class_visibility, sensitivity_tag}. project defaults to the canonical (data-dir-derived) project key when omitted.",
+        "type": "object"
+       }
+      },
+      "required": [
+       "scope",
+       "query"
+      ],
+      "type": "object"
+     },
+     "name": "crystalium.recall"
+    },
+    {
+     "description": "Commit a crystal to a memory layer. T3 callers: Episodic-quarantine only (G1). T2: Episodic or Procedural-candidate only (G1, G2). T1/T0: Semantic, Procedural, Execution allowed (with gate checks G4, G5). Bi-temporal: write-new, never hard-delete (P0-5). v1.6: scope.project is normalized to the canonical (data-dir-derived) project key (advisory: scope_normalized=true); summary is checked against a mechanical quality gate (advisory: summary_quality='poor').",
+     "inputSchema": {
+      "properties": {
+       "layer": {
+        "enum": [
+         "episodic",
+         "semantic",
+         "procedural",
+         "execution"
+        ],
+        "type": "string"
+       },
+       "payload": {
+        "description": "Crystal payload (must include 'summary', 'scope')",
+        "type": "object"
+       },
+       "provenance": {
+        "description": "Provenance dict: {source, author_agent, task_id, created_at}. source must be one of: environment, human, unverified_agent, verified_agent \u2014 an out-of-enum value is COERCED to a value derived from the caller's trust tier (never 'human' for a non-T0 caller) rather than rejected, with a `provenance_coercion` advisory attached to the result.",
+        "type": "object"
+       }
+      },
+      "required": [
+       "layer",
+       "payload",
+       "provenance"
+      ],
+      "type": "object"
+     },
+     "name": "crystalium.commit"
+    },
+    {
+     "description": "Ingest a roster ECL handoff envelope (v1.x or v2.x) as a crystal. Maps any artifact to crystal.v1 (native payload preserved verbatim in encoding_context); commits THROUGH the chokepoint so MIN-trust is preserved. T3/tool-origin artifacts land Episodic-quarantined; never laundered to a higher tier.",
+     "inputSchema": {
+      "properties": {
+       "envelope": {
+        "description": "Inbound ECL envelope (11 fields; envelope_version 1.x/2.x).",
+        "type": "object"
+       },
+       "payload": {
+        "description": "The artifact payload the envelope wraps (object or string)."
+       },
+       "payload_encoding": {
+        "description": "How to decode a string payload (default utf8).",
+        "enum": [
+         "utf8",
+         "base64",
+         "json"
+        ],
+        "type": "string"
+       }
+      },
+      "required": [
+       "envelope",
+       "payload"
+      ],
+      "type": "object"
+     },
+     "name": "crystalium.ingest"
+    },
+    {
+     "description": "Bi-temporal update: invalidate old crystal (t_valid_to=now, superseded_by=new_id), write new revision. Never hard-delete (P0-5). Same tier rules as crystalium.commit for the target crystal's layer.",
+     "inputSchema": {
+      "properties": {
+       "id": {
+        "description": "CrystalId of the record to update",
+        "type": "string"
+       },
+       "patch": {
+        "description": "Partial payload dict to merge with existing crystal",
+        "type": "object"
+       },
+       "reason": {
+        "description": "Human-readable reason for update",
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "patch",
+       "reason"
+      ],
+      "type": "object"
+     },
+     "name": "crystalium.update"
+    },
+    {
+     "description": "Run a procedural verifier skill in a sandboxed subprocess (G3). D5 bounds: timeout_s<=30, output_cap_bytes<=8192, workdir MUST resolve under /sandbox/<skill_id>. OPERATOR WARNING: container IS the sandbox boundary.",
+     "inputSchema": {
+      "properties": {
+       "args": {
+        "description": "Arguments passed to the skill",
+        "type": "object"
+       },
+       "output_cap_bytes": {
+        "default": 8192,
+        "maximum": 8192,
+        "type": "integer"
+       },
+       "skill_id": {
+        "description": "Procedural skill identifier",
+        "type": "string"
+       },
+       "timeout_s": {
+        "default": 30,
+        "maximum": 30,
+        "type": "integer"
+       },
+       "workdir": {
+        "description": "Workdir path; MUST resolve under /sandbox/<skill_id>",
+        "type": "string"
+       }
+      },
+      "required": [
+       "skill_id"
+      ],
+      "type": "object"
+     },
+     "name": "crystalium.skill_invoke"
+    },
+    {
+     "description": "Write a TTL-bound plan checkpoint to the Execution layer. T0/T1 only (G1: T2/T3 blocked). Expires after execution TTL (default 24h). v1.6: scope.project normalized to the canonical project key; a missing/poor summary is auto-enriched (plan + scope + phase) instead of the bare 'plan_checkpoint:<id>' label; the last active checkpoint for a plan is never auto-deprecated by Dream.",
+     "inputSchema": {
+      "properties": {
+       "state": {
+        "description": "Plan state snapshot dict (must include 'scope')",
+        "type": "object"
+       }
+      },
+      "required": [
+       "state"
+      ],
+      "type": "object"
+     },
+     "name": "crystalium.plan_checkpoint"
+    },
+    {
+     "description": "Append a plan replan diff to the Execution layer. Bi-temporal: if diff.supersedes_id is set, invalidates the old plan node. T0/T1 only (G1: T2/T3 blocked).",
+     "inputSchema": {
+      "properties": {
+       "diff": {
+        "description": "Plan diff dict; set supersedes_id to chain bi-temporally",
+        "type": "object"
+       }
+      },
+      "required": [
+       "diff"
+      ],
+      "type": "object"
+     },
+     "name": "crystalium.plan_replan"
+    },
+    {
+     "description": "Signal end-of-session. Enqueues a Dream consolidation run (G8). Returns {enqueued: bool, dream_run_id: str|null}. Deduped: concurrent calls yield at most one enqueued run. D3: fast-path complements the 60s idle-poll floor.",
+     "inputSchema": {
+      "properties": {
+       "reason": {
+        "description": "Optional free-text reason for session end",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     },
+     "name": "crystalium.session_end"
+    },
+    {
+     "description": "Export the scoped memory graph as nodes[]+edges[] (JSON canonical, or graphml/cytoscape adapter). Nodes = redacted crystal summaries (never raw blob); edges = LINKS_TO (kuzu) + derived SUPERSEDES/MERGED_FROM/CONFLICTS_WITH. Read-only; bounded (limit<=10000); universally allowed (read op). Rate-limited (200 calls/min).",
+     "inputSchema": {
+      "properties": {
+       "format": {
+        "default": "json",
+        "enum": [
+         "json",
+         "graphml",
+         "cytoscape"
+        ],
+        "type": "string"
+       },
+       "include": {
+        "description": "Optional override flags (\u00a76.4): include_quarantined, include_deprecated, include_superseded, all_visibility, include_content_ref, include_drift, synthesize_links, dangling_policy",
+        "type": "object"
+       },
+       "layers": {
+        "items": {
+         "enum": [
+          "episodic",
+          "semantic",
+          "procedural",
+          "execution"
+         ],
+         "type": "string"
+        },
+        "type": "array"
+       },
+       "limit": {
+        "default": 5000,
+        "description": "Node cap (clamped to 10000)",
+        "type": "integer"
+       },
+       "scope": {
+        "description": "{project, agent_class_visibility, sensitivity_tag}",
+        "type": "object"
+       }
+      },
+      "required": [
+       "scope"
+      ],
+      "type": "object"
+     },
+     "name": "crystalium.graph_export"
+    }
+   ]
+  }
+ }
+}
