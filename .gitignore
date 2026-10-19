@@ -55,3 +55,5 @@ evals/results/*.json
 !/.eidolons/harness/manifest.json
 # <!-- eidolon:gitignore end -->
 .atlas/
+.wire-build/
+evals/wire/results/
